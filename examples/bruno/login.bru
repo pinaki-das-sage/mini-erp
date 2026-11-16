@@ -1,0 +1,80 @@
+meta {
+  name: Login
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/api/v1/auth/login
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "company": "{{company}}",
+    "username": "{{username}}",
+    "password": "{{password}}"
+  }
+}
+
+script:pre-request {
+  bru.deleteVar("access_token");
+}
+
+script:post-response {
+  const body = res.getBody();
+  if (res.getStatus() === 200 && body && body.success === true) {
+    const token = body.result && body.result.access_token;
+    if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) {
+      throw new Error("Login did not return a valid bearer token.");
+    }
+    bru.setVar("access_token", token);
+  }
+}
+
+tests {
+  const body = res.getBody();
+  const result = body && body.result;
+  
+  test("Login returns HTTP 200 and the standard envelope", function () {
+    expect(res.getStatus()).to.equal(200);
+    expect(body.success).to.equal(true);
+    expect(Object.keys(body)).to.include.members([
+      "success", "operation_id", "current_version", "result", "error"
+    ]);
+    expect(body.error).to.equal(null);
+  });
+  
+  test("Login issues an opaque bearer token", function () {
+    expect(Boolean(result && result.token_type === "Bearer")).to.equal(true);
+    expect(Boolean(result && typeof result.access_token === "string" &&
+      /^[a-f0-9]{64}$/.test(result.access_token))).to.equal(true);
+  });
+  
+  test("Token lifetime matches configuration and expiry is in UTC", function () {
+    const lifetime = result && result.expires_in;
+    const expiresAt = result && result.expires_at;
+    expect(Number.isInteger(lifetime) && lifetime >= 60 && lifetime <= 86400).to.equal(true);
+    expect(lifetime).to.equal(Number(bru.getEnvVar("expected_ttl_seconds")));
+    expect(typeof expiresAt === "string" && expiresAt.endsWith("Z")).to.equal(true);
+    const expiry = Date.parse(expiresAt);
+    expect(Number.isFinite(expiry) &&
+      Math.abs(expiry - Date.now() - lifetime * 1000) <= 30000).to.equal(true);
+  });
+}
+
+docs {
+  Select your remote environment, configure company/username and enter password as a secret variable.
+  Successful login retains access_token only in Bruno runtime variables for the user requests.
+  Keep base_url at the deployed public directory, without a trailing slash.
+  Deploy the API code and apply 004_api_tokens.php before sending this request.
+  Use a trusted HTTPS certificate; certificate bypass is not authentication acceptance.
+  Token assertions use booleans to avoid printing raw tokens on failure.
+  Do not export response bodies or screenshots containing passwords/tokens.
+}

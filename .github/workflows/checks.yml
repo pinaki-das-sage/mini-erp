@@ -1,0 +1,24 @@
+name: Foundation checks
+on: [push, pull_request]
+jobs:
+  foundation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring
+          coverage: none
+      - run: composer install --no-interaction --prefer-dist
+      - run: composer dump-autoload --optimize --strict-psr
+      - run: composer lint
+      - run: composer test
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run check:js
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser:local

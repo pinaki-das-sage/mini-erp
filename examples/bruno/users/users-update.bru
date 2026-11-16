@@ -1,0 +1,53 @@
+meta {
+  name: Update test user
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{base_url}}/api/v1/users/{{target_user_id}}
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{access_token}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "display_name": "{{?Updated display name}}",
+    "is_admin": false,
+    "active": true,
+    "expected_version": {{?Current user version}}
+  }
+}
+
+script:pre-request {
+  const token = bru.getVar("access_token");
+  if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) {
+    throw new Error("Run Login as an administrator first.");
+  }
+  const id = bru.getVar("target_user_id") ?? bru.getEnvVar("target_user_id");
+  if (typeof id !== "string" || !/^[a-zA-Z0-9_-]{1,40}$/.test(id)) {
+    throw new Error("Create a test user or explicitly set target_user_id from List users.");
+  }
+}
+
+tests {
+  test("Admin updates the selected test user", function () {
+    const body = res.getBody();
+    expect(res.getStatus()).to.equal(200);
+    expect(body.success).to.equal(true);
+    expect(Boolean(body.result && Number.isInteger(body.result.current_version))).to.equal(true);
+  });
+}
+
+docs {
+  Confirm target_user_id: this changes real data and defaults to non-admin/active.
+  Read the latest current_version from List users and enter it as an unquoted number.
+  To disable your test user, deliberately change active to false. No delete endpoint exists.
+  Updating invalidates that user's sessions/tokens. Never target your own admin unintentionally.
+}

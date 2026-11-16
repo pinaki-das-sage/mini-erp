@@ -1,0 +1,38 @@
+{
+  "name": "training/mini-erp",
+  "description": "PHP 8.4 and Oracle graduate training foundation",
+  "type": "project",
+  "license": "proprietary",
+  "require": {
+    "php": "~8.4.0",
+    "ext-json": "*",
+    "ext-mbstring": "*",
+    "ext-session": "*",
+    "smarty/smarty": "^5.0",
+    "vlucas/phpdotenv": "^5.6"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^11.5"
+  },
+  "suggest": {
+    "ext-oci8": "Required on the remote application server for Oracle connectivity"
+  },
+  "autoload": {
+    "psr-4": {"MiniErp\\": "src/"}
+  },
+  "autoload-dev": {
+    "psr-4": {"MiniErp\\Tests\\": "tests/"}
+  },
+  "scripts": {
+    "test": "@php vendor/bin/phpunit --testsuite unit",
+    "test:oracle": "@php vendor/bin/phpunit --testsuite oracle",
+    "lint": "@php bin/lint.php",
+    "doctor": "@php bin/console.php doctor",
+    "migrate": "@php bin/console.php migrate",
+    "seed": "@php bin/console.php seed"
+  },
+  "config": {
+    "sort-packages": true,
+    "allow-plugins": {}
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "mini-erp-foundation",
+  "private": true,
+  "scripts": {
+    "pretest:browser": "node --test tests/unit/browser-config.test.cjs",
+    "test:browser": "playwright test",
+    "pretest:browser:local": "node --test tests/unit/browser-config.test.cjs",
+    "test:browser:local": "playwright test --config playwright.local.config.js",
+    "check:js": "node --check public/assets/app.js && node --check tests/browser/config.cjs && node --check playwright.config.js && node --check playwright.local.config.js && node --check tests/browser/remote/smoke.spec.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0"
+  }
+}

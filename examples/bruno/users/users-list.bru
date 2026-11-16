@@ -1,0 +1,46 @@
+meta {
+  name: List users
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/v1/users?page=1&page_size=25
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{access_token}}
+  Accept: application/json
+}
+
+script:pre-request {
+  const token = bru.getVar("access_token");
+  if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) {
+    throw new Error("Run Login as an administrator first.");
+  }
+}
+
+tests {
+  const body = res.getBody();
+  test("Admin can list users", function () {
+    expect(res.getStatus()).to.equal(200);
+    expect(body.success).to.equal(true);
+    expect(Boolean(body.result && Array.isArray(body.result.items))).to.equal(true);
+  });
+  test("Users expose versions, not passwords", function () {
+    const items = body.result && body.result.items;
+    expect(Array.isArray(items) && items.every(function (user) {
+      return typeof user.id === "string" && Number.isInteger(user.current_version) &&
+        !Object.prototype.hasOwnProperty.call(user, "password") &&
+        !Object.prototype.hasOwnProperty.call(user, "password_hash");
+    })).to.equal(true);
+  });
+}
+
+docs {
+  Run Login with an admin account first. Adjust page/page_size to find your intended test user.
+  For existing users, set target_user_id in your environment to the selected id.
+  Read current_version before each mutation; it changes after every successful edit.
+}

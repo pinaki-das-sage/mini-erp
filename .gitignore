@@ -1,0 +1,12 @@
+/vendor/
+/node_modules/
+/.env
+/.env.*
+!/.env.example
+/config.ini
+/.phpunit.cache/
+/var/*
+!/var/.gitkeep
+/playwright-report/
+/test-results/
+/local-docs/

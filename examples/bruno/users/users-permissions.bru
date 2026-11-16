@@ -1,0 +1,50 @@
+meta {
+  name: Set test user permissions
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base_url}}/api/v1/users/{{target_user_id}}/permissions
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{access_token}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "grants": ["shared.note:read", "shared.note:update"],
+    "expected_version": {{?Current user version}}
+  }
+}
+
+script:pre-request {
+  const token = bru.getVar("access_token");
+  if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) {
+    throw new Error("Run Login as an administrator first.");
+  }
+  const id = bru.getVar("target_user_id") ?? bru.getEnvVar("target_user_id");
+  if (typeof id !== "string" || !/^[a-zA-Z0-9_-]{1,40}$/.test(id)) {
+    throw new Error("Create a test user or explicitly set target_user_id from List users.");
+  }
+}
+
+tests {
+  test("Admin changes the selected user's grants", function () {
+    const body = res.getBody();
+    expect(res.getStatus()).to.equal(200);
+    expect(body.success).to.equal(true);
+    expect(Boolean(body.result && Number.isInteger(body.result.current_version))).to.equal(true);
+  });
+}
+
+docs {
+  Replaces ALL grants with the listed note grants; it does not append permissions.
+  Use the new non-admin test user, not an existing employee account.
+  Read its latest current_version after any preceding edit. Existing user tokens are invalidated.
+}

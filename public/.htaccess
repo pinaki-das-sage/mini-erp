@@ -1,0 +1,12 @@
+Require all granted
+Options -Indexes
+DirectoryIndex index.php
+
+RewriteEngine On
+# Preserve the request's mount prefix even when an Alias overlaps DocumentRoot.
+RewriteCond %{REQUEST_URI}::$1 ^(.*)/(.*)::\2$
+RewriteRule ^(.*)$ - [E=APP_MOUNT:%1]
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ %{ENV:APP_MOUNT}/index.php [END]

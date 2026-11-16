@@ -1,0 +1,61 @@
+meta {
+  name: Create test user
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/v1/users
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{access_token}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "username": "{{?New username}}",
+    "display_name": "{{?New user display name}}",
+    "password": "{{?Temporary password (12-72 bytes)}}",
+    "is_admin": false
+  }
+}
+
+script:pre-request {
+  const token = bru.getVar("access_token");
+  if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) {
+    throw new Error("Run Login as an administrator first.");
+  }
+  bru.deleteVar("target_user_id");
+}
+
+script:post-response {
+  const body = res.getBody();
+  if (res.getStatus() === 201 && body && body.success === true) {
+    const id = body.result && body.result.id;
+    if (typeof id !== "string" || !/^[a-zA-Z0-9_-]{1,40}$/.test(id)) {
+      throw new Error("Create did not return a valid user ID.");
+    }
+    bru.setVar("target_user_id", id);
+  }
+}
+
+tests {
+  test("Admin creates a non-admin test user", function () {
+    const body = res.getBody();
+    expect(res.getStatus()).to.equal(201);
+    expect(body.success).to.equal(true);
+    expect(Boolean(body.result && typeof body.result.id === "string")).to.equal(true);
+  });
+}
+
+docs {
+  Creates real data: use a unique test username in your approved sandbox only.
+  Password is prompted interactively, not saved in the collection.
+  Success selects the new target_user_id in runtime variables. List users to obtain its version.
+  New users must change their temporary password and have no business grants by default.
+}

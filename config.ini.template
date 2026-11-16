@@ -1,0 +1,8 @@
+; Copy to private config.ini or set ORACLE_CONFIG_FILE outside the web root.
+; Never commit the completed file.
+[oracle]
+host =
+port = 1521
+service_name =
+username =
+password =
