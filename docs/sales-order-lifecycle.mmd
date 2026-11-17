@@ -1,0 +1,42 @@
+%%{init: {'theme':'default','themeVariables':{'background':'#ffffff'}}}%%
+flowchart LR
+    CUST["1. Customer<br/>Unique code, active, has address"]
+    DRAFT["2. Draft order<br/>One line per product, positive whole qty,<br/>price max 2 decimals, server-calculated totals"]
+    CONF["3. Confirmed<br/>Reference, products, qty, price, address frozen<br/>All demand Unallocated: U = Q"]
+    ALLOC{"4. Allocate - explicit action<br/>Stock for EVERY line?"}
+    FAIL["Allocation failed<br/>All earlier line reservations rolled back<br/>U = Q, R = 0"]
+    RETRY["5. Retry<br/>New stock arrives, user runs allocation<br/>again with a NEW action reference"]
+    RES["Allocated<br/>R = Q, U = 0"]
+    CLAIM["Planned on draft trip<br/>Logistics claim"]
+    DISP["6. Dispatched by Logistics<br/>R to T: T = Q<br/>Cancel NOT allowed from here"]
+    DELIV["7. Delivered by Logistics<br/>T to D: D = Q"]
+    DONE(["Completed<br/>only when D = Q"])
+    REMOVE["Remove draft-trip claim first"]
+    CANCEL(["8. Cancelled<br/>Whole order, with reason<br/>Release reservations + cancel in ONE transaction<br/>C = Q"])
+
+    CUST --> DRAFT
+    DRAFT -->|Confirm| CONF
+    CONF --> ALLOC
+    ALLOC -->|No| FAIL
+    FAIL --> RETRY
+    RETRY --> ALLOC
+    ALLOC -->|Yes| RES
+    RES -->|Logistics plans trip| CLAIM
+    CLAIM -->|Trip dispatched| DISP
+    DISP -->|Driver records full delivery| DELIV
+    DELIV --> DONE
+
+    CONF -->|Cancel| CANCEL
+    FAIL -->|Cancel| CANCEL
+    RES -->|Cancel| CANCEL
+    CLAIM -->|Cancel requested| REMOVE
+    REMOVE --> CANCEL
+
+    classDef sales fill:#dbeafe,stroke:#1e40af,color:#000000
+    classDef logistics fill:#fef3c7,stroke:#b45309,color:#000000
+    classDef bad fill:#fee2e2,stroke:#b91c1c,color:#000000
+    classDef good fill:#dcfce7,stroke:#15803d,color:#000000
+    class CUST,DRAFT,CONF,ALLOC,RES,RETRY sales
+    class CLAIM,DISP,DELIV,REMOVE logistics
+    class FAIL,CANCEL bad
+    class DONE good

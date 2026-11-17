@@ -1,0 +1,170 @@
+%%{init: {'theme':'default','themeVariables':{'background':'#ffffff'}}}%%
+erDiagram
+    %% ===== Shared foundation tables (already exist, reuse) =====
+
+    ME_COMPANY {
+        NUMBER ID PK
+        VARCHAR2 CODE UK
+        VARCHAR2 NAME
+        NUMBER ACTIVE
+    }
+
+    ME_USERS {
+        VARCHAR2 ID PK
+        NUMBER COMPANY_ID FK
+        VARCHAR2 USERNAME
+        VARCHAR2 PASSWORD_HASH
+        VARCHAR2 DISPLAY_NAME
+        NUMBER ACTIVE
+        NUMBER IS_ADMIN
+        NUMBER SECURITY_VERSION
+        NUMBER VERSION
+        NUMBER MUST_CHANGE_PASSWORD
+    }
+
+    ME_ROLES {
+        VARCHAR2 CODE PK "e.g. sales_clerk"
+    }
+
+    ME_USER_ROLES {
+        VARCHAR2 USER_ID PK, FK
+        VARCHAR2 ROLE_CODE PK, FK
+        NUMBER COMPANY_ID FK
+    }
+
+    ME_OBJECTS {
+        VARCHAR2 CODE PK "Team 3 inserts sales.customers, sales.orders"
+        VARCHAR2 NAME
+        VARCHAR2 MODULE_CODE "sales"
+        NUMBER ALLOW_CREATE
+        NUMBER ALLOW_READ
+        NUMBER ALLOW_UPDATE
+        NUMBER ALLOW_DELETE
+        NUMBER ACTIVE
+    }
+
+    ME_OBJECT_ACTIONS {
+        VARCHAR2 OBJECT_CODE PK, FK
+        VARCHAR2 ACTION_CODE PK "Team 3 inserts confirm, allocate, cancel"
+        VARCHAR2 NAME
+    }
+
+    ME_USER_PERMISSIONS {
+        VARCHAR2 USER_ID PK, FK
+        VARCHAR2 OBJECT_CODE PK, FK
+        VARCHAR2 OPERATION PK
+        NUMBER COMPANY_ID FK
+    }
+
+    ME_ACTIONS {
+        VARCHAR2 ACTION_REFERENCE PK "replay protection"
+        NUMBER COMPANY_ID PK, FK
+        VARCHAR2 ACTOR_ID FK
+        VARCHAR2 PAYLOAD_HASH
+        CLOB RESULT_JSON
+        TIMESTAMP CREATED_AT
+    }
+
+    ME_AUDIT {
+        VARCHAR2 ID PK
+        NUMBER COMPANY_ID FK
+        VARCHAR2 ACTION_REFERENCE FK
+        VARCHAR2 ACTOR_ID FK
+        VARCHAR2 EVENT_TYPE "e.g. SALES_ORDER_CONFIRM"
+        CLOB DETAILS_JSON
+        TIMESTAMP CREATED_AT
+    }
+
+    ME_NOTES {
+        VARCHAR2 ID PK "example only, copy pattern"
+        NUMBER COMPANY_ID PK, FK
+        VARCHAR2 BODY
+        NUMBER VERSION
+    }
+
+    ME_SECURITY_AUDIT {
+        VARCHAR2 ID PK "foundation only"
+        NUMBER COMPANY_ID FK
+        VARCHAR2 ACTOR_ID FK
+        VARCHAR2 TARGET_ID
+        VARCHAR2 EVENT_TYPE
+        CLOB DETAILS_JSON
+        TIMESTAMP CREATED_AT
+    }
+
+    %% ===== Team 3 Sales tables (to build, proposal for Day 2 review) =====
+
+    ME_SAL_CUSTOMERS {
+        VARCHAR2 ID PK
+        NUMBER COMPANY_ID FK
+        VARCHAR2 CODE UK "unique per company"
+        VARCHAR2 NAME
+        VARCHAR2 ADDRESS "required for new orders"
+        NUMBER ACTIVE "inactive blocks new orders"
+        NUMBER VERSION
+        VARCHAR2 CREATED_BY FK
+        TIMESTAMP CREATED_AT
+    }
+
+    ME_SAL_ORDERS {
+        VARCHAR2 ID PK
+        NUMBER COMPANY_ID FK
+        VARCHAR2 REFERENCE UK "unique per company, frozen at confirm"
+        VARCHAR2 CUSTOMER_ID FK
+        VARCHAR2 STATUS "DRAFT, CONFIRMED, COMPLETED, CANCELLED"
+        VARCHAR2 SHIP_ADDRESS "snapshot frozen at confirm"
+        NUMBER TOTAL_AMOUNT "NUMBER(14,2) server-calculated"
+        VARCHAR2 CANCEL_REASON "required when cancelled"
+        NUMBER VERSION
+        VARCHAR2 CREATED_BY FK
+        VARCHAR2 CONFIRMED_BY FK
+        TIMESTAMP CONFIRMED_AT
+        VARCHAR2 CANCELLED_BY FK
+        TIMESTAMP CANCELLED_AT
+    }
+
+    ME_SAL_ORDER_LINES {
+        VARCHAR2 ID PK
+        NUMBER COMPANY_ID FK
+        VARCHAR2 ORDER_ID FK "UK with PRODUCT_ID"
+        VARCHAR2 PRODUCT_ID "Inventory product ID, FK added in integration migration"
+        NUMBER UNIT_PRICE "NUMBER(12,2) frozen at confirm"
+        NUMBER QTY_ORDERED "Q, positive whole number"
+        NUMBER QTY_CANCELLED "C"
+        NUMBER QTY_IN_TRANSIT "T"
+        NUMBER QTY_DELIVERED "D"
+        NUMBER LINE_TOTAL "NUMBER(14,2) server-calculated"
+        NUMBER VERSION
+    }
+
+    ME_SAL_FULFILLMENT_EVENTS {
+        VARCHAR2 ID PK
+        NUMBER COMPANY_ID FK
+        VARCHAR2 ORDER_LINE_ID FK
+        VARCHAR2 EVENT_TYPE "DISPATCH or DELIVERY"
+        VARCHAR2 SOURCE_REFERENCE UK "shipment/outcome ID, unique per company + type + line"
+        NUMBER QUANTITY "positive whole number"
+        VARCHAR2 ACTION_REFERENCE FK
+        VARCHAR2 ACTOR_ID FK
+        TIMESTAMP CREATED_AT
+    }
+
+    %% ===== Shared relationships =====
+    ME_COMPANY ||--o{ ME_USERS : has
+    ME_USERS ||--o{ ME_USER_ROLES : has
+    ME_ROLES ||--o{ ME_USER_ROLES : assigned
+    ME_USERS ||--o{ ME_USER_PERMISSIONS : granted
+    ME_OBJECTS ||--o{ ME_USER_PERMISSIONS : on
+    ME_OBJECTS ||--o{ ME_OBJECT_ACTIONS : defines
+    ME_USERS ||--o{ ME_ACTIONS : performs
+    ME_ACTIONS ||--o{ ME_AUDIT : logged_in
+    ME_COMPANY ||--o{ ME_NOTES : owns
+    ME_USERS ||--o{ ME_SECURITY_AUDIT : changes
+
+    %% ===== Team 3 relationships =====
+    ME_COMPANY ||--o{ ME_SAL_CUSTOMERS : owns
+    ME_SAL_CUSTOMERS ||--o{ ME_SAL_ORDERS : places
+    ME_SAL_ORDERS ||--|{ ME_SAL_ORDER_LINES : contains
+    ME_SAL_ORDER_LINES ||--o{ ME_SAL_FULFILLMENT_EVENTS : fulfilled_by
+    ME_USERS ||--o{ ME_SAL_ORDERS : creates_confirms_cancels
+    ME_ACTIONS ||--o{ ME_SAL_FULFILLMENT_EVENTS : replay_ref
