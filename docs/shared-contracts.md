@@ -8,7 +8,7 @@ Read with the [project plan](../README.md), [coding conventions](./coding-conven
 
 The shared [API framework](./api-development.md) now supplies login tokens, permission checks and note/user examples under `/api/v1`. For each story: agree the API contract and test examples -> approve design/test plan -> failing tests -> service/API -> verification -> Smarty UI. Guides enforce that order; module routes require registered permissions.
 
-API calls authenticate the user; the internal PHP contracts below connect the modules using that same Actor and transaction. Do not replace those internal calls with HTTP or assume token login means the domain services/doubles are implemented. Apply foundation migration `004_api_tokens.php` before using the new API on a server. 
+API calls authenticate the user; the internal PHP contracts below connect the modules using that same Actor and transaction. Do not replace those internal calls with HTTP or assume token login means the domain services/doubles are implemented. Apply foundation migration `004_api_tokens.php` before using the new API on a server.
 
 ## The basic idea
 
