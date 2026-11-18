@@ -55,7 +55,12 @@ final class Kernel
                 $applied = array_column($this->db()->query(
                     "SELECT VERSION, CHECKSUM, STATUS FROM ME_MIGRATIONS WHERE COMPONENT = 'shared'",
                 ), null, 'VERSION');
-                $plan = (new MigrationRunner($this->db()))->plan(dirname(__DIR__, 2) . '/database/migrations/shared');
+                $runner = new MigrationRunner($this->db());
+                $directories = $runner->directories(dirname(__DIR__, 2) . '/database/migrations');
+                if (!isset($directories['shared'])) {
+                    throw new AppError('NOT_READY', 'Shared migration directory is missing.', 503);
+                }
+                $plan = $runner->plan($directories['shared']);
                 foreach ($plan as $migration) {
                     $current = $applied[$migration['version']] ?? null;
                     if ($current === null || $current['CHECKSUM'] !== $migration['checksum'] || $current['STATUS'] !== 'APPLIED') {
