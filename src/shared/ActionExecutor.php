@@ -24,6 +24,10 @@ final readonly class ActionExecutor
             throw new AppError('VALIDATION_ERROR', 'Provide an action reference of 1-100 letters, digits, underscores or hyphens.');
         }
         $hash = self::fingerprint($payload);
+        if ($eventType !== 'NEUTRAL_NOTE_UPDATE') {
+            // Preserve legacy note hashes while binding other actions to their event type.
+            $hash = hash('sha256', $eventType . "\0" . $hash);
+        }
         return $this->transactions->run(function (TransactionContext $tx) use ($actor, $reference, $payload, $operation, $hash, $eventType): array {
             try {
                 $tx->execute(
