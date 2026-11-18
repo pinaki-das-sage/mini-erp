@@ -1,6 +1,6 @@
 # API-first development
 
-The shared framework implements bearer authentication, permission-checked route registration, JSON responses and input/pagination helpers. The note and user-administration APIs are working examples. Inventory, Purchasing, Sales and Logistics endpoints remain team work.
+The shared framework implements bearer authentication, permission-checked route registration, JSON responses and input/pagination helpers. The note and user-administration APIs are working examples. The [Leads blueprint](./entity-blueprint.md) adds a complete independent Sales entity; the baseline ERP workflow endpoints remain team work.
 
 ## 1. Required story order
 
@@ -121,6 +121,10 @@ Read the current version first. Retry unchanged input/reference after an uncerta
 Existing browser routes (`/login`, `/logout`, `/api/note`, `/api/settings/users`) retain HttpOnly cookies and CSRF. They are not bearer endpoints. `/api/v1` neither starts nor authenticates from a browser session; an invalid bearer never falls back to cookies. The Smarty UI remains cookie-based and shares the same services.
 
 ## 4. Add a module API
+
+For an implemented end-to-end example, start with the [Leads blueprint](./entity-blueprint.md).
+It includes six `/api/v1/sales/leads` routes (list/detail/create/update/archive/restore),
+permission registration, Oracle persistence, Smarty UI and [Bruno requests](../examples/bruno/leads).
 
 Create your module's `src/<module>/api.php`. The framework loads these four module files when present; each must return a registration closure. Missing module files mean unimplemented routes, not simulated functionality.
 

@@ -93,3 +93,53 @@ if (search) {
   search.addEventListener('input', filter);
   status.addEventListener('change', filter);
 }
+
+for (const leadForm of document.querySelectorAll('.lead-form')) {
+  let pendingPayload = null;
+  leadForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const status = leadForm.querySelector('.form-status');
+    const button = leadForm.querySelector('button');
+    const payload = {
+      operation: leadForm.dataset.operation,
+      action_reference: leadForm.elements.action_reference.value,
+    };
+    if (payload.operation !== 'create') {
+      payload.id = leadForm.dataset.id;
+      payload.expected_version = Number(leadForm.dataset.version);
+    }
+    for (const field of ['contact_name', 'business_name', 'email', 'phone', 'source', 'status', 'notes']) {
+      if (leadForm.elements[field]) payload[field] = leadForm.elements[field].value;
+    }
+    const serialized = JSON.stringify(payload);
+    if (pendingPayload !== null && pendingPayload !== serialized) {
+      status.textContent = 'Retry unchanged input after an uncertain response, or refresh to check the saved state before starting another action.';
+      return;
+    }
+    pendingPayload = serialized;
+    button.disabled = true;
+    try {
+      const response = await fetch(appUrl('/api/sales/leads'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': leadForm.elements.csrf_token.value },
+        body: serialized,
+      });
+      const body = await response.json();
+      if (!response.ok || !body.success) {
+        status.textContent = body.error.message;
+        // A server failure may occur after commit; retain the exact retry payload.
+        if (response.status < 500) pendingPayload = null;
+        return;
+      }
+      if (leadForm.dataset.canRead === '1') {
+        window.location.assign(appUrl(`/sales/leads/${encodeURIComponent(body.result.id)}`));
+      } else {
+        status.textContent = `Lead ${body.result.lead_reference} created. Reload this page to create another.`;
+      }
+    } catch {
+      status.textContent = 'No confirmed response. Retry unchanged input with the same action reference, or refresh to check the saved state.';
+    } finally {
+      button.disabled = false;
+    }
+  });
+}

@@ -62,6 +62,7 @@ final class Renderer
             'company' => '/settings/company', 'users' => '/settings/users',
             'createUser' => '/settings/users/new', 'userApi' => '/api/settings/users',
             'health' => '/health', 'ready' => '/ready',
+            'leads' => '/sales/leads', 'createLead' => '/sales/leads/new', 'leadApi' => '/api/sales/leads',
         ] as $name => $route) {
             $urls[$name] = $this->paths->url($route);
         }

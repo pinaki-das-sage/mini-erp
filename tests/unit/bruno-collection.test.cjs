@@ -92,3 +92,31 @@ test('create clears an old selection and selects the returned ID only after succ
   });
   assert.equal(variables.get('target_user_id'), 'fixture-user');
 });
+
+test('lead samples use the six registered routes, explicit targets and replay references', () => {
+  for (const [file, method, route] of [
+    ['list', 'get', '/sales/leads?page=1&page_size=25&archived=false'],
+    ['detail', 'get', '/sales/leads/{{target_lead_id}}'],
+    ['create', 'post', '/sales/leads'],
+    ['update', 'patch', '/sales/leads/{{target_lead_id}}'],
+    ['archive', 'post', '/sales/leads/{{target_lead_id}}/archive'],
+    ['restore', 'post', '/sales/leads/{{target_lead_id}}/restore'],
+  ]) {
+    const source = read(`leads/${file}.bru`);
+    assert.ok(block(source, method).includes(`url: {{base_url}}/api/v1${route}`));
+    assert.ok(block(source, 'headers').includes('Authorization: Bearer {{access_token}}'));
+    new vm.Script(block(source, 'tests'));
+    assert.throws(() => vm.runInNewContext(block(source, 'script:pre-request'), {
+      bru: { getVar: () => undefined, getEnvVar: () => undefined },
+    }), /Run Login/);
+    if (!['list', 'create'].includes(file)) {
+      assert.throws(() => vm.runInNewContext(block(source, 'script:pre-request'), {
+        bru: { getVar: name => name === 'access_token' ? 'a'.repeat(64) : undefined, getEnvVar: () => undefined },
+      }), /target_lead_id/);
+    }
+    if (method === 'get') continue;
+    const body = JSON.parse(block(source, 'body:json').replaceAll('{{?Current lead version}}', '2'));
+    assert.match(body.action_reference, /^\{\{\?/);
+    if (file !== 'create') assert.equal(body.expected_version, 2);
+  }
+});

@@ -15,6 +15,8 @@ final class ConsoleTest extends TestCase
         self::assertStringContainsString('Oracle connection OK. Schema: FIXTURE_SCHEMA', $output);
         self::assertStringContainsString('Applied: 001_foundation.php, 002_company_permissions.php', $output);
         self::assertStringContainsString('CREATE TABLE ME_COMPANY', $writes);
+        self::assertStringContainsString('CREATE TABLE ME_SAL_LEADS', $writes);
+        self::assertLessThan(strpos($writes, 'CREATE TABLE ME_SAL_LEADS'), strpos($writes, 'CREATE TABLE ME_COMPANY'));
         self::assertStringContainsString("SET STATUS = 'APPLIED'", $writes);
     }
 
@@ -44,6 +46,15 @@ final class ConsoleTest extends TestCase
         self::assertSame(1, $status);
         self::assertStringContainsString('FORBIDDEN', $error);
         self::assertSame('', $writes);
+    }
+
+    public function testSalesMigrationCanBeAppliedSeparatelyFromShared(): void
+    {
+        [$status, $output, $error, $writes] = $this->runConsole('success', 'migrate', 'sales');
+        self::assertSame(0, $status, $error);
+        self::assertStringContainsString('001_leads.php', $output);
+        self::assertStringContainsString('CREATE TABLE ME_SAL_LEADS', $writes);
+        self::assertStringNotContainsString('CREATE TABLE ME_COMPANY', $writes);
     }
 
     public function testUnknownMigrationComponentFailsExplicitlyWithoutWrites(): void
