@@ -12,6 +12,9 @@ $template = match ($argv[1] ?? '') {
     'user-edit' => 'shared/settings/users/edit.tpl',
     'users' => 'shared/settings/users/list.tpl',
     'example' => 'shared/example/note.tpl',
+    'lead-new' => 'sales/leads/form.tpl',
+    'lead-edit' => 'sales/leads/form.tpl',
+    'lead-detail' => 'sales/leads/detail.tpl',
     default => throw new InvalidArgumentException('Unsupported browser fixture view.'),
 };
 $title = 'User management';
@@ -30,4 +33,18 @@ $data = [
     'grants' => ['inventory.products:read'],
     'note' => ['text' => 'Initial note', 'current_version' => 1],
 ];
+if (str_starts_with($argv[1], 'lead-')) {
+    $editing = $argv[1] === 'lead-edit';
+    $data += [
+        'lead' => ['id' => str_repeat('a', 32), 'lead_reference' => 'LD-TEST', 'contact_name' => 'Alex Smith',
+            'business_name' => 'Example', 'email' => 'alex@example.test', 'phone' => '', 'source' => 'website',
+            'status' => 'new', 'notes' => '', 'archived' => false, 'current_version' => 2,
+            'created_at' => '2026-11-17T00:00:00Z', 'updated_at' => '2026-11-17T00:00:00Z', 'created_by' => 'a', 'updated_by' => 'a'],
+        'leadPermissions' => ['read' => true, 'create' => true, 'update' => true, 'archive' => true, 'restore' => true],
+        'operation' => $editing ? 'update' : 'create', 'actionReference' => bin2hex(random_bytes(16)),
+        'sources' => \MiniErp\sales\LeadService::SOURCES, 'statuses' => \MiniErp\sales\LeadService::STATUSES,
+        'detailUrl' => $paths->url('/sales/leads/' . str_repeat('a', 32)),
+        'editUrl' => $paths->url('/sales/leads/' . str_repeat('a', 32) . '/edit'),
+    ];
+}
 echo (new Renderer($paths))->render($template, $title, $csrf, $data);

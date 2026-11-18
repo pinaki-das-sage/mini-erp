@@ -20,12 +20,15 @@ The learning objective is not the number of screens. Each team must demonstrate 
 - [Shared contracts: priorities, callers and fixtures](./docs/shared-contracts.md)
 - [Coding conventions](./docs/coding-conventions.md)
 - [API-first framework and endpoint guide](./docs/api-development.md)
+- [Adding an entity: the Leads blueprint](./docs/entity-blueprint.md)
 - [Company, users and permission registration](./docs/permissions.md)
 - [Setup, local development and verification](./docs/SETUP.md)
 
 **Implementation status:** the PHP 8.4 foundation is now available: shell/navigation, role-based login infrastructure, CSRF, INI-compatible OCI8 adapter, transaction context, checksum migrations and a neutral audited/versioned note example. Local unit/browser checks are provided. Remote Oracle is not configured or verified; ERP domain services and the peer adapter/fixture pack are still intentionally unimplemented.
 
 The shared `/api/v1` framework provides expiring bearer login/logout, current identity/permissions, password change, note read/update and admin user CRUD/permission/reset operations. New module work is API-first: approved contract/design/test plan -> failing tests -> service/API -> verification -> Smarty UI. Browser cookies/CSRF remain supported separately; all channels share the same business services. Deploy the new `004_api_tokens.php` migration before API use. See the [API guide](./docs/api-development.md); this update's live Oracle/API acceptance is not claimed locally.
+
+Leads is an additional standalone Sales teaching blueprint with a company-scoped Oracle table, permission-checked REST operations, list/create/detail/edit screens and archive/restore actions. It has no Customer/Order or stock dependency and does not change the graduate baseline workflow. Run `php bin/console.php migrate`, which discovers ordered folders (`001-shared`, then `002-sales`), then open **Sales -> Leads**. New numbered module folders are picked up automatically without CLI changes; ledger component names remain stable without their order prefixes. See the [blueprint walkthrough](./docs/entity-blueprint.md) for the contract, implementation sequence, Bruno requests and verification limits.
 
 The shared UI includes manual company-aware login, a sidebar workspace and admin-only user/permission Settings confined to the signed-in company. One schema supports multiple companies; `SIA-MINI-ERP` remains the default training/demo company. Additional companies are created CLI-only with `php bin/addcompany.php "Company name"`, atomically creating their admin, all ten training users, roles/grants and welcome note. The printed login code is the uppercase name with whitespace replaced by hyphens. Tenant-owned data has mandatory `COMPANY_ID`; shared definitions/migration metadata remain global. Register CRUD objects and named actions through migrations; UI and REST use the same server-side grants. See the permission guide for tenant boundaries and upgrade behavior. User administration is foundation-owned, not assigned to a graduate team.
 

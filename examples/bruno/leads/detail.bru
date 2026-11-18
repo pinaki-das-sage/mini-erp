@@ -1,0 +1,39 @@
+meta {
+  name: Read selected lead
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/v1/sales/leads/{{target_lead_id}}
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{access_token}}
+  Accept: application/json
+}
+
+script:pre-request {
+  if (!/^[a-f0-9]{64}$/.test(bru.getVar("access_token") || "")) {
+    throw new Error("Run Login with Leads read permission first.");
+  }
+  const id = bru.getVar("target_lead_id") ?? bru.getEnvVar("target_lead_id");
+  if (typeof id !== "string" || !/^[a-f0-9]{32}$/.test(id)) {
+    throw new Error("Create a test lead or explicitly set target_lead_id from List leads.");
+  }
+}
+
+tests {
+  test("Reads the selected lead and its current version", function () {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().success).to.equal(true);
+    expect(Number.isInteger(res.getBody().result.current_version)).to.equal(true);
+  });
+}
+
+docs {
+  Requires sales.leads:read. Includes archived leads.
+  Read the latest current_version before each new write.
+}

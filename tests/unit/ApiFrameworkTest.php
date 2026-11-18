@@ -47,9 +47,15 @@ final class ApiFrameworkTest extends TestCase
                 return [['ROLE_CODE' => 'trainee']];
             }
             if (str_contains($sql, 'ME_OBJECT_ACTIONS')) {
+                if (($parameters['object'] ?? '') === 'sales.leads') {
+                    return in_array($parameters['operation'], ['archive', 'restore'], true) ? [['ACTION_CODE' => $parameters['operation']]] : [];
+                }
                 return [['OBJECT_CODE' => 'shared.note', 'ACTION_CODE' => 'publish']];
             }
             if (str_contains($sql, 'ME_OBJECTS')) {
+                if (($parameters['object'] ?? '') === 'sales.leads') {
+                    return [['ACTIVE' => 1, 'ALLOW_CREATE' => 1, 'ALLOW_READ' => 1, 'ALLOW_UPDATE' => 1, 'ALLOW_DELETE' => 0]];
+                }
                 if (($parameters['object'] ?? '') === 'shared.user') {
                     return [['CODE' => 'shared.user', 'ACTIVE' => 1, 'ALLOW_CREATE' => 1, 'ALLOW_READ' => 1,
                         'ALLOW_UPDATE' => 1, 'ALLOW_DELETE' => 0]];
@@ -64,6 +70,10 @@ final class ApiFrameworkTest extends TestCase
             if (str_contains($sql, 'ME_NOTES')) {
                 self::assertSame(7, $parameters['company_id']);
                 return [['ID' => 'welcome', 'BODY' => 'API note', 'VERSION' => 2]];
+            }
+            if (str_contains($sql, 'FROM ME_SAL_LEADS')) {
+                self::assertSame(7, $parameters['company_id']);
+                return [];
             }
             if (str_contains($sql, 'FROM ME_USERS')) {
                 self::assertSame(7, $parameters['company_id']);
@@ -95,6 +105,12 @@ final class ApiFrameworkTest extends TestCase
                     return 0;
                 }
                 $this->tokens[$parameters['hash']]['REVOKED_AT'] = $parameters['now'];
+                return 1;
+            }
+            if (str_starts_with($sql, 'INSERT INTO ME_SAL_LEADS')
+                || str_starts_with($sql, 'INSERT INTO ME_ACTIONS') || str_starts_with($sql, 'UPDATE ME_ACTIONS')
+                || str_starts_with($sql, 'INSERT INTO ME_AUDIT')) {
+                self::assertSame(7, $parameters['company_id']);
                 return 1;
             }
             throw new \LogicException('Unexpected test write: ' . $sql);
@@ -382,5 +398,37 @@ final class ApiFrameworkTest extends TestCase
         $response = $api->handle('GET', '/api/v1/security-race', [], ['authorization' => 'Bearer ' . $token]);
         self::assertSame(401, $response['status']);
         self::assertSame('Bearer', $response['headers']['WWW-Authenticate']);
+    }
+
+    public function testLeadRoutesUseBearerPermissionsEnvelopeAndStrictInputs(): void
+    {
+        $db = $this->connection();
+        $api = new Api($db, Config::fromArray([]));
+        $token = (new TokenService($db))->login('user', 'fixture-password', 'LAB', '127.0.0.1')['access_token'];
+        $headers = ['authorization' => 'Bearer ' . $token, 'content-type' => 'application/json'];
+        $id = str_repeat('a', 32);
+        foreach ([
+            ['GET', '/sales/leads', 'read'], ['GET', '/sales/leads/' . $id, 'read'],
+            ['POST', '/sales/leads', 'create'], ['PATCH', '/sales/leads/' . $id, 'update'],
+            ['POST', '/sales/leads/' . $id . '/archive', 'archive'],
+            ['POST', '/sales/leads/' . $id . '/restore', 'restore'],
+        ] as [$method, $path, $permission]) {
+            $this->grants = [];
+            self::assertSame(403, $api->handle($method, '/api/v1' . $path, [], $headers)['status'], $path);
+            $this->grants = [['OBJECT_CODE' => 'sales.leads', 'OPERATION' => $permission]];
+            self::assertSame($method === 'GET' ? ($path === '/sales/leads' ? 200 : 404) : 400,
+                $api->handle($method, '/api/v1' . $path, [], $headers)['status'], $path);
+        }
+        $this->grants = [['OBJECT_CODE' => 'sales.leads', 'OPERATION' => 'create']];
+        $created = $api->handle('POST', '/api/v1/sales/leads', [
+            'contact_name' => 'Alex', 'email' => 'alex@example.test', 'action_reference' => 'api-lead-create',
+        ], $headers);
+        self::assertSame(201, $created['status']);
+        $body = json_decode($created['body'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame(['success', 'operation_id', 'current_version', 'result', 'error'], array_keys($body));
+        self::assertSame('api-lead-create', $body['operation_id']);
+        self::assertSame(1, $body['current_version']);
+        self::assertSame(401, $api->handle('GET', '/api/v1/sales/leads', [])['status']);
+        self::assertSame(404, $api->handle('DELETE', '/api/v1/sales/leads/' . $id, [], $headers)['status']);
     }
 }

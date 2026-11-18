@@ -114,13 +114,15 @@ database/migrations/
     002_company_permissions.php
     003_multi_tenancy.php
     004_api_tokens.php
+  002-sales/
+    001_leads.php
 ```
 
 Expected first run: `Oracle connection OK. Schema: ...`, then an `Applied:`
-line for shared. Repeating unchanged completed migrations reports
-`No pending shared migrations.`
+line for shared and another for sales. Repeating unchanged completed migrations
+reports `No pending shared migrations.` and `No pending sales migrations.`
 
-For future modules, add a unique numbered folder such as `002-inventory` and
+For future modules, add a unique numbered folder such as `003-inventory` and
 numbered PHP files returning statement lists. Use sequences `001`-`999`,
 unique lowercase component names (letters, digits, underscores), and unique
 folder sequences. Files belong directly inside each component folder; discovery
@@ -129,15 +131,16 @@ fail explicitly. Non-directory files at the migration root are not migrations.
 An empty component reports no pending migrations.
 
 **Existing databases:** folder prefixes control execution order only. Ledger
-components omit their numeric prefixes (`001-shared` remains `shared`), so
-directory moves do not replay already-applied migrations or require a ledger conversion. Migration filenames
+components remain `shared` and `sales`, so these directory moves do not replay
+already-applied migrations or require a ledger conversion. Migration filenames
 and contents/checksums are unchanged. Keep component suffixes stable; do not
 rename `shared` to another component or edit applied migration files.
 When deploying by file copy, synchronize directory removals as well as additions:
-do not leave old unnumbered component folders such as `shared/` behind.
+do not leave the old unnumbered `shared/` and `sales/` folders behind.
 
-For a deliberately scoped run, `php bin/console.php migrate shared`
-resolves the component dynamically from the discovered folders. This skips other components, including prerequisites:
+For a deliberately scoped run, `php bin/console.php migrate shared` or
+`php bin/console.php migrate sales` resolves the component dynamically from
+the discovered folders. This skips other components, including prerequisites:
 prefer bare `migrate` for normal setup/upgrades. Unknown components and extra
 arguments fail rather than running a different component.
 
@@ -153,6 +156,23 @@ If the company already exists, you should get a message confirming the same.
 Before upgrading an existing installation, back up data, stop application traffic and apply the pending tenant migration `003_multi_tenancy.php`. Sign in again afterward. On any failed/incomplete migration, stop and follow [migration failure guidance](#migration-failure), not a blind retry.
 
 For the API framework update, also apply pending `004_api_tokens.php` in each approved team/integration schema. It creates timezone-aware token storage, login-throttle counters and user-API permission registration; `/ready` now checks these tables and the new checksum. Preserve private configuration and optionally set `API_TOKEN_TTL_SECONDS=3600` (60-86400 allowed). Existing browser login remains cookie/CSRF-based; new clients use `/api/v1` and HTTPS. Install locked dependencies as usual; this update adds no package dependency. Run unit checks and the opted-in disposable-schema Oracle suite before claiming live API acceptance.
+
+### Leads blueprint migration
+
+The normal migration command above now installs both foundation and the
+standalone Sales example:
+
+```bash
+php bin/console.php migrate
+```
+
+This creates `ME_SAL_LEADS` and registers its permissions using the separate
+`sales` migration component after `shared`. Run it in each approved schema.
+Then open **Sales -> Leads** as an
+admin, or grant a non-admin the required Sales / Leads operations in Settings.
+See the [entity blueprint](./entity-blueprint.md) for all six REST requests,
+screens, archive/restore rules and the disposable-schema acceptance checklist.
+The foundation's `/ready` response does not verify this module.
 
 ### Migration failure
 
