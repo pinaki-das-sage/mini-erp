@@ -92,7 +92,7 @@ If it fails, check private configuration, OCI8 loading, client libraries, listen
 
 The adapter supports independent connections for two-session tests and bound `SELECT ... FOR UPDATE`. Business mutations require an active caller-owned transaction, without automatic commits or a silent row limit. Typed Oracle errors support controlled conflict handling; domain services do not own commit/rollback. `/health` explicitly does not check Oracle; `/ready` checks the foundation's tables, migration status/checksums and essential seed data, not complete ERP acceptance.
 
-## 5. Apply foundation migrations to the approved lab schema
+## 5. Apply migrations to the approved lab schema
 
 Make sure `config.ini` points to the approved lab schema. The command checks Oracle connectivity and the connected schema before starting migrations; a failed check exits with an error and performs no migration writes:
 
@@ -100,7 +100,53 @@ Make sure `config.ini` points to the approved lab schema. The command checks Ora
 php bin/console.php migrate
 ```
 
-Expected first run: `Oracle connection OK. Schema: ...`, then `Applied: 001_foundation.php, 002_company_permissions.php, 003_multi_tenancy.php, 004_api_tokens.php`. Repeating unchanged completed migrations reports no pending shared migrations.
+The command discovers every immediate `NNN-component` subfolder under
+`database/migrations/`, sorts folders by their three-digit sequence, and runs
+each folder's PHP migration files in filename order. No CLI edit is needed
+when a new folder or migration is added.
+
+Current order:
+
+```text
+database/migrations/
+  001-shared/
+    001_foundation.php
+    002_company_permissions.php
+    003_multi_tenancy.php
+    004_api_tokens.php
+```
+
+Expected first run: `Oracle connection OK. Schema: ...`, then an `Applied:`
+line for shared. Repeating unchanged completed migrations reports
+`No pending shared migrations.`
+
+For future modules, add a unique numbered folder such as `002-inventory` and
+numbered PHP files returning statement lists. Use sequences `001`-`999`,
+unique lowercase component names (letters, digits, underscores), and unique
+folder sequences. Files belong directly inside each component folder; discovery
+is not recursive. Invalid/duplicate folder names and symlinked component folders
+fail explicitly. Non-directory files at the migration root are not migrations.
+An empty component reports no pending migrations.
+
+**Existing databases:** folder prefixes control execution order only. Ledger
+components omit their numeric prefixes (`001-shared` remains `shared`), so
+directory moves do not replay already-applied migrations or require a ledger conversion. Migration filenames
+and contents/checksums are unchanged. Keep component suffixes stable; do not
+rename `shared` to another component or edit applied migration files.
+When deploying by file copy, synchronize directory removals as well as additions:
+do not leave old unnumbered component folders such as `shared/` behind.
+
+For a deliberately scoped run, `php bin/console.php migrate shared`
+resolves the component dynamically from the discovered folders. This skips other components, including prerequisites:
+prefer bare `migrate` for normal setup/upgrades. Unknown components and extra
+arguments fail rather than running a different component.
+
+Every pending migration in an earlier folder runs before pending migrations
+in a later folder. This is not a dependency graph: for a new cross-module
+change that needs another module's new tables, put it in a later integration
+component, rather than expecting per-file versions to interleave across folders.
+The command stops at the first failure. Earlier successful migrations may
+already be committed; there is no all-components rollback.
 
 If the company already exists, you should get a message confirming the same.
 

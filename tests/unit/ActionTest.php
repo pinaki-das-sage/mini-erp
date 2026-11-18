@@ -27,10 +27,12 @@ final class ActionTest extends TestCase
     public function testUnauthorizedReplayDoesNotTouchDatabase(): void
     {
         $db = $this->createMock(Connection::class);
+        $db->method('query')->willReturnCallback(static fn (string $sql): array =>
+            str_contains($sql, 'ME_OBJECTS') ? [['ACTIVE' => 1, 'ALLOW_UPDATE' => 1]] : [['USER_ID' => 'u']]);
         $db->expects(self::never())->method('begin');
-        $executor = new ActionExecutor(new TransactionManager($db));
         $this->expectException(AppError::class);
-        $executor->run(new Actor('u', 'buyer', ['buyer'], 1), 'action-1', ['value' => 'new'], fn () => []);
+        $this->expectExceptionMessage('Your role cannot perform this operation.');
+        (new NeutralNote($db))->update(new Actor('u', 'buyer', ['buyer'], 1), 'action-1', 'new', 1);
     }
 
     public function testCommittedReplayDoesNotReexecuteMutation(): void

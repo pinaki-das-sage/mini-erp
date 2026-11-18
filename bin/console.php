@@ -16,7 +16,8 @@ try {
     }
     $command = $argv[1] ?? 'help';
     if ($command === 'help') {
-        echo "Commands: doctor [--offline], migrate, bootstrap, seed, company:create CODE [NAME]\n";
+        echo "Commands: doctor [--offline], migrate [component], bootstrap, seed, company:create CODE [NAME]\n";
+        echo "migrate discovers all NNN-component directories under database/migrations in order.\n";
         echo "Write commands use the configured Oracle connection; --confirm-schema=NAME is optional.\n";
         exit(0);
     }
@@ -49,8 +50,20 @@ try {
     }
     echo 'Oracle connection OK. Schema: ' . $schema . "\n";
     if ($command === 'migrate') {
-        $completed = (new MigrationRunner($connection))->apply(dirname(__DIR__) . '/database/migrations/shared');
-        echo $completed === [] ? "No pending shared migrations.\n" : 'Applied: ' . implode(', ', $completed) . "\n";
+        $component = null;
+        foreach (array_slice($argv, 2) as $argument) {
+            if (str_starts_with($argument, '--confirm-schema=')) {
+                continue;
+            }
+            if ($component !== null || str_starts_with($argument, '-')) {
+                throw new InvalidArgumentException('Usage: migrate [component] [--confirm-schema=NAME].');
+            }
+            $component = $argument;
+        }
+        $completed = (new MigrationRunner($connection))->applyAll(dirname(__DIR__) . '/database/migrations', $component);
+        foreach ($completed as $name => $versions) {
+            echo $versions === [] ? "No pending $name migrations.\n" : 'Applied: ' . implode(', ', $versions) . " (component: $name)\n";
+        }
     } elseif ($command === 'bootstrap' || $command === 'company:create') {
         $username = $_ENV['BOOTSTRAP_ADMIN_USER'] ?? getenv('BOOTSTRAP_ADMIN_USER');
         $password = $_ENV['BOOTSTRAP_ADMIN_PASSWORD'] ?? getenv('BOOTSTRAP_ADMIN_PASSWORD');
