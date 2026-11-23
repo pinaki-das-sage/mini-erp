@@ -37,12 +37,12 @@ final readonly class Seeder
         ];
         $created = [];
         foreach ($accounts as $username => $role) {
-            if ($tx->query('SELECT ID FROM ME_USERS WHERE USERNAME = :username AND COMPANY_ID = :company_id',
+            if ($tx->query('SELECT USER_ID FROM ME_USERS WHERE USERNAME = :username AND COMPANY_ID = :company_id',
                 ['username' => $username, 'company_id' => $companyId]) !== []) {
                 continue;
             }
             $id = $companyId === 1 ? 'lab-' . $username : 'lab-' . bin2hex(random_bytes(16));
-            $tx->execute('INSERT INTO ME_USERS (ID, USERNAME, PASSWORD_HASH, COMPANY_ID) VALUES (:id, :username, :hash, :company_id)',
+            $tx->execute('INSERT INTO ME_USERS (USER_ID, USERNAME, PASSWORD_HASH, COMPANY_ID) VALUES (:id, :username, :hash, :company_id)',
                 ['id' => $id, 'company_id' => $companyId, 'username' => $username, 'hash' => password_hash($password ?? $username, PASSWORD_DEFAULT)]);
             foreach (['trainee', $role] as $assignedRole) {
                 $tx->execute('INSERT INTO ME_USER_ROLES (USER_ID, ROLE_CODE, COMPANY_ID) VALUES (:id, :role, :company_id)',
