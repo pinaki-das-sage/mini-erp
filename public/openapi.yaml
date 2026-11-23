@@ -1,70 +1,3633 @@
 openapi: 3.1.0
-
 info:
-  title: Mini ERP API
-  description: Mini ERP REST API documentation
-  version: 1.0.0
-
+  title: Mini ERP Authentication and Purchasing API
+  version: 1.12.5
+  description: Sample requests and expected responses for the current merged fields. HTTP 400 examples identify
+    error.field and error.message; line errors include the line number in the message. These are documented
+    expectations, not live backend validation results.
 servers:
   - url: ./api/v1
-
+    description: API relative to this OpenAPI file's deployment directory
+security:
+  - bearerAuth: []
+tags:
+  - name: Authentication
+  - name: Vendors
+  - name: Purchasing Documents
+  - name: Purchasing Document Entries
 paths:
-
   /auth/login:
     post:
       tags:
         - Authentication
-
-      summary: Login to Mini ERP
-
-      description: Authenticate user and generate access token.
-
       operationId: login
-
+      summary: Login to Mini ERP
+      description: >
+        Authenticate an active user in an active company and issue an opaque bearer token. Send JSON without
+        an Authorization header. Company codes and usernames are trimmed and normalized; passwords are
+        case-sensitive. Tokens expire after the configured lifetime (one hour by default). Login is limited to
+        five attempts per company/username and 100 attempts per source IP per fixed one-minute window,
+        including successful attempts.
+      x-implementation-status: implemented
+      security: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required:
-                - company
-                - username
-                - password
-              properties:
-                company:
-                  type: string
-                  example: SIA-MINI-ERP
-
-                username:
-                  type: string
-                  example: admin
-
-                password:
-                  type: string
-                  format: password
-                  example: secret123
-
+              $ref: "#/components/schemas/Login"
+            example:
+              company: SIA-MINI-ERP
+              username: your-username
+              password: your-password
       responses:
-        '200':
-          description: Login successful
+        "200":
+          description: Login successful. Store the token securely; do not log it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          description: Missing or invalid fields, malformed JSON, or an Authorization header was supplied.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Invalid company, username or password, or an inactive account/company.
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: string
+                const: Bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: UNAUTHENTICATED
+                  message: Invalid company, username or password.
+        "415":
+          description: Content-Type must be application/json.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many login attempts. Retry after 60 seconds.
+          headers:
+            Retry-After:
+              schema:
+                type: string
+                const: "60"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: RATE_LIMITED
+                  message: Too many login attempts. Try again after one minute.
+        "500":
+          description: Unexpected server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Database or authentication configuration is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/me:
+    get:
+      tags:
+        - Authentication
+      operationId: getCurrentUser
+      summary: Verify token and get current user
+      description: Returns the identity and current permissions associated with the supplied token.
+      responses:
+        "200":
+          description: Valid token and current user identity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityResponse"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /purchasing/vendors:
+    get:
+      tags:
+        - Vendors
+      operationId: listVendors
+      summary: List vendors
+      description: Returns two initial dummy vendors (101 and 102), plus vendors created through POST in this tab.
+        Supports pagination, search and status filters. Use GET /purchasing/vendors/{id} for a single vendor.
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000000
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+        - name: search
+          in: query
+          description: Search vendor name or vendor number.
+          schema:
+            type: string
+            maxLength: 100
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum:
+              - active
+              - inactive
+      responses:
+        "200":
+          description: Vendor list matching the filters and requested page.
           content:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
+                required:
+                  - success
+                  - operation_id
+                  - current_version
+                  - result
+                  - error
                 properties:
                   success:
                     type: boolean
-                    example: true
+                    const: true
+                  operation_id:
+                    type: "null"
+                  current_version:
+                    type: "null"
+                  result:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Vendor"
+                  error:
+                    type: "null"
+              examples:
+                vendors:
+                  $ref: "#/components/examples/VendorListSuccess"
+        "400":
+          $ref: "#/components/responses/VendorListValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    post:
+      tags:
+        - Vendors
+      operationId: createVendor
+      summary: Create vendor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VendorCreate"
+            examples:
+              vendor:
+                $ref: "#/components/examples/VendorCreateRequest"
+        description: >-
+          Input fields must have concrete values; null is not accepted. Omit optional fields when no value is
+          available.
+
+
+          Enter only the request fields shown in the examples. cnyid, id, createdby, modifiedby, whencreated
+          and whenmodified are assigned by the server and cannot be supplied. GET responses retain the full
+          saved record.
+
+
+          | Field | Rule |
+
+          | --- | --- |
+
+          | `vendor_id` | Required; 1-20 letters, numbers or hyphens; unique within company; immutable after
+          save. |
+
+          | `name` | Required; trim surrounding spaces; must not be blank; maximum 100 characters. |
+
+          | `status` | active or inactive; default active. Deactivate/reactivate through authorized update;
+          preserve historical documents. |
+
+          | `contact` | Optional; maximum 100 characters; omit when not supplied. |
+
+          | `email` | Optional; maximum 254 characters; validate email format when supplied; omit when not
+          supplied. |
+
+          | `phone` | Optional 10-digit Indian mobile number, starting with 6-9; for example 9876543210. No
+          country code or spaces. |
+
+          | `addr_1` | Required, nonblank; maximum 150 characters. |
+
+          | `addr_2` | Optional; maximum 150 characters; omit when not supplied. |
+
+          | `city` | Required, nonblank; maximum 80 characters. |
+
+          | `state` | Optional; maximum 80 characters; omit when not supplied. |
+
+          | `postal_code` | Optional string; maximum 20 letters/numbers; preserve leading zeros; omit when not
+          supplied. |
+
+          | `country` | Required, nonblank free text; maximum 80 characters. |
+
+          | `payment_terms` | due_on_receipt, net_15 or net_30; default net_30. |
+      responses:
+        "201":
+          $ref: "#/components/responses/VendorResult"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /purchasing/vendors/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Numeric internal id from a me_pur_vendor response, not the business vendor_id.
+        schema:
+          type: integer
+          minimum: 1
+          example: 101
+    get:
+      tags:
+        - Vendors
+      operationId: getVendor
+      summary: Get vendor
+      responses:
+        "200":
+          description: Current me_pur_vendor record for the authenticated company.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - success
+                  - operation_id
+                  - current_version
+                  - result
+                  - error
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  operation_id:
+                    type: "null"
+                  current_version:
+                    type: "null"
+                  result:
+                    $ref: "#/components/schemas/VendorResponse"
+                  error:
+                    type: "null"
+              examples:
+                vendor:
+                  $ref: "#/components/examples/VendorReadSuccess"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+      description: Enter the id returned by POST /purchasing/vendors to retrieve that vendor. In Swagger dummy mode,
+        ID 101 is available initially and created vendors remain available until this tab reloads.
+    patch:
+      tags:
+        - Vendors
+      operationId: updateVendor
+      summary: Update vendor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VendorUpdate"
+            examples:
+              vendor:
+                $ref: "#/components/examples/VendorUpdateRequest"
+      responses:
+        "200":
+          description: Vendor updated successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - success
+                  - operation_id
+                  - current_version
+                  - result
+                  - error
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  operation_id:
+                    type: "null"
+                  current_version:
+                    type: "null"
                   result:
                     type: object
+                    additionalProperties: false
+                    required:
+                      - id
+                      - cnyid
+                      - name
+                      - message
                     properties:
-                      access_token:
+                      id:
+                        type: integer
+                        minimum: 1
+                        description: Generated by the server; cannot be entered by the user.
+                        readOnly: true
+                      cnyid:
+                        type: integer
+                        minimum: 1
+                        description: Assigned by the server from the authenticated company; cannot be entered by the user.
+                        readOnly: true
+                      name:
                         type: string
-                        example: abc123xyz
-
-        '401':
-          description: Invalid credentials
-
-        '500':
-          description: Internal server error
+                      message:
+                        type: string
+                  error:
+                    type: "null"
+              examples:
+                updated:
+                  $ref: "#/components/examples/VendorUpdatedSuccess"
+        "400":
+          $ref: "#/components/responses/VendorUpdateValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /purchasing/documents:
+    get:
+      tags:
+        - Purchasing Documents
+      operationId: listPurchaseDocuments
+      summary: List purchasing documents
+      responses:
+        "200":
+          description: Sample document list.
+          content:
+            application/json:
+              examples:
+                documents:
+                  $ref: "#/components/examples/PurchaseDocumentListSuccess"
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - success
+                  - operation_id
+                  - current_version
+                  - result
+                  - error
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  operation_id:
+                    type: "null"
+                  current_version:
+                    type: "null"
+                  result:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PurchaseDocument"
+                  error:
+                    type: "null"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags:
+        - Purchasing Documents
+      operationId: createPurchaseDocument
+      summary: Create purchasing document
+      requestBody:
+        required: true
+        content:
+          application/json:
+            examples:
+              order:
+                $ref: "#/components/examples/PurchaseOrderRequest"
+              receiver:
+                $ref: "#/components/examples/ReceiverRequest"
+              invoice:
+                $ref: "#/components/examples/VendorInvoiceRequest"
+            schema:
+              $ref: "#/components/schemas/PurchaseDocumentCreate"
+        description: Create the document and all entries together. docno and vendor_id are inputs. recordtype may be
+          order, receiver or invoice; if omitted it is inferred from the docno prefix. Entry IDs, company,
+          audit fields and parent links are assigned automatically. Optional doc_id must match the generated
+          parent ID. lineamount is calculated and a supplied value must match it. Null input values are not
+          accepted.
+      responses:
+        "201":
+          description: Purchasing document created successfully. name contains the generated document number.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - success
+                  - operation_id
+                  - current_version
+                  - result
+                  - error
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  operation_id:
+                    type: "null"
+                  current_version:
+                    type: "null"
+                  result:
+                    type: object
+                    additionalProperties: false
+                    required:
+                      - id
+                      - cnyid
+                      - name
+                      - message
+                    properties:
+                      id:
+                        type: integer
+                        minimum: 1
+                        description: Generated by the server; cannot be entered by the user.
+                        readOnly: true
+                      cnyid:
+                        type: integer
+                        minimum: 1
+                        description: Assigned by the server from the authenticated company; cannot be entered by the user.
+                        readOnly: true
+                      name:
+                        type: string
+                      message:
+                        type: string
+                  error:
+                    type: "null"
+              examples:
+                purchaseOrder:
+                  $ref: "#/components/examples/PurchaseOrderCreatedSuccess"
+                receiver:
+                  $ref: "#/components/examples/ReceiverCreatedSuccess"
+                vendorInvoice:
+                  $ref: "#/components/examples/VendorInvoiceCreatedSuccess"
+        "400":
+          $ref: "#/components/responses/PurchaseDocumentValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/PurchaseDocumentConflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /purchasing/documents/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+          example: 202
+    get:
+      tags:
+        - Purchasing Documents
+      operationId: getPurchaseDocument
+      summary: Get purchasing document
+      responses:
+        "200":
+          $ref: "#/components/responses/PurchaseDocumentResult"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/PurchaseDocumentNotFound"
+      description: "Returns the document with its entries array. Every entry doc_id matches the document id. Dummy
+        documents: 201 and 202."
+    patch:
+      tags:
+        - Purchasing Documents
+      operationId: updatePurchaseDocument
+      summary: Update purchasing document
+      requestBody:
+        required: true
+        content:
+          application/json:
+            examples:
+              document:
+                $ref: "#/components/examples/PurchaseDocumentUpdateRequest"
+            schema:
+              $ref: "#/components/schemas/PurchaseDocumentUpdate"
+        description: Update payment_terms/status and optionally entries in one request. An entry with id updates only
+          description/notes; optional lineno must match its saved line. An entry without id adds a new line.
+          New entries may supply doc_id matching this document. All changes succeed together or none are
+          saved.
+      responses:
+        "200":
+          description: Only the submitted header fields and affected entry fields are returned inside result. Use GET
+            for the full saved document and generated entry IDs.
+          content:
+            application/json:
+              examples:
+                document:
+                  $ref: "#/components/examples/PurchaseDocumentUpdatedSuccess"
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - success
+                  - operation_id
+                  - current_version
+                  - result
+                  - error
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  operation_id:
+                    type: "null"
+                  current_version:
+                    type: "null"
+                  result:
+                    $ref: "#/components/schemas/PurchaseDocumentUpdate"
+                  error:
+                    type: "null"
+        "400":
+          $ref: "#/components/responses/PurchaseDocumentUpdateValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/PurchaseDocumentNotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /purchasing/document-entries:
+    get:
+      tags:
+        - Purchasing Document Entries
+      operationId: listPurchaseDocumentEntries
+      summary: List document entries
+      parameters:
+        - name: doc_id
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            example: 201
+      responses:
+        "200":
+          description: Sample document entry list.
+          content:
+            application/json:
+              examples:
+                entry:
+                  $ref: "#/components/examples/PurchaseDocumentEntryListSuccess"
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - success
+                  - operation_id
+                  - current_version
+                  - result
+                  - error
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  operation_id:
+                    type: "null"
+                  current_version:
+                    type: "null"
+                  result:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PurchaseDocumentEntry"
+                  error:
+                    type: "null"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /purchasing/document-entries/{record}:
+    parameters:
+      - name: record
+        in: path
+        required: true
+        description: Numeric id from me_pur_docentry.
+        schema:
+          type: integer
+          minimum: 1
+          example: 501
+    get:
+      tags:
+        - Purchasing Document Entries
+      operationId: getPurchaseDocumentEntry
+      summary: Get document entry
+      responses:
+        "200":
+          description: Sample document entry.
+          content:
+            application/json:
+              examples:
+                entry:
+                  $ref: "#/components/examples/PurchaseDocumentEntryReadSuccess"
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - success
+                  - operation_id
+                  - current_version
+                  - result
+                  - error
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  operation_id:
+                    type: "null"
+                  current_version:
+                    type: "null"
+                  result:
+                    $ref: "#/components/schemas/PurchaseDocumentEntry"
+                  error:
+                    type: "null"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/PurchaseDocumentEntryNotFound"
+      description: Read an entry by ID. Entries are created and updated through the parent document POST/PATCH.
+components:
+  examples:
+    PurchaseDocumentEntryRead:
+      summary: Sample read JSON response
+      value:
+        cnyid: 7
+        id: 501
+        doc_id: 202
+        lineno: 1
+        product_id: 1001
+        description: Office chair
+        quantity: 2
+        unitcost: "125.50"
+        lineamount: "251.00"
+        notes: Deliver to reception
+        createdby: user-001
+        modifiedby: user-001
+        whencreated: 2026-11-18T09:00:00.000Z
+        whenmodified: 2026-11-18T09:00:00.000Z
+    PurchaseDocumentEntryList:
+      summary: Sample list JSON response
+      value:
+        - cnyid: 7
+          id: 501
+          doc_id: 202
+          lineno: 1
+          product_id: 1001
+          description: Office chair
+          quantity: 2
+          unitcost: "125.50"
+          lineamount: "251.00"
+          notes: Deliver to reception
+          createdby: user-001
+          modifiedby: user-001
+          whencreated: 2026-11-18T09:00:00.000Z
+          whenmodified: 2026-11-18T09:00:00.000Z
+        - cnyid: 7
+          id: 502
+          doc_id: 202
+          lineno: 2
+          product_id: 1002
+          description: Desk lamp
+          quantity: 1
+          unitcost: "45.00"
+          lineamount: "45.00"
+          notes: Pack separately
+          createdby: user-001
+          modifiedby: user-001
+          whencreated: 2026-11-18T09:00:00.000Z
+          whenmodified: 2026-11-18T09:00:00.000Z
+    PurchaseOrderRequest:
+      summary: "order: show order_id only"
+      value:
+        docno: PO-000203
+        vendor_id: 101
+        doc_date: 2026-11-20
+        vendor_ref: QUOTE-001
+        delivery_addr: 12 Market Road, London
+        payment_terms: net_30
+        status: draft
+        recordtype: order
+        entries:
+          - lineno: 1
+            product_id: 1001
+            description: Office chair
+            quantity: 2
+            unitcost: "125.50"
+            lineamount: "251.00"
+            notes: Deliver to reception
+          - lineno: 2
+            product_id: 1002
+            description: Desk lamp
+            quantity: 1
+            unitcost: "45.00"
+            lineamount: "45.00"
+            notes: Pack separately
+    PurchaseOrderResponse:
+      summary: Sample JSON response
+      value:
+        cnyid: 7
+        id: 201
+        docno: PO-000201
+        vendor_id: 101
+        doc_date: 2026-11-18T00:00:00.000Z
+        vendor_ref: QUOTE-001
+        delivery_addr: 12 Market Road, London
+        payment_terms: net_30
+        status: draft
+        duedate: null
+        recordtype: order
+        amountdue: null
+        total: "0.00"
+        createdby: user-001
+        modifiedby: user-001
+        whencreated: 2026-11-18T09:00:00.000Z
+        whenmodified: 2026-11-18T09:00:00.000Z
+        order_id: 201
+        entries: []
+    ReceiverRequest:
+      summary: "receiver: show receiver_id only"
+      value:
+        docno: RCV-000203
+        vendor_id: 101
+        doc_date: 2026-11-20
+        vendor_ref: QUOTE-001
+        delivery_addr: 12 Market Road, London
+        payment_terms: net_30
+        status: draft
+        recordtype: receiver
+        entries:
+          - lineno: 1
+            product_id: 1001
+            description: Office chair
+            quantity: 2
+            unitcost: "125.50"
+            lineamount: "251.00"
+            notes: Deliver to reception
+          - lineno: 2
+            product_id: 1002
+            description: Desk lamp
+            quantity: 1
+            unitcost: "45.00"
+            lineamount: "45.00"
+            notes: Pack separately
+    ReceiverResponse:
+      summary: Sample JSON response
+      value:
+        cnyid: 7
+        id: 301
+        docno: RCV-000301
+        vendor_id: 101
+        doc_date: 2026-11-19T00:00:00.000Z
+        vendor_ref: QUOTE-001
+        delivery_addr: 12 Market Road, London
+        payment_terms: net_30
+        status: draft
+        duedate: null
+        recordtype: receiver
+        amountdue: null
+        total: "0.00"
+        createdby: user-001
+        modifiedby: user-001
+        whencreated: 2026-11-19T09:00:00.000Z
+        whenmodified: 2026-11-19T09:00:00.000Z
+        receiver_id: 301
+        entries: []
+    VendorInvoiceRequest:
+      summary: "invoice: show invoice_id only"
+      value:
+        docno: INV-000203
+        vendor_id: 101
+        doc_date: 2026-11-20
+        vendor_ref: QUOTE-001
+        delivery_addr: 12 Market Road, London
+        payment_terms: net_30
+        status: draft
+        recordtype: invoice
+        duedate: 2026-12-20
+        entries:
+          - lineno: 1
+            product_id: 1001
+            description: Office chair
+            quantity: 2
+            unitcost: "125.50"
+            lineamount: "251.00"
+            notes: Deliver to reception
+          - lineno: 2
+            product_id: 1002
+            description: Desk lamp
+            quantity: 1
+            unitcost: "45.00"
+            lineamount: "45.00"
+            notes: Pack separately
+    VendorInvoiceResponse:
+      summary: Sample JSON response
+      value:
+        cnyid: 7
+        id: 202
+        docno: INV-000202
+        vendor_id: 101
+        doc_date: 2026-11-20T00:00:00.000Z
+        vendor_ref: QUOTE-001
+        delivery_addr: 12 Market Road, London
+        payment_terms: net_30
+        status: draft
+        duedate: 2026-12-20
+        recordtype: invoice
+        amountdue: "296.00"
+        total: "296.00"
+        createdby: user-001
+        modifiedby: user-001
+        whencreated: 2026-11-20T09:00:00.000Z
+        whenmodified: 2026-11-20T09:00:00.000Z
+        invoice_id: 202
+        entries:
+          - cnyid: 7
+            id: 501
+            doc_id: 202
+            lineno: 1
+            product_id: 1001
+            description: Office chair
+            quantity: 2
+            unitcost: "125.50"
+            lineamount: "251.00"
+            notes: Deliver to reception
+            createdby: user-001
+            modifiedby: user-001
+            whencreated: 2026-11-18T09:00:00.000Z
+            whenmodified: 2026-11-18T09:00:00.000Z
+          - cnyid: 7
+            id: 502
+            doc_id: 202
+            lineno: 2
+            product_id: 1002
+            description: Desk lamp
+            quantity: 1
+            unitcost: "45.00"
+            lineamount: "45.00"
+            notes: Pack separately
+            createdby: user-001
+            modifiedby: user-001
+            whencreated: 2026-11-18T09:00:00.000Z
+            whenmodified: 2026-11-18T09:00:00.000Z
+    PurchaseDocumentUpdateRequest:
+      summary: Sample update JSON request
+      value:
+        payment_terms: net_15
+        status: pending
+        entries:
+          - id: 501
+            lineno: 1
+            description: Ergonomic office chair
+            notes: Deliver upstairs
+          - doc_id: 202
+            lineno: 3
+            product_id: 1003
+            description: Monitor stand
+            quantity: 1
+            unitcost: "30.00"
+            lineamount: "30.00"
+            notes: Handle with care
+    PurchaseDocumentUpdated:
+      summary: Only submitted header fields and affected entries
+      value:
+        payment_terms: net_15
+        status: pending
+        entries:
+          - id: 501
+            lineno: 1
+            description: Ergonomic office chair
+            notes: Deliver upstairs
+          - doc_id: 202
+            lineno: 3
+            product_id: 1003
+            description: Monitor stand
+            quantity: 1
+            unitcost: "30.00"
+            lineamount: "30.00"
+            notes: Handle with care
+    PurchaseDocumentList:
+      summary: Sample JSON list response
+      value:
+        - cnyid: 7
+          id: 201
+          docno: PO-000201
+          vendor_id: 101
+          doc_date: 2026-11-18T00:00:00.000Z
+          vendor_ref: QUOTE-001
+          delivery_addr: 12 Market Road, London
+          payment_terms: net_30
+          status: draft
+          duedate: null
+          recordtype: order
+          amountdue: null
+          total: "0.00"
+          createdby: user-001
+          modifiedby: user-001
+          whencreated: 2026-11-18T09:00:00.000Z
+          whenmodified: 2026-11-18T09:00:00.000Z
+          order_id: 201
+          entries: []
+        - cnyid: 7
+          id: 202
+          docno: INV-000202
+          vendor_id: 101
+          doc_date: 2026-11-20T00:00:00.000Z
+          vendor_ref: QUOTE-001
+          delivery_addr: 12 Market Road, London
+          payment_terms: net_30
+          status: draft
+          duedate: 2026-12-20
+          recordtype: invoice
+          amountdue: "296.00"
+          total: "296.00"
+          createdby: user-001
+          modifiedby: user-001
+          whencreated: 2026-11-20T09:00:00.000Z
+          whenmodified: 2026-11-20T09:00:00.000Z
+          invoice_id: 202
+          entries:
+            - cnyid: 7
+              id: 501
+              doc_id: 202
+              lineno: 1
+              product_id: 1001
+              description: Office chair
+              quantity: 2
+              unitcost: "125.50"
+              lineamount: "251.00"
+              notes: Deliver to reception
+              createdby: user-001
+              modifiedby: user-001
+              whencreated: 2026-11-18T09:00:00.000Z
+              whenmodified: 2026-11-18T09:00:00.000Z
+            - cnyid: 7
+              id: 502
+              doc_id: 202
+              lineno: 2
+              product_id: 1002
+              description: Desk lamp
+              quantity: 1
+              unitcost: "45.00"
+              lineamount: "45.00"
+              notes: Pack separately
+              createdby: user-001
+              modifiedby: user-001
+              whencreated: 2026-11-18T09:00:00.000Z
+              whenmodified: 2026-11-18T09:00:00.000Z
+    VendorCreateRequest:
+      summary: Sample JSON request body for POST /purchasing/vendors
+      value:
+        vendor_id: V-002
+        name: Northstar Supplies
+        status: active
+        contact: Alex Smith
+        email: alex@example.test
+        phone: "9876543210"
+        addr_1: 12 Market Road
+        addr_2: Suite 2
+        city: London
+        state: Greater London
+        postal_code: "00123"
+        country: United Kingdom
+        payment_terms: net_30
+    VendorUpdateRequest:
+      summary: Sample JSON request body for PATCH /purchasing/vendors/101
+      value:
+        status: inactive
+        payment_terms: net_15
+    VendorRead:
+      summary: JSON get response (numeric id is a path parameter, not a JSON body)
+      value:
+        cnyid: 7
+        id: 101
+        vendor_id: V-001
+        name: Example Vendor
+        status: active
+        contact: Alex Smith
+        email: alex@example.test
+        phone: "9876543210"
+        addr_1: 12 Market Road
+        addr_2: Suite 2
+        city: London
+        state: Greater London
+        postal_code: "00123"
+        country: United Kingdom
+        payment_terms: net_30
+        createdby: user-001
+        modifiedby: user-001
+        whencreated: 2026-11-19T14:00:00Z
+        whenmodified: 2026-11-19T14:00:00Z
+    VendorSaved:
+      summary: JSON response after creating a me_pur_vendor record
+      value:
+        id: 103
+        cnyid: 7
+        name: Northstar Supplies
+        message: Vendor created successfully.
+    VendorUpdated:
+      summary: JSON response after updating and deactivating a vendor
+      value:
+        id: 101
+        cnyid: 7
+        name: Example Vendor
+        message: Vendor updated successfully.
+    PurchaseOrderCreated:
+      summary: Purchase order created successfully
+      value:
+        id: 203
+        cnyid: 7
+        name: PO-000203
+        message: Purchase order created successfully.
+    ReceiverCreated:
+      summary: Receiver created successfully
+      value:
+        id: 203
+        cnyid: 7
+        name: RCV-000203
+        message: Receiver created successfully.
+    VendorInvoiceCreated:
+      summary: Vendor invoice created successfully
+      value:
+        id: 203
+        cnyid: 7
+        name: INV-000203
+        message: Vendor invoice created successfully.
+    VendorList:
+      summary: Dummy vendor list; POST-created vendors also appear here.
+      value:
+        - cnyid: 7
+          id: 101
+          vendor_id: V-001
+          name: Example Vendor
+          status: active
+          contact: Alex Smith
+          email: alex@example.test
+          phone: "9876543210"
+          addr_1: 12 Market Road
+          addr_2: Suite 2
+          city: London
+          state: Greater London
+          postal_code: "00123"
+          country: United Kingdom
+          payment_terms: net_30
+          createdby: user-001
+          modifiedby: user-001
+          whencreated: 2026-11-19T14:00:00Z
+          whenmodified: 2026-11-19T14:00:00Z
+        - cnyid: 7
+          id: 102
+          vendor_id: V-003
+          name: Southstar Supplies
+          status: active
+          contact: Priya Sharma
+          email: priya@southstar.example
+          phone: "9123456780"
+          addr_1: 24 MG Road
+          addr_2: Floor 2
+          city: Hyderabad
+          state: Telangana
+          postal_code: "500001"
+          country: India
+          payment_terms: net_30
+          createdby: user-001
+          modifiedby: user-001
+          whencreated: 2026-11-19T14:00:00Z
+          whenmodified: 2026-11-19T14:00:00Z
+    VendorListSuccess:
+      summary: Dummy vendor list; POST-created vendors also appear here.
+      value:
+        success: true
+        operation_id: null
+        current_version: null
+        result:
+          - cnyid: 7
+            id: 101
+            vendor_id: V-001
+            name: Example Vendor
+            status: active
+            contact: Alex Smith
+            email: alex@example.test
+            phone: "9876543210"
+            addr_1: 12 Market Road
+            addr_2: Suite 2
+            city: London
+            state: Greater London
+            postal_code: "00123"
+            country: United Kingdom
+            payment_terms: net_30
+            createdby: user-001
+            modifiedby: user-001
+            whencreated: 2026-11-19T14:00:00Z
+            whenmodified: 2026-11-19T14:00:00Z
+          - cnyid: 7
+            id: 102
+            vendor_id: V-003
+            name: Southstar Supplies
+            status: active
+            contact: Priya Sharma
+            email: priya@southstar.example
+            phone: "9123456780"
+            addr_1: 24 MG Road
+            addr_2: Floor 2
+            city: Hyderabad
+            state: Telangana
+            postal_code: "500001"
+            country: India
+            payment_terms: net_30
+            createdby: user-001
+            modifiedby: user-001
+            whencreated: 2026-11-19T14:00:00Z
+            whenmodified: 2026-11-19T14:00:00Z
+        error: null
+    VendorSavedSuccess:
+      summary: JSON response after creating a me_pur_vendor record
+      value:
+        success: true
+        operation_id: null
+        current_version: null
+        result:
+          id: 103
+          cnyid: 7
+          name: Northstar Supplies
+          message: Vendor created successfully.
+        error: null
+    VendorReadSuccess:
+      summary: JSON get response (numeric id is a path parameter, not a JSON body)
+      value:
+        success: true
+        operation_id: null
+        current_version: null
+        result:
+          cnyid: 7
+          id: 101
+          vendor_id: V-001
+          name: Example Vendor
+          status: active
+          contact: Alex Smith
+          email: alex@example.test
+          phone: "9876543210"
+          addr_1: 12 Market Road
+          addr_2: Suite 2
+          city: London
+          state: Greater London
+          postal_code: "00123"
+          country: United Kingdom
+          payment_terms: net_30
+          createdby: user-001
+          modifiedby: user-001
+          whencreated: 2026-11-19T14:00:00Z
+          whenmodified: 2026-11-19T14:00:00Z
+        error: null
+    VendorUpdatedSuccess:
+      summary: JSON response after updating and deactivating a vendor
+      value:
+        success: true
+        operation_id: null
+        current_version: null
+        result:
+          id: 101
+          cnyid: 7
+          name: Example Vendor
+          message: Vendor updated successfully.
+        error: null
+    PurchaseDocumentListSuccess:
+      summary: Sample JSON list response
+      value:
+        success: true
+        operation_id: null
+        current_version: null
+        result:
+          - cnyid: 7
+            id: 201
+            docno: PO-000201
+            vendor_id: 101
+            doc_date: 2026-11-18T00:00:00.000Z
+            vendor_ref: QUOTE-001
+            delivery_addr: 12 Market Road, London
+            payment_terms: net_30
+            status: draft
+            duedate: null
+            recordtype: order
+            amountdue: null
+            total: "0.00"
+            createdby: user-001
+            modifiedby: user-001
+            whencreated: 2026-11-18T09:00:00.000Z
+            whenmodified: 2026-11-18T09:00:00.000Z
+            order_id: 201
+            entries: []
+          - cnyid: 7
+            id: 202
+            docno: INV-000202
+            vendor_id: 101
+            doc_date: 2026-11-20T00:00:00.000Z
+            vendor_ref: QUOTE-001
+            delivery_addr: 12 Market Road, London
+            payment_terms: net_30
+            status: draft
+            duedate: 2026-12-20
+            recordtype: invoice
+            amountdue: "296.00"
+            total: "296.00"
+            createdby: user-001
+            modifiedby: user-001
+            whencreated: 2026-11-20T09:00:00.000Z
+            whenmodified: 2026-11-20T09:00:00.000Z
+            invoice_id: 202
+            entries:
+              - cnyid: 7
+                id: 501
+                doc_id: 202
+                lineno: 1
+                product_id: 1001
+                description: Office chair
+                quantity: 2
+                unitcost: "125.50"
+                lineamount: "251.00"
+                notes: Deliver to reception
+                createdby: user-001
+                modifiedby: user-001
+                whencreated: 2026-11-18T09:00:00.000Z
+                whenmodified: 2026-11-18T09:00:00.000Z
+              - cnyid: 7
+                id: 502
+                doc_id: 202
+                lineno: 2
+                product_id: 1002
+                description: Desk lamp
+                quantity: 1
+                unitcost: "45.00"
+                lineamount: "45.00"
+                notes: Pack separately
+                createdby: user-001
+                modifiedby: user-001
+                whencreated: 2026-11-18T09:00:00.000Z
+                whenmodified: 2026-11-18T09:00:00.000Z
+        error: null
+    PurchaseOrderCreatedSuccess:
+      summary: Purchase order created successfully
+      value:
+        success: true
+        operation_id: null
+        current_version: null
+        result:
+          id: 203
+          cnyid: 7
+          name: PO-000203
+          message: Purchase order created successfully.
+        error: null
+    ReceiverCreatedSuccess:
+      summary: Receiver created successfully
+      value:
+        success: true
+        operation_id: null
+        current_version: null
+        result:
+          id: 203
+          cnyid: 7
+          name: RCV-000203
+          message: Receiver created successfully.
+        error: null
+    VendorInvoiceCreatedSuccess:
+      summary: Vendor invoice created successfully
+      value:
+        success: true
+        operation_id: null
+        current_version: null
+        result:
+          id: 203
+          cnyid: 7
+          name: INV-000203
+          message: Vendor invoice created successfully.
+        error: null
+    PurchaseOrderResponseSuccess:
+      summary: Sample JSON response
+      value:
+        success: true
+        operation_id: null
+        current_version: null
+        result:
+          cnyid: 7
+          id: 201
+          docno: PO-000201
+          vendor_id: 101
+          doc_date: 2026-11-18T00:00:00.000Z
+          vendor_ref: QUOTE-001
+          delivery_addr: 12 Market Road, London
+          payment_terms: net_30
+          status: draft
+          duedate: null
+          recordtype: order
+          amountdue: null
+          total: "0.00"
+          createdby: user-001
+          modifiedby: user-001
+          whencreated: 2026-11-18T09:00:00.000Z
+          whenmodified: 2026-11-18T09:00:00.000Z
+          order_id: 201
+          entries: []
+        error: null
+    PurchaseDocumentUpdatedSuccess:
+      summary: Sample update JSON response
+      value:
+        success: true
+        operation_id: null
+        current_version: null
+        result:
+          payment_terms: net_15
+          status: pending
+          entries:
+            - id: 501
+              lineno: 1
+              description: Ergonomic office chair
+              notes: Deliver upstairs
+            - doc_id: 202
+              lineno: 3
+              product_id: 1003
+              description: Monitor stand
+              quantity: 1
+              unitcost: "30.00"
+              lineamount: "30.00"
+              notes: Handle with care
+        error: null
+    PurchaseDocumentEntryListSuccess:
+      summary: Sample list JSON response
+      value:
+        success: true
+        operation_id: null
+        current_version: null
+        result:
+          - cnyid: 7
+            id: 501
+            doc_id: 202
+            lineno: 1
+            product_id: 1001
+            description: Office chair
+            quantity: 2
+            unitcost: "125.50"
+            lineamount: "251.00"
+            notes: Deliver to reception
+            createdby: user-001
+            modifiedby: user-001
+            whencreated: 2026-11-18T09:00:00.000Z
+            whenmodified: 2026-11-18T09:00:00.000Z
+          - cnyid: 7
+            id: 502
+            doc_id: 202
+            lineno: 2
+            product_id: 1002
+            description: Desk lamp
+            quantity: 1
+            unitcost: "45.00"
+            lineamount: "45.00"
+            notes: Pack separately
+            createdby: user-001
+            modifiedby: user-001
+            whencreated: 2026-11-18T09:00:00.000Z
+            whenmodified: 2026-11-18T09:00:00.000Z
+        error: null
+    PurchaseDocumentEntryReadSuccess:
+      summary: Sample read JSON response
+      value:
+        success: true
+        operation_id: null
+        current_version: null
+        result:
+          cnyid: 7
+          id: 501
+          doc_id: 202
+          lineno: 1
+          product_id: 1001
+          description: Office chair
+          quantity: 2
+          unitcost: "125.50"
+          lineamount: "251.00"
+          notes: Deliver to reception
+          createdby: user-001
+          modifiedby: user-001
+          whencreated: 2026-11-18T09:00:00.000Z
+          whenmodified: 2026-11-18T09:00:00.000Z
+        error: null
+    VendorInvoiceResponseSuccess:
+      summary: Invoice with its two entries
+      value:
+        success: true
+        operation_id: null
+        current_version: null
+        result:
+          cnyid: 7
+          id: 202
+          docno: INV-000202
+          vendor_id: 101
+          doc_date: 2026-11-20T00:00:00.000Z
+          vendor_ref: QUOTE-001
+          delivery_addr: 12 Market Road, London
+          payment_terms: net_30
+          status: draft
+          duedate: 2026-12-20
+          recordtype: invoice
+          amountdue: "296.00"
+          total: "296.00"
+          createdby: user-001
+          modifiedby: user-001
+          whencreated: 2026-11-20T09:00:00.000Z
+          whenmodified: 2026-11-20T09:00:00.000Z
+          invoice_id: 202
+          entries:
+            - cnyid: 7
+              id: 501
+              doc_id: 202
+              lineno: 1
+              product_id: 1001
+              description: Office chair
+              quantity: 2
+              unitcost: "125.50"
+              lineamount: "251.00"
+              notes: Deliver to reception
+              createdby: user-001
+              modifiedby: user-001
+              whencreated: 2026-11-18T09:00:00.000Z
+              whenmodified: 2026-11-18T09:00:00.000Z
+            - cnyid: 7
+              id: 502
+              doc_id: 202
+              lineno: 2
+              product_id: 1002
+              description: Desk lamp
+              quantity: 1
+              unitcost: "45.00"
+              lineamount: "45.00"
+              notes: Pack separately
+              createdby: user-001
+              modifiedby: user-001
+              whencreated: 2026-11-18T09:00:00.000Z
+              whenmodified: 2026-11-18T09:00:00.000Z
+        error: null
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Paste result.access_token from a successful login response without the Bearer prefix. Verify with
+        GET /auth/me.
+  schemas:
+    Login:
+      type: object
+      required:
+        - company
+        - username
+        - password
+      properties:
+        company:
+          type: string
+          minLength: 1
+          description: Company code, not the company display name.
+        username:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
+          format: password
+          writeOnly: true
+    LoginResponse:
+      type: object
+      required:
+        - success
+        - operation_id
+        - current_version
+        - result
+        - error
+      properties:
+        success:
+          type: boolean
+          const: true
+        operation_id:
+          type: "null"
+        current_version:
+          type: "null"
+        result:
+          $ref: "#/components/schemas/LoginResult"
+        error:
+          type: "null"
+    LoginResult:
+      type: object
+      required:
+        - access_token
+        - token_type
+        - expires_in
+        - expires_at
+        - must_change_password
+      properties:
+        access_token:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+          description: Opaque token issued by the server, not a JWT.
+        token_type:
+          type: string
+          const: Bearer
+        expires_in:
+          type: integer
+          minimum: 60
+          maximum: 86400
+          example: 3600
+        expires_at:
+          type: string
+          format: date-time
+          description: Token expiry timestamp in UTC.
+        must_change_password:
+          type: boolean
+          description: Temporary-password accounts must change their password before using protected business APIs.
+    ErrorResponse:
+      type: object
+      required:
+        - success
+        - operation_id
+        - current_version
+        - result
+        - error
+      properties:
+        success:
+          type: boolean
+          const: false
+        operation_id:
+          type: "null"
+        current_version:
+          type: "null"
+        result:
+          type: "null"
+        error:
+          $ref: "#/components/schemas/ApiError"
+    ApiError:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        request_id:
+          type: string
+          description: Diagnostic reference when supplied by the server.
+        field:
+          type: string
+          description: Input field associated with a validation or duplicate-ID error, when applicable.
+    Envelope:
+      type: object
+      required:
+        - success
+        - operation_id
+        - current_version
+        - result
+        - error
+      properties:
+        success:
+          type: boolean
+        operation_id:
+          type:
+            - string
+            - "null"
+        current_version:
+          type:
+            - integer
+            - "null"
+        result:
+          type:
+            - object
+            - "null"
+        error:
+          oneOf:
+            - $ref: "#/components/schemas/ApiError"
+            - type: "null"
+    IdentityResponse:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            result:
+              type: object
+              required:
+                - id
+                - username
+                - company_id
+                - company_name
+                - roles
+                - is_admin
+                - must_change_password
+                - permissions
+              properties:
+                id:
+                  type: string
+                username:
+                  type: string
+                company_id:
+                  type: integer
+                company_name:
+                  type: string
+                roles:
+                  type: array
+                  items:
+                    type: string
+                is_admin:
+                  type: boolean
+                must_change_password:
+                  type: boolean
+                permissions:
+                  type: array
+                  items:
+                    type: string
+    VendorFields:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: \S
+          description: Vendor Name. Trim spaces; must not be blank.
+        status:
+          type: string
+          enum:
+            - active
+            - inactive
+          default: active
+          description: Status. Active or Inactive; defaults to active on create. Use update to deactivate/reactivate.
+        contact:
+          type: string
+          maxLength: 100
+          description: Contact Name. Optional primary sales or order contact.
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          description: Email Address. Validate format when entered; omit the field when no value is available.
+        phone:
+          type: string
+          minLength: 10
+          maxLength: 10
+          pattern: ^[6-9][0-9]{9}$
+          example: "9876543210"
+          description: "Optional Indian mobile number: 10 digits starting with 6, 7, 8 or 9. Example: 9876543210. No
+            country code or spaces."
+        addr_1:
+          type: string
+          minLength: 1
+          maxLength: 150
+          description: Address Line 1. Required main vendor address.
+          pattern: \S
+        addr_2:
+          type: string
+          maxLength: 150
+          description: Address Line 2. Optional additional address details.
+        city:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: City. Required vendor city.
+          pattern: \S
+        state:
+          type: string
+          maxLength: 80
+          description: State / Province. Optional region name or code.
+        postal_code:
+          type: string
+          maxLength: 20
+          pattern: ^[A-Za-z0-9]+$
+          description: Postal Code. Letters and numbers only; string retains leading zeros.
+        country:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: Country. Required free text.
+          pattern: \S
+        payment_terms:
+          type: string
+          enum:
+            - due_on_receipt
+            - net_15
+            - net_30
+          default: net_30
+          description: Payment Terms. Due on receipt, Net 15 or Net 30; defaults to net_30 on create.
+    VendorCreate:
+      description: Create a vendor. Company, record ID and audit fields are assigned by the server and cannot be supplied.
+      type: object
+      additionalProperties: false
+      required:
+        - vendor_id
+        - name
+        - addr_1
+        - city
+        - country
+      properties:
+        vendor_id:
+          type: string
+          minLength: 1
+          maxLength: 20
+          pattern: ^[A-Za-z0-9-]+$
+          description: Vendor ID. Unique within company and immutable after creation.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: \S
+          description: Vendor Name. Trim spaces; must not be blank.
+        status:
+          type: string
+          enum:
+            - active
+            - inactive
+          default: active
+          description: Status. Active or Inactive; defaults to active on create. Use update to deactivate/reactivate.
+        contact:
+          type: string
+          maxLength: 100
+          description: Contact Name. Optional primary sales or order contact.
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          description: Email Address. Validate format when entered; omit the field when no value is available.
+        phone:
+          type: string
+          minLength: 10
+          maxLength: 10
+          pattern: ^[6-9][0-9]{9}$
+          example: "9876543210"
+          description: "Optional Indian mobile number: 10 digits starting with 6, 7, 8 or 9. Example: 9876543210. No
+            country code or spaces."
+        addr_1:
+          type: string
+          minLength: 1
+          maxLength: 150
+          description: Address Line 1. Required main vendor address.
+          pattern: \S
+        addr_2:
+          type: string
+          maxLength: 150
+          description: Address Line 2. Optional additional address details.
+        city:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: City. Required vendor city.
+          pattern: \S
+        state:
+          type: string
+          maxLength: 80
+          description: State / Province. Optional region name or code.
+        postal_code:
+          type: string
+          maxLength: 20
+          pattern: ^[A-Za-z0-9]+$
+          description: Postal Code. Letters and numbers only; string retains leading zeros.
+        country:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: Country. Required free text.
+          pattern: \S
+        payment_terms:
+          type: string
+          enum:
+            - due_on_receipt
+            - net_15
+            - net_30
+          default: net_30
+          description: Payment Terms. Due on receipt, Net 15 or Net 30; defaults to net_30 on create.
+    VendorUpdate:
+      description: Only status and payment_terms may be updated. Supply at least one of these fields.
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        status:
+          type: string
+          enum:
+            - active
+            - inactive
+          default: active
+          description: Status. Active or Inactive; defaults to active on create. Use update to deactivate/reactivate.
+        payment_terms:
+          type: string
+          enum:
+            - due_on_receipt
+            - net_15
+            - net_30
+          default: net_30
+          description: Payment Terms. Due on receipt, Net 15 or Net 30; defaults to net_30 on create.
+    Vendor:
+      description: Full vendor record returned by GET. Identity and audit fields are assigned by the server.
+      unevaluatedProperties: false
+      allOf:
+        - $ref: "#/components/schemas/VendorFields"
+        - type: object
+          required:
+            - id
+            - cnyid
+            - vendor_id
+            - name
+            - addr_1
+            - city
+            - country
+            - status
+            - payment_terms
+            - createdby
+            - modifiedby
+            - whencreated
+            - whenmodified
+          properties:
+            cnyid:
+              type: integer
+              minimum: 1
+              description: Assigned by the server from the authenticated company; cannot be entered by the user.
+              readOnly: true
+            id:
+              type: integer
+              minimum: 1
+              description: Generated by the server; cannot be entered by the user.
+              readOnly: true
+            vendor_id:
+              type: string
+              minLength: 1
+              maxLength: 20
+              pattern: ^[A-Za-z0-9-]+$
+              description: Vendor ID. Unique within company and immutable after creation.
+            createdby:
+              type: string
+              minLength: 1
+              pattern: \S
+              description: Set by the server from the authenticated creator; retained on update.
+              readOnly: true
+            modifiedby:
+              type: string
+              minLength: 1
+              pattern: \S
+              description: Set by the server from the authenticated modifier.
+              readOnly: true
+            whencreated:
+              type: string
+              format: date-time
+              description: Generated creation timestamp; retained on update.
+              readOnly: true
+            whenmodified:
+              type: string
+              format: date-time
+              description: Generated modification timestamp; cannot precede whencreated.
+              readOnly: true
+    VendorResponse:
+      $ref: "#/components/schemas/Vendor"
+    OrderCreate:
+      type: object
+      additionalProperties: false
+      required:
+        - docno
+        - vendor_id
+        - doc_date
+        - entries
+      properties:
+        docno:
+          type: string
+          maxLength: 20
+          pattern: ^PO-
+          description: Unique document number beginning with PO-.
+        vendor_id:
+          type: integer
+          minimum: 1
+        recordtype:
+          type: string
+          enum:
+            - order
+        order_id:
+          type: integer
+          minimum: 1
+          description: Optional type key. Defaults to the generated document ID.
+        doc_date:
+          type: string
+          format: date
+        vendor_ref:
+          type: string
+          maxLength: 30
+        delivery_addr:
+          type: string
+          minLength: 1
+          pattern: \S
+          maxLength: 500
+        payment_terms:
+          type: string
+          enum:
+            - due_on_receipt
+            - net_15
+            - net_30
+        status:
+          type: string
+          enum:
+            - draft
+            - pending
+            - received
+            - submitted
+            - completed
+        duedate:
+          type: string
+          format: date
+          description: Optional invoice due date; must agree with date and payment_terms.
+        entries:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/DocumentEntryCreate"
+    ReceiverCreate:
+      type: object
+      additionalProperties: false
+      required:
+        - docno
+        - vendor_id
+        - doc_date
+        - entries
+      properties:
+        docno:
+          type: string
+          maxLength: 20
+          pattern: ^RCV-
+          description: Unique document number beginning with RCV-.
+        vendor_id:
+          type: integer
+          minimum: 1
+        recordtype:
+          type: string
+          enum:
+            - receiver
+        receiver_id:
+          type: integer
+          minimum: 1
+          description: Optional type key. Defaults to the generated document ID.
+        doc_date:
+          type: string
+          format: date
+        vendor_ref:
+          type: string
+          maxLength: 30
+        delivery_addr:
+          type: string
+          minLength: 1
+          pattern: \S
+          maxLength: 500
+        payment_terms:
+          type: string
+          enum:
+            - due_on_receipt
+            - net_15
+            - net_30
+        status:
+          type: string
+          enum:
+            - draft
+            - pending
+            - received
+            - submitted
+            - completed
+        duedate:
+          type: string
+          format: date
+          description: Optional invoice due date; must agree with date and payment_terms.
+        entries:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/DocumentEntryCreate"
+    InvoiceCreate:
+      type: object
+      additionalProperties: false
+      required:
+        - docno
+        - vendor_id
+        - doc_date
+        - entries
+      properties:
+        docno:
+          type: string
+          maxLength: 20
+          pattern: ^INV-
+          description: Unique document number beginning with INV-.
+        vendor_id:
+          type: integer
+          minimum: 1
+        recordtype:
+          type: string
+          enum:
+            - invoice
+        invoice_id:
+          type: integer
+          minimum: 1
+          description: Optional type key. Defaults to the generated document ID.
+        doc_date:
+          type: string
+          format: date
+        vendor_ref:
+          type: string
+          maxLength: 30
+        delivery_addr:
+          type: string
+          minLength: 1
+          pattern: \S
+          maxLength: 500
+        payment_terms:
+          type: string
+          enum:
+            - due_on_receipt
+            - net_15
+            - net_30
+        status:
+          type: string
+          enum:
+            - draft
+            - pending
+            - received
+            - submitted
+            - completed
+        duedate:
+          type: string
+          format: date
+          description: Optional invoice due date; must agree with date and payment_terms.
+        entries:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/DocumentEntryCreate"
+    PurchaseDocumentCreate:
+      oneOf:
+        - $ref: "#/components/schemas/OrderCreate"
+        - $ref: "#/components/schemas/ReceiverCreate"
+        - $ref: "#/components/schemas/InvoiceCreate"
+    PurchaseDocumentUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        payment_terms:
+          type: string
+          enum:
+            - due_on_receipt
+            - net_15
+            - net_30
+        status:
+          type: string
+          enum:
+            - draft
+            - pending
+            - received
+            - submitted
+            - completed
+        entries:
+          type: array
+          minItems: 1
+          items:
+            oneOf:
+              - $ref: "#/components/schemas/DocumentEntryUpdate"
+              - $ref: "#/components/schemas/DocumentEntryCreate"
+    PurchaseDocumentEntry:
+      type: object
+      additionalProperties: false
+      required:
+        - cnyid
+        - id
+        - doc_id
+        - lineno
+        - product_id
+        - description
+        - quantity
+        - unitcost
+        - lineamount
+        - notes
+        - createdby
+        - modifiedby
+        - whencreated
+        - whenmodified
+      properties:
+        cnyid:
+          type: integer
+          minimum: 1
+          readOnly: true
+          description: Assigned from the company context; user cannot enter this field.
+        id:
+          type: integer
+          minimum: 1
+          readOnly: true
+          description: Generated record ID; user cannot enter this field.
+        doc_id:
+          type: integer
+          minimum: 1
+        lineno:
+          type: integer
+          minimum: 1
+        product_id:
+          type: integer
+          minimum: 1
+        description:
+          type: string
+          minLength: 1
+          pattern: \S
+          maxLength: 200
+        quantity:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 999999999.999
+          multipleOf: 0.001
+        unitcost:
+          type: string
+          pattern: ^(0|[1-9][0-9]{0,9})\.[0-9]{2}$
+        lineamount:
+          type: string
+          readOnly: true
+        notes:
+          type:
+            - string
+            - "null"
+          maxLength: 500
+        createdby:
+          type: string
+          readOnly: true
+          description: Assigned creator; retained on update.
+        modifiedby:
+          type: string
+          readOnly: true
+          description: Assigned modifier.
+        whencreated:
+          type: string
+          format: date-time
+          readOnly: true
+        whenmodified:
+          type: string
+          format: date-time
+          readOnly: true
+    PurchaseDocument:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          properties:
+            vendor_id:
+              type: integer
+              minimum: 1
+            doc_date:
+              type: string
+              format: date-time
+            vendor_ref:
+              type: string
+              maxLength: 30
+            delivery_addr:
+              type: string
+              minLength: 1
+              pattern: \S
+              maxLength: 500
+            payment_terms:
+              type: string
+              enum:
+                - due_on_receipt
+                - net_15
+                - net_30
+            cnyid:
+              type: integer
+              minimum: 1
+              readOnly: true
+              description: Assigned from the company context; user cannot enter this field.
+            id:
+              type: integer
+              minimum: 1
+              readOnly: true
+              description: Generated record ID; user cannot enter this field.
+            createdby:
+              type: string
+              readOnly: true
+              description: Assigned creator; retained on update.
+            modifiedby:
+              type: string
+              readOnly: true
+              description: Assigned modifier.
+            whencreated:
+              type: string
+              format: date-time
+              readOnly: true
+            whenmodified:
+              type: string
+              format: date-time
+              readOnly: true
+            recordtype:
+              type: string
+              enum:
+                - order
+            order_id:
+              type: integer
+              minimum: 1
+            docno:
+              type: string
+              readOnly: true
+            status:
+              type: string
+              enum:
+                - draft
+                - pending
+                - received
+                - submitted
+                - completed
+            total:
+              type: string
+              readOnly: true
+            duedate:
+              type:
+                - string
+                - "null"
+              format: date
+              readOnly: true
+            amountdue:
+              type:
+                - string
+                - "null"
+              readOnly: true
+            entries:
+              type: array
+              items:
+                $ref: "#/components/schemas/PurchaseDocumentEntry"
+          required:
+            - id
+            - cnyid
+            - recordtype
+            - order_id
+            - entries
+        - type: object
+          additionalProperties: false
+          properties:
+            vendor_id:
+              type: integer
+              minimum: 1
+            doc_date:
+              type: string
+              format: date-time
+            vendor_ref:
+              type: string
+              maxLength: 30
+            delivery_addr:
+              type: string
+              minLength: 1
+              pattern: \S
+              maxLength: 500
+            payment_terms:
+              type: string
+              enum:
+                - due_on_receipt
+                - net_15
+                - net_30
+            cnyid:
+              type: integer
+              minimum: 1
+              readOnly: true
+              description: Assigned from the company context; user cannot enter this field.
+            id:
+              type: integer
+              minimum: 1
+              readOnly: true
+              description: Generated record ID; user cannot enter this field.
+            createdby:
+              type: string
+              readOnly: true
+              description: Assigned creator; retained on update.
+            modifiedby:
+              type: string
+              readOnly: true
+              description: Assigned modifier.
+            whencreated:
+              type: string
+              format: date-time
+              readOnly: true
+            whenmodified:
+              type: string
+              format: date-time
+              readOnly: true
+            recordtype:
+              type: string
+              enum:
+                - receiver
+            receiver_id:
+              type: integer
+              minimum: 1
+            docno:
+              type: string
+              readOnly: true
+            status:
+              type: string
+              enum:
+                - draft
+                - pending
+                - received
+                - submitted
+                - completed
+            total:
+              type: string
+              readOnly: true
+            duedate:
+              type:
+                - string
+                - "null"
+              format: date
+              readOnly: true
+            amountdue:
+              type:
+                - string
+                - "null"
+              readOnly: true
+            entries:
+              type: array
+              items:
+                $ref: "#/components/schemas/PurchaseDocumentEntry"
+          required:
+            - id
+            - cnyid
+            - recordtype
+            - receiver_id
+            - entries
+        - type: object
+          additionalProperties: false
+          properties:
+            vendor_id:
+              type: integer
+              minimum: 1
+            doc_date:
+              type: string
+              format: date-time
+            vendor_ref:
+              type: string
+              maxLength: 30
+            delivery_addr:
+              type: string
+              minLength: 1
+              pattern: \S
+              maxLength: 500
+            payment_terms:
+              type: string
+              enum:
+                - due_on_receipt
+                - net_15
+                - net_30
+            cnyid:
+              type: integer
+              minimum: 1
+              readOnly: true
+              description: Assigned from the company context; user cannot enter this field.
+            id:
+              type: integer
+              minimum: 1
+              readOnly: true
+              description: Generated record ID; user cannot enter this field.
+            createdby:
+              type: string
+              readOnly: true
+              description: Assigned creator; retained on update.
+            modifiedby:
+              type: string
+              readOnly: true
+              description: Assigned modifier.
+            whencreated:
+              type: string
+              format: date-time
+              readOnly: true
+            whenmodified:
+              type: string
+              format: date-time
+              readOnly: true
+            recordtype:
+              type: string
+              enum:
+                - invoice
+            invoice_id:
+              type: integer
+              minimum: 1
+            docno:
+              type: string
+              readOnly: true
+            status:
+              type: string
+              enum:
+                - draft
+                - pending
+                - received
+                - submitted
+                - completed
+            total:
+              type: string
+              readOnly: true
+            duedate:
+              type:
+                - string
+                - "null"
+              format: date
+              readOnly: true
+            amountdue:
+              type:
+                - string
+                - "null"
+              readOnly: true
+            entries:
+              type: array
+              items:
+                $ref: "#/components/schemas/PurchaseDocumentEntry"
+          required:
+            - id
+            - cnyid
+            - recordtype
+            - invoice_id
+            - entries
+    DocumentEntryCreate:
+      type: object
+      additionalProperties: false
+      required:
+        - lineno
+        - product_id
+        - description
+        - quantity
+        - unitcost
+      properties:
+        doc_id:
+          type: integer
+          minimum: 1
+          description: Optional parent ID; if supplied it must match the parent document. Otherwise assigned
+            automatically.
+        lineno:
+          type: integer
+          minimum: 1
+        product_id:
+          type: integer
+          minimum: 1
+        description:
+          type: string
+          minLength: 1
+          pattern: \S
+          maxLength: 200
+        quantity:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 999999999.999
+          multipleOf: 0.001
+        unitcost:
+          type: string
+          pattern: ^(0|[1-9][0-9]{0,9})\.[0-9]{2}$
+        notes:
+          type: string
+          maxLength: 500
+        lineamount:
+          type: string
+          pattern: ^(0|[1-9][0-9]{0,15})\.[0-9]{2}$
+          description: Optional; must equal quantity × unitcost rounded half up to two decimals.
+    DocumentEntryUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+      anyOf:
+        - required:
+            - description
+        - required:
+            - notes
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        lineno:
+          type: integer
+          minimum: 1
+          description: Optional existing line number; must match the saved line.
+        description:
+          type: string
+          minLength: 1
+          pattern: \S
+          maxLength: 200
+        notes:
+          type: string
+          maxLength: 500
+  responses:
+    PurchaseDocumentEntryNotFound:
+      description: Entry not found in the authenticated company.
+      content:
+        application/json:
+          example:
+            success: false
+            operation_id: null
+            current_version: null
+            result: null
+            error:
+              code: NOT_FOUND
+              field: id
+              message: Document entry not found.
+    PurchaseDocumentResult:
+      description: Sample me_pur_doc JSON response.
+      content:
+        application/json:
+          examples:
+            document:
+              $ref: "#/components/examples/VendorInvoiceResponseSuccess"
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - success
+              - operation_id
+              - current_version
+              - result
+              - error
+            properties:
+              success:
+                type: boolean
+                const: true
+              operation_id:
+                type: "null"
+              current_version:
+                type: "null"
+              result:
+                $ref: "#/components/schemas/PurchaseDocument"
+              error:
+                type: "null"
+    PurchaseDocumentValidationError:
+      description: Validation errors identify the input field; nested entry errors include their array index.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            docno:
+              summary: "docno: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: docno
+                  message: Enter a valid docno.
+            vendor_id:
+              summary: "vendor_id: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: vendor_id
+                  message: Enter a valid vendor_id.
+            doc_date:
+              summary: "doc_date: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: doc_date
+                  message: Enter a valid doc_date.
+            vendor_ref:
+              summary: "vendor_ref: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: vendor_ref
+                  message: Enter a valid vendor_ref.
+            delivery_addr:
+              summary: "delivery_addr: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: delivery_addr
+                  message: Enter a valid delivery_addr.
+            payment_terms:
+              summary: "payment_terms: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: payment_terms
+                  message: Enter a valid payment_terms.
+            status:
+              summary: "status: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: status
+                  message: Enter a valid status.
+            duedate:
+              summary: "duedate: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: duedate
+                  message: Enter a valid duedate.
+            recordtype:
+              summary: "recordtype: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: recordtype
+                  message: Enter a valid recordtype.
+            order_id:
+              summary: "order_id: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: order_id
+                  message: Enter a valid order_id.
+            receiver_id:
+              summary: "receiver_id: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: receiver_id
+                  message: Enter a valid receiver_id.
+            invoice_id:
+              summary: "invoice_id: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: invoice_id
+                  message: Enter a valid invoice_id.
+            entries:
+              summary: "entries: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries
+                  message: Enter a valid entries.
+            entries_0__lineno:
+              summary: "entries[0].lineno: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries[0].lineno
+                  message: Enter a valid entries[0].lineno.
+            entries_0__product_id:
+              summary: "entries[0].product_id: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries[0].product_id
+                  message: Enter a valid entries[0].product_id.
+            entries_0__description:
+              summary: "entries[0].description: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries[0].description
+                  message: Enter a valid entries[0].description.
+            entries_0__quantity:
+              summary: "entries[0].quantity: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries[0].quantity
+                  message: Enter a valid entries[0].quantity.
+            entries_0__unitcost:
+              summary: "entries[0].unitcost: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries[0].unitcost
+                  message: Enter a valid entries[0].unitcost.
+            entries_0__lineamount:
+              summary: "entries[0].lineamount: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries[0].lineamount
+                  message: Enter a valid entries[0].lineamount.
+            entries_0__notes:
+              summary: "entries[0].notes: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries[0].notes
+                  message: Enter a valid entries[0].notes.
+            entries_0__doc_id:
+              summary: "entries[0].doc_id: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries[0].doc_id
+                  message: Enter a valid entries[0].doc_id.
+    PurchaseDocumentConflict:
+      description: Document number already exists.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            duplicateDocument:
+              summary: "docno: Document number already exists."
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: CONFLICT
+                  field: docno
+                  message: Document number already exists.
+    PurchaseDocumentNotFound:
+      description: Document not found or unavailable in the authenticated company.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            notFound:
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: NOT_FOUND
+                  field: id
+                  message: Document not found.
+    VendorResult:
+      description: Vendor created successfully with the generated ID, company and name.
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - success
+              - operation_id
+              - current_version
+              - result
+              - error
+            properties:
+              success:
+                type: boolean
+                const: true
+              operation_id:
+                type: "null"
+              current_version:
+                type: "null"
+              result:
+                type: object
+                additionalProperties: false
+                required:
+                  - id
+                  - cnyid
+                  - name
+                  - message
+                properties:
+                  id:
+                    type: integer
+                    minimum: 1
+                    description: Generated by the server; cannot be entered by the user.
+                    readOnly: true
+                  cnyid:
+                    type: integer
+                    minimum: 1
+                    description: Assigned by the server from the authenticated company; cannot be entered by the user.
+                    readOnly: true
+                  name:
+                    type: string
+                  message:
+                    type: string
+              error:
+                type: "null"
+          examples:
+            savedVendor:
+              $ref: "#/components/examples/VendorSavedSuccess"
+    ValidationError:
+      description: Validation errors for editable request fields only. Select an example to see its input field and
+        message.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            requiredVendorNumber:
+              summary: "vendor_id: Enter Vendor ID."
+              description: 'Invalid request fragment: `{"vendor_id":""}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: vendor_id
+                  message: Enter Vendor ID.
+            invalidVendorNumber:
+              summary: "vendor_id: Vendor ID can contain only letters, numbers and hyphens."
+              description: 'Invalid request fragment: `{"vendor_id":"V_001"}`.'
+              x-message-source: pdf-page-5
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: vendor_id
+                  message: Vendor ID can contain only letters, numbers and hyphens.
+            vendorNumberTooLong:
+              summary: "vendor_id: Vendor ID must be 20 characters or fewer."
+              description: 'Invalid request fragment: `{"vendor_id":"VVVVVVVVVVVVVVVVVVVVV"}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: vendor_id
+                  message: Vendor ID must be 20 characters or fewer.
+            required:
+              summary: "name: Enter Vendor Name."
+              description: 'Invalid request fragment: `{"name":"   "}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: name
+                  message: Enter Vendor Name.
+            nameTooLong:
+              summary: "name: Vendor Name must be 100 characters or fewer."
+              description: 'Invalid request fragment:
+                `{"name":"NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN"}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: name
+                  message: Vendor Name must be 100 characters or fewer.
+            requiredStatus:
+              summary: "status: Select Status."
+              description: 'Invalid request fragment: `{"status":123}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: status
+                  message: Select Status.
+            invalidStatus:
+              summary: "status: Select a valid Status from the list."
+              description: 'Invalid request fragment: `{"status":"pending"}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: status
+                  message: Select a valid Status from the list.
+            contactTooLong:
+              summary: "contact: Contact Name must be 100 characters or fewer."
+              description: 'Invalid request fragment:
+                `{"contact":"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: contact
+                  message: Contact Name must be 100 characters or fewer.
+            addressTooLong:
+              summary: "addr_1: Address Line 1 must be 150 characters or fewer."
+              description: 'Invalid request fragment:
+                `{"addr_1":"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: addr_1
+                  message: Address Line 1 must be 150 characters or fewer.
+            additionalAddressTooLong:
+              summary: "addr_2: Address Line 2 must be 150 characters or fewer."
+              description: 'Invalid request fragment:
+                `{"addr_2":"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: addr_2
+                  message: Address Line 2 must be 150 characters or fewer.
+            cityTooLong:
+              summary: "city: City must be 80 characters or fewer."
+              description: 'Invalid request fragment:
+                `{"city":"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: city
+                  message: City must be 80 characters or fewer.
+            stateTooLong:
+              summary: "state: State / Province must be 80 characters or fewer."
+              description: 'Invalid request fragment:
+                `{"state":"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: state
+                  message: State / Province must be 80 characters or fewer.
+            countryTooLong:
+              summary: "country: Country must be 80 characters or fewer."
+              description: 'Invalid request fragment:
+                `{"country":"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: country
+                  message: Country must be 80 characters or fewer.
+            emailTooLong:
+              summary: "email: Email Address must be 254 characters or fewer."
+              description: 'Invalid request fragment:
+                `{"email":"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: email
+                  message: Email Address must be 254 characters or fewer.
+            phoneTooLong:
+              summary: "phone: Phone Number must be exactly 10 digits."
+              description: 'Invalid request fragment: `{"phone":"98765432101"}`.'
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: phone
+                  message: Phone Number must be exactly 10 digits.
+            postalCodeTooLong:
+              summary: "postal_code: Postal Code must be 20 characters or fewer."
+              description: 'Invalid request fragment: `{"postal_code":"XXXXXXXXXXXXXXXXXXXXX"}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: postal_code
+                  message: Postal Code must be 20 characters or fewer.
+            requiredAddress:
+              summary: "addr_1: Enter Address Line 1."
+              description: 'Invalid request fragment: `{"addr_1":"   "}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: addr_1
+                  message: Enter Address Line 1.
+            requiredCity:
+              summary: "city: Enter City."
+              description: 'Invalid request fragment: `{"city":"   "}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: city
+                  message: Enter City.
+            requiredCountry:
+              summary: "country: Enter Country."
+              description: 'Invalid request fragment: `{"country":"   "}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: country
+                  message: Enter Country.
+            invalidEmail:
+              summary: "email: Enter a valid Email Address, for example name@example.com."
+              description: 'Invalid request fragment: `{"email":"alex@"}`.'
+              x-message-source: pdf-page-5
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: email
+                  message: Enter a valid Email Address, for example name@example.com.
+            invalidPhone:
+              summary: "phone: Enter a valid 10-digit Indian mobile number, for example 9876543210."
+              description: 'Invalid request fragment: `{"phone":"+91 98765 43210"}`.'
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: phone
+                  message: Enter a valid 10-digit Indian mobile number, for example 9876543210.
+            invalidPostalCode:
+              summary: "postal_code: Enter a valid Postal Code."
+              description: 'Invalid request fragment: `{"postal_code":"12@34"}`.'
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: postal_code
+                  message: Enter a valid Postal Code.
+            requiredPaymentTerms:
+              summary: "payment_terms: Select Payment Terms."
+              description: 'Invalid request fragment: `{"payment_terms":123}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: payment_terms
+                  message: Select Payment Terms.
+            invalidPaymentTerms:
+              summary: "payment_terms: Select a valid Payment Terms from the list."
+              description: 'Invalid request fragment: `{"payment_terms":"net_60"}`.'
+              x-message-source: pdf-page-2
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: payment_terms
+                  message: Select a valid Payment Terms from the list.
+    Unauthenticated:
+      description: Missing, invalid, expired or revoked token. Log in again and replace the token in Authorize.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            const: Bearer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Valid identity without the required company permission, or a required password change.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            success: false
+            operation_id: null
+            current_version: null
+            result: null
+            error:
+              code: FORBIDDEN
+              message: You do not have permission to perform this action.
+    NotFound:
+      description: Vendor not found in the authenticated company.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Conflict:
+      description: Duplicate Vendor ID within the authenticated company.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            duplicateVendor:
+              summary: "vendor_id: Vendor ID already exists. Enter a unique Vendor ID."
+              description: 'Invalid request fragment: `{"vendor_id":"V-001"}`. V-001 already exists in this company.'
+              x-message-source: pdf-page-5
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: CONFLICT
+                  field: vendor_id
+                  message: Vendor ID already exists. Enter a unique Vendor ID.
+    UnsupportedMediaType:
+      description: Writes require Content-Type application/json.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unavailable:
+      description: >
+        Database or service is unavailable. A failed transactional write returns "Unable to save. Your changes
+        have not been saved. Try again."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            success: false
+            operation_id: null
+            current_version: null
+            result: null
+            error:
+              code: SERVICE_UNAVAILABLE
+              message: Unable to save. Your changes have not been saved. Try again.
+    VendorUpdateValidationError:
+      description: Validation errors for this operation's input fields only.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            status:
+              summary: "status: Select a valid status: active, inactive."
+              description: 'Invalid request fragment: `{"status":"invalid"}`.'
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: status
+                  message: "Select a valid status: active, inactive."
+            payment_terms:
+              summary: "payment_terms: Select a valid payment_terms: due_on_receipt, net_15, net_30."
+              description: 'Invalid request fragment: `{"payment_terms":"invalid"}`.'
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: payment_terms
+                  message: "Select a valid payment_terms: due_on_receipt, net_15, net_30."
+    PurchaseDocumentUpdateValidationError:
+      description: Validation errors identify the input field; nested entry errors include their array index.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            payment_terms:
+              summary: "payment_terms: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: payment_terms
+                  message: Enter a valid payment_terms.
+            status:
+              summary: "status: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: status
+                  message: Enter a valid status.
+            entries:
+              summary: "entries: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries
+                  message: Enter a valid entries.
+            entries_0__id:
+              summary: "entries[0].id: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries[0].id
+                  message: Enter a valid entries[0].id.
+            entries_0__lineno:
+              summary: "entries[0].lineno: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries[0].lineno
+                  message: Enter a valid entries[0].lineno.
+            entries_0__description:
+              summary: "entries[0].description: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries[0].description
+                  message: Enter a valid entries[0].description.
+            entries_0__notes:
+              summary: "entries[0].notes: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries[0].notes
+                  message: Enter a valid entries[0].notes.
+            entries_0__doc_id:
+              summary: "entries[0].doc_id: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries[0].doc_id
+                  message: Enter a valid entries[0].doc_id.
+            entries_0__product_id:
+              summary: "entries[0].product_id: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries[0].product_id
+                  message: Enter a valid entries[0].product_id.
+            entries_0__quantity:
+              summary: "entries[0].quantity: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries[0].quantity
+                  message: Enter a valid entries[0].quantity.
+            entries_0__unitcost:
+              summary: "entries[0].unitcost: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries[0].unitcost
+                  message: Enter a valid entries[0].unitcost.
+            entries_0__lineamount:
+              summary: "entries[0].lineamount: Enter a valid value."
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: entries[0].lineamount
+                  message: Enter a valid entries[0].lineamount.
+    VendorListValidationError:
+      description: Validation errors for this operation's input fields only.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            page:
+              summary: "page: Enter a valid page."
+              description: 'Invalid request fragment: `{"page":"invalid"}`.'
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: page
+                  message: Enter a valid page.
+            page_size:
+              summary: "page_size: Enter a valid page_size."
+              description: 'Invalid request fragment: `{"page_size":"invalid"}`.'
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: page_size
+                  message: Enter a valid page_size.
+            search:
+              summary: "search: Enter a valid search."
+              description: 'Invalid request fragment: `{"search":123}`.'
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: search
+                  message: Enter a valid search.
+            status:
+              summary: "status: Select a valid status: active, inactive."
+              description: 'Invalid request fragment: `{"status":"invalid"}`.'
+              x-message-source: merged-contract
+              value:
+                success: false
+                operation_id: null
+                current_version: null
+                result: null
+                error:
+                  code: VALIDATION_ERROR
+                  field: status
+                  message: "Select a valid status: active, inactive."
+x-pdf-validation-review:
+  scope: Current API contract; user-requested type names, conditional keys and PATCH restrictions override
+    earlier PDF mappings.
+  source: Purchasing_PO_API_Through_Vendor_Invoice (1).pdf, version 4.0, 17 November 2026
+  field_counts:
+    me_pur_vendor: 19
+    me_pur_doc: 20
+    me_pur_docentry: 14
+  differences:
+    - completed has no transition in the PDF. submitted applies to Requisitions, which the current recordtype
+      examples do not represent.
+    - Entry notes and its 500-character limit are a merged-contract extension; PDF Notes is at document level.
+    - Vendor and purchase document POST requests omit generated identity and audit fields. Document POST
+      examples omit calculated or inapplicable fields instead of submitting null. GET examples remain full
+      records. These are contract expectations; live backend parity is not verified here.
+    - The PDF does not prescribe internal-key, timestamp-format, calculated-value mismatch messages or HTTP
+      status codes. Those messages are marked merged-contract; 400/403/404/409/503 are contract status
+      mappings.
+    - Documents use order/order_id, receiver/receiver_id and invoice/invoice_id. Only the selected type key is
+      supplied. Entries use cnyid/id; identity and audit fields are generated.
+  workflow_rules:
+    - Document POST creates the header and entries together. Document PATCH accepts payment_terms, status and
+      entries. An existing entry ID permits description/notes updates; an entry without ID adds a new line.
+    - Standalone document-entry endpoints support GET only. Parent links and generated identity/audit fields
+      cannot be changed through client input.
+    - Entry IDs and line numbers are unique within their scopes. Each entry belongs to the company and
+      document returned by GET. Invalid nested changes leave the header and all entries unchanged.
+    - Invoice amountdue equals its line total. Invoice due date is calculated from its date and payment terms;
+      a supplied due date must agree. POST and GET both use vendor_id.
+    - Calculated line amounts are rounded half-up to 2 decimals before summing total. Reject excess input
+      precision and overflow; no partial saved records or effects on failure.
