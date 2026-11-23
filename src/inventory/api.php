@@ -26,7 +26,8 @@ return static function (Api $api, Connection $connection): void {
         static fn (Actor $actor, array $input): array => $products->create($actor, Api::string($input, 'action_reference'), $input),
         201);
 
-    $api->register('PATCH', '/inventory/products/{id}', 'inventory.products', 'update',
+    // POST, not PATCH: the training host's gateway rejects PATCH before it reaches the app.
+    $api->register('POST', '/inventory/products/{id}/update', 'inventory.products', 'update',
         static fn (Actor $actor, array $input, array $params): array => $products->update(
             $actor, Api::string($input, 'action_reference'), $productId($params), $input,
         ));

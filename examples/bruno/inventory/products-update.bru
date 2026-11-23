@@ -4,8 +4,8 @@ meta {
   seq: 4
 }
 
-patch {
-  url: {{base_url}}/api/v1/inventory/products/{{product_id}}
+post {
+  url: {{base_url}}/api/v1/inventory/products/{{product_id}}/update
   body: json
   auth: none
 }
@@ -48,6 +48,7 @@ tests {
 }
 
 docs {
+  POST is used instead of PATCH because the training host's gateway blocks PATCH.
   The SKU cannot be changed. To retire a product, deliberately set active to false;
   this is refused with 409 while any of its stock is reserved. There is no delete endpoint.
 }

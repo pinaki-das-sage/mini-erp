@@ -115,20 +115,21 @@ final class InventoryApiTest extends TestCase
             ['authorization' => 'Bearer ' . self::TOKEN])['status']);
     }
 
-    public function testPatchUpdatesTheProduct(): void
+    public function testUpdateRouteUpdatesTheProduct(): void
     {
-        $response = $this->api()->handle('PATCH', '/api/v1/inventory/products/7', [
+        $response = $this->api()->handle('POST', '/api/v1/inventory/products/7/update', [
             'action_reference' => 'prod-upd-1', 'name' => 'Steel Bolt M8', 'unit_label' => 'pack', 'unit_weight_grams' => 450, 'active' => true,
         ], self::JSON);
         self::assertSame(200, $response['status']);
         self::assertSame('Steel Bolt M8', $this->decode($response)['result']['name']);
     }
 
-    public function testPatchCannotChangeSkuAndHasNoDeleteRoute(): void
+    public function testUpdateRouteCannotChangeSkuAndThereIsNoDeleteOrPatchRoute(): void
     {
         $api = $this->api();
         $change = ['action_reference' => 'prod-upd-2', 'sku' => 'NEW', 'name' => 'X', 'unit_label' => 'box', 'unit_weight_grams' => 5, 'active' => true];
-        self::assertSame(400, $api->handle('PATCH', '/api/v1/inventory/products/7', $change, self::JSON)['status']);
+        self::assertSame(400, $api->handle('POST', '/api/v1/inventory/products/7/update', $change, self::JSON)['status']);
         self::assertSame(404, $api->handle('DELETE', '/api/v1/inventory/products/7', [], self::JSON)['status']);
+        self::assertSame(404, $api->handle('PATCH', '/api/v1/inventory/products/7', $change, self::JSON)['status']);
     }
 }

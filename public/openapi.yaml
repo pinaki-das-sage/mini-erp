@@ -68,7 +68,7 @@ paths:
 
         '500':
           description: Internal server error
-  
+
   /inventory/products:
     get:
       tags:
@@ -176,7 +176,9 @@ paths:
         '403': { description: Object not registered, or permission not granted }
         '404': { description: Product not found }
 
-    patch:
+
+  /inventory/products/{id}/update:
+    post:
       tags:
         - Inventory
       summary: Update or deactivate product
@@ -184,6 +186,7 @@ paths:
         Changes name, unit label, unit weight and the active flag. The SKU cannot be changed.
         Deactivating is refused (409) while any of the product's stock is reserved. There is no delete.
         Requires inventory.products:update.
+        Uses POST because the training host's gateway blocks PATCH.
       operationId: updateProduct
       security:
         - bearerAuth: []
