@@ -68,3 +68,183 @@ paths:
 
         '500':
           description: Internal server error
+  
+  /inventory/products:
+    get:
+      tags:
+        - Inventory
+      summary: List products
+      description: Paged product list for the signed-in company. Requires inventory.products:read.
+      operationId: listProducts
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        '200':
+          description: A page of products
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  result:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/Product' }
+                      page: { type: integer, example: 1 }
+                      page_size: { type: integer, example: 25 }
+        '400': { description: Unsupported filter or invalid paging value }
+        '401': { description: Missing or invalid token }
+        '403': { description: Object not registered, or permission not granted }
+
+    post:
+      tags:
+        - Inventory
+      summary: Create product
+      description: >
+        Creates a product and its zero-stock balance row in one transaction.
+        Requires inventory.products:create. Repeating the same action_reference with the same body returns the first result.
+      operationId: createProduct
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action_reference, name, sku, unit_label, unit_weight_grams]
+              properties:
+                action_reference: { type: string, example: inv-create-001 }
+                name: { type: string, maxLength: 255, example: Steel Bolt }
+                sku: { type: string, maxLength: 50, example: BOLT-01, description: Trimmed and upper-cased. Letters, digits, dot, underscore, hyphen. }
+                unit_label: { type: string, maxLength: 50, example: box }
+                unit_weight_grams: { type: integer, minimum: 1, example: 500 }
+      responses:
+        '201':
+          description: Product created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  operation_id: { type: string, example: inv-create-001 }
+                  result:
+                    type: object
+                    properties:
+                      product_id: { type: integer, example: 1 }
+                      sku: { type: string, example: BOLT-01 }
+        '400': { description: Invalid field }
+        '401': { description: Missing or invalid token }
+        '403': { description: Object not registered, or permission not granted }
+        '409': { description: DUPLICATE_SKU, or the action reference belongs to a different request }
+        '415': { description: Content-Type must be application/json }
+
+  /inventory/products/{id}:
+    get:
+      tags:
+        - Inventory
+      summary: Get product
+      description: Requires inventory.products:read.
+      operationId: getProduct
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        '200':
+          description: The product
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  result: { $ref: '#/components/schemas/Product' }
+        '400': { description: Product id is not a positive whole number }
+        '401': { description: Missing or invalid token }
+        '403': { description: Object not registered, or permission not granted }
+        '404': { description: Product not found }
+
+    patch:
+      tags:
+        - Inventory
+      summary: Update or deactivate product
+      description: >
+        Changes name, unit label, unit weight and the active flag. The SKU cannot be changed.
+        Deactivating is refused (409) while any of the product's stock is reserved. There is no delete.
+        Requires inventory.products:update.
+      operationId: updateProduct
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action_reference, name, unit_label, unit_weight_grams, active]
+              properties:
+                action_reference: { type: string, example: inv-update-001 }
+                name: { type: string, maxLength: 255, example: Steel Bolt M8 }
+                unit_label: { type: string, maxLength: 50, example: pack }
+                unit_weight_grams: { type: integer, minimum: 1, example: 450 }
+                active: { type: boolean, example: true }
+      responses:
+        '200':
+          description: Product updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  operation_id: { type: string, example: inv-update-001 }
+                  result:
+                    type: object
+                    properties:
+                      product_id: { type: integer, example: 1 }
+                      name: { type: string }
+                      unit_label: { type: string }
+                      unit_weight_grams: { type: integer }
+                      active: { type: boolean }
+        '400': { description: Invalid field, or sku supplied }
+        '401': { description: Missing or invalid token }
+        '403': { description: Object not registered, or permission not granted }
+        '404': { description: Product not found }
+        '409': { description: Product has reserved stock and cannot be deactivated, or action reference conflict }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    ProductId:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+  schemas:
+    Product:
+      type: object
+      properties:
+        product_id: { type: integer, example: 1 }
+        name: { type: string, example: Steel Bolt }
+        sku: { type: string, example: BOLT-01 }
+        warehouse_id: { type: string, example: W01 }
+        unit_label: { type: string, example: box }
+        unit_weight_grams: { type: integer, example: 500 }
+        active: { type: boolean, example: true }

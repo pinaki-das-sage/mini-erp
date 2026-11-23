@@ -1,0 +1,44 @@
+meta {
+  name: List products
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/v1/inventory/products?page=1&page_size=25
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{access_token}}
+  Accept: application/json
+}
+
+script:pre-request {
+  const token = bru.getVar("access_token");
+  if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) {
+    throw new Error("Run Login first.");
+  }
+}
+
+tests {
+  const body = res.getBody();
+  test("Lists products for the signed-in company", function () {
+    expect(res.getStatus()).to.equal(200);
+    expect(body.success).to.equal(true);
+    expect(Boolean(body.result && Array.isArray(body.result.items))).to.equal(true);
+  });
+  test("Products expose id, sku, unit and weight", function () {
+    const items = body.result && body.result.items;
+    expect(Array.isArray(items) && items.every(function (p) {
+      return Number.isInteger(p.product_id) && typeof p.sku === "string" &&
+        Number.isInteger(p.unit_weight_grams) && typeof p.active === "boolean";
+    })).to.equal(true);
+  });
+}
+
+docs {
+  Needs inventory.products:read (admins pass once the object is registered).
+  Change page and page_size (1-100). No other filters exist yet.
+}

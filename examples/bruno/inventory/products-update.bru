@@ -1,0 +1,53 @@
+meta {
+  name: Update product
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{base_url}}/api/v1/inventory/products/{{product_id}}
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{access_token}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "action_reference": "{{inv_action_reference}}",
+    "name": "{{?Product name}}",
+    "unit_label": "{{?Unit label}}",
+    "unit_weight_grams": {{?Unit weight in grams (whole number)}},
+    "active": true
+  }
+}
+
+script:pre-request {
+  const token = bru.getVar("access_token");
+  if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) {
+    throw new Error("Run Login first.");
+  }
+  const id = bru.getVar("product_id");
+  if (!Number.isInteger(id) || id < 1) {
+    throw new Error("Create a product, or set product_id from List products.");
+  }
+  bru.setVar("inv_action_reference", "inv-update-" + Date.now());
+}
+
+tests {
+  test("Updates the selected product", function () {
+    const body = res.getBody();
+    expect(res.getStatus()).to.equal(200);
+    expect(body.success).to.equal(true);
+    expect(body.result.product_id).to.equal(bru.getVar("product_id"));
+  });
+}
+
+docs {
+  The SKU cannot be changed. To retire a product, deliberately set active to false;
+  this is refused with 409 while any of its stock is reserved. There is no delete endpoint.
+}
