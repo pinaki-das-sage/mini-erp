@@ -1,0 +1,779 @@
+PAGE 1
+Order Entry | API stories
+Version 6 | 17 November 2026 | Week 1 | 2 developers + 1 QA
+Build metadata first, then transaction APIs in workflow order. Week 2 builds the UI against these APIs. This document
+supersedes the earlier OE status, mandatory-source and full-payment rules. Purchasing is a separate document and
+team.
+Priority
+Story
+Team can deliver when...
+1
+API-01 Permissions
+Read and assigned Create / Update / Delete permissions are enforced, including workflow
+actions.
+2
+API-02 Customer
+Create, read, update and deactivate/reactivate Customer metadata.
+3
+API-03 Sales Quote
+Create Draft, read/update/delete eligible Drafts, submit and conditionally return to Draft.
+4
+API-04 Sales Order
+Same workflow; optional Submitted Sales Quote source.
+5
+API-05 Shipper
+Same workflow; optional Submitted Sales Order source; authorized dispatch confirmation.
+6
+API-06 Sales Invoice
+Same workflow; optional Submitted Shipper source; correct Customer balance.
+7
+API-07 Customer payment
+Create/read partial or full payments against current Amount Due.
+Simple workflow
+Customer metadata and read-only Inventory references
+Sales Quote (optional upstream) 
+®
+ Sales Order 
+®
+ Shipper 
+®
+ Sales Invoice 
+®
+ Customer payment
+All four document types use Draft / Submitted. Each downstream transaction may be created standalone. Invoice
+payment status is separate: Unpaid / Partially Paid / Paid, only after submission.
+Ownership and delivery
+Inventory owns Item, Warehouse and stock management. OE reads existing active Item and Warehouse choices; it
+does not build Inventory CRUD or calculate/update stock. Approvals remain next scope. Simple dropdowns are
+sufficient. No database schema or SQL is prescribed.
+QA tests APIs during week 1 and repeats the same business cases through the UI in week 2. Agree reference
+endpoints with Inventory and Logistics early; use sample contract data while dependencies are being connected.
+Mini ERP | OE API v6
+1 / 11
+Version 6.1 | 17 November 2026 | Week 1 | Explicit line-entry API coverage
+Mini ERP | OE API v6.1
+1 / 13
+
+PAGE 2
+API-01 | Permissions and common rules
+As an authorized user, I can work only with records and actions allowed for my module and company.
+1. Read-only users can list/open records but cannot create, edit, submit, return to Draft, delete or record payments.
+2. Use existing module permissions. Create permits a new Draft; Update permits Draft changes and authorized status
+actions; Delete permits only eligible Draft deletion. Require the payment action permission for recording money and the
+Logistics authorization for submitting a Shipper.
+3. Enforce permissions server-side for every call. Customer records are deactivated rather than deleted. Payment
+records support Create and Read only.
+4. Return clear field errors and preserve all data on validation failure. Never save half a document, half a status change
+or half a balance change.
+Document states and actions - all four types
+Current state
+Available action / result
+New, unsaved
+Save as Draft creates a numbered Draft. Direct submission of an unsaved form is not offered.
+Saved Draft
+Save Changes; Save as Submitted validates all required fields and makes it Submitted.
+Submitted
+Read-only business fields. Move to Draft only if no downstream document uses it as source, including a
+downstream Draft.
+Submitted Invoice
+Also block Move to Draft if any payment is recorded. No editable payment-status field.
+Eligible Draft
+Delete may be offered in All Documents only; never inside create, edit or view forms. Reject if referenced
+downstream.
+Apply complete business validation on Draft save as well as submission in this first release. Document numbers are
+unique, system-generated, read-only, at most 20 characters and never reused. Dates use YYYY-MM-DD. Free text is
+trimmed before required/length checks. Validate decimal precision and capacity without silently truncating.
+Return-to-Draft, source assignment, source release and payment updates must be safe against concurrent requests.
+Source-linked drafts keep inherited business values read-only. A returned Draft may be edited only in fields not
+inherited from a source.
+Mini ERP | OE API v6
+2 / 11
+Mini ERP | OE API v6.1
+2 / 13
+
+PAGE 3
+API-02 | Customer metadata
+As an OE user, I can maintain Customer details before creating sales documents.
+Field label
+Business type
+Limit / format
+Required
+Rule / description
+Customer ID
+Text
+20 characters
+Yes
+Unique within company; letters, numbers and hyphen;
+immutable after first save.
+Customer Name
+Text
+100 characters
+Yes
+Customer display name.
+Status
+Choice
+Active / Inactive
+Yes
+Default Active; deactivate instead of delete.
+Contact Name
+Text
+100 characters
+No
+Main contact.
+Email Address
+Text
+254 characters
+No
+Validate email format if provided.
+Phone Number
+Text
+25 characters
+No
+Digits, spaces, +, -, parentheses.
+Billing Address Line 1
+Text
+150 characters
+Yes
+Street / building.
+Billing Address Line 2
+Text
+150 characters
+No
+Additional address.
+City
+Text
+80 characters
+Yes
+City name.
+State / Province
+Text
+80 characters
+No
+State or province.
+Postal Code
+Text
+20 characters
+No
+Keep leading zeros.
+Country
+Text
+80 characters
+Yes
+Normal country-name text; no dropdown or
+country-code list.
+Payment Terms
+Choice
+Due on receipt / Net
+15 / Net 30
+Yes
+Default Net 30.
+Notes
+Long text
+500 characters
+No
+Optional information.
+Amount Customer Owes
+Us
+Calculated
+money
+16 whole + 2
+decimals
+Auto
+Read-only; default 0.00; outstanding submitted invoices
+less recorded payments.
+Mini ERP | OE API v6
+3 / 11
+Mini ERP | OE API v6.1
+3 / 13
+
+PAGE 4
+API-02 | Acceptance and errors
+Customer metadata is delivered before the document flow.
+1. Create, list, open and update a Customer. Search the list by Customer ID / Customer Name; filter Active / Inactive.
+2. Reject a duplicate Customer ID. Changing Customer ID after creation is rejected.
+3. Inactive Customers are hidden from new selections. Keep historical Customer references and allow payments
+against already submitted invoices even if the Customer later becomes inactive.
+4. Customer balance is derived from submitted invoices and actual recorded payments. Users cannot type or overwrite
+it. No opening balances, credits or refunds are added in this release.
+Validation
+Error message
+Missing required field
+Enter {Field label}.
+Overlength text
+{Field label} must be {limit} characters or fewer.
+Duplicate Customer ID
+Customer ID already exists. Enter a unique ID.
+Changing saved ID
+Customer ID cannot be changed after creation.
+Invalid ID characters
+Customer ID may contain only letters, numbers and hyphens.
+Invalid email / phone
+Enter a valid Email Address. / Enter a valid Phone Number.
+Country blank / too long
+Enter Country. / Country must be 80 characters or fewer.
+Invalid Status / Payment Terms
+Select a valid Status. / Select valid Payment Terms.
+Balance supplied by caller
+Amount Customer Owes Us is calculated and cannot be edited.
+Customer balance example
+Submit an Invoice for 1,000.00: Customer owes 1,000.00. Record payment of 300.00: Customer owes 700.00. Record
+another 700.00: Customer owes 0.00. This total combines all of that Customer's submitted unpaid or partly paid
+invoices; it is not a payment field.
+Mini ERP | OE API v6
+4 / 11
+Mini ERP | OE API v6.1
+4 / 13
+
+PAGE 5
+API-03 to 06 | Common document fields
+These business fields apply to Sales Quote, Sales Order, Shipper and Sales Invoice unless a later page specifies an
+exception.
+Field label
+Business type
+Limit / format
+Required
+Rule / description
+Document number
+System text
+20 characters
+Auto
+Use type-specific labels: Sales Quote Number, Sales
+Order Number, Shipper Number, Sales Invoice Number.
+Customer
+Dropdown
+reference
+Customer ID: 20
+chars
+Yes
+Active Customer; copied read-only when Source is
+selected.
+Warehouse
+Dropdown
+reference
+Warehouse ID: 20
+chars
+Yes
+Active available Inventory Warehouse. One Warehouse
+applies to every line; copy and lock when linked.
+Document date
+Date
+YYYY-MM-DD
+Yes
+Use Quote Date / Order Date / Shipment Date / Invoice
+Date; default current business date.
+Document Status
+System choice
+Draft / Submitted
+Auto
+Change through authorized actions only.
+Notes
+Long text
+500 characters
+No
+Optional transaction notes.
+Item
+Dropdown
+reference
+Item Code: 30 chars
+Yes / line
+Active Inventory Item; copy description on selection.
+Description
+Text
+200 characters
+Yes / line
+Copied or entered item description.
+Quantity
+Decimal
+9 whole + 3
+decimals
+Yes / line
+Must be greater than 0.
+Unit Price
+Money
+10 whole + 2
+decimals
+Yes / line
+0 or greater.
+Line Amount
+Calculated
+money
+16 whole + 2
+decimals
+Auto
+Quantity x Unit Price, rounded half up to 2 decimals.
+Document Total
+Calculated
+money
+16 whole + 2
+decimals
+Auto
+Sum rounded Line Amounts; at least one line required.
+Do not accept caller edits to calculated totals or status. For linked documents, copy and preserve Customer,
+Warehouse and lines from the source; reject mismatches. Use the current user's company for every lookup.
+Mini ERP | OE API v6
+5 / 11
+Mini ERP | OE API v6.1
+5 / 13
+
+PAGE 6
+API-03 to 06 | Line-entry behavior
+Shared acceptance criteria for the lines within Sales Quote, Sales Order, Shipper and Sales Invoice APIs.
+As an OE user, I can add, read, update and remove item lines on an editable standalone Draft, so that the document
+contains the correct items, quantities and prices. These requirements are part of API-03 through API-06, not a separate
+Inventory feature.
+Simple API contract
+Handle lines within the parent document create/read/update calls. A separate line endpoint is not required for this
+release. The write request includes the complete intended line collection; the response returns saved lines, stable
+system line identifiers, display line numbers, calculated Line Amounts and Document Total. URL and storage design
+remain with the team.
+Operation
+Required behavior
+Create Draft with lines
+Accept Customer, Warehouse and header fields with at least one valid item line. Generate document and
+line identifiers. Save headers and all lines together or save nothing.
+Read document
+Return all lines in display order with identifier, line number, Item, Description, Quantity, Unit Price, inherited
+Warehouse and calculated Line Amount. Return Document Total.
+Add a line
+On an editable standalone Draft, include a new line without a saved line identifier. Assign its identifier on
+save; validate and recalculate amounts.
+Update a line
+Include the existing line identifier with changed values. It must belong to this document. Revalidate changed
+Item, Description, Quantity and Unit Price.
+Remove a line
+Omit that saved line identifier from the complete submitted collection. Remove it only when the document is
+an editable standalone Draft. At least one valid line must remain.
+Recalculate
+After each successful write, calculate each Line Amount = Quantity x Unit Price, rounded half up to 2
+decimals. Total = sum of rounded line amounts. Return the saved values.
+Acceptance criteria
+1. Blank Source permits manual line entry. Source-selected documents copy all source lines and keep them read-only;
+do not allow line additions, changes or removals while the source link is retained.
+2. Submitted documents reject all line modifications. They must first pass the existing Move to Draft rules; a retained
+source link still locks inherited lines.
+3. Line removal changes an item row only; it is separate from deleting a document. No document Delete action appears
+inside a form.
+4. Save or Submit validates all lines on the server, including when UI checks are bypassed. Do not change totals,
+source reservations, status or Customer balance if any line fails.
+Mini ERP | OE API v6.1
+6 / 13
+
+PAGE 7
+Line validation | API acceptance tests
+Apply to every relevant document create, update and submit request. Existing business field limits continue to apply.
+Rule / test
+Expected result / message
+Missing or empty line collection
+Reject: Add at least one item line. A request using the complete-collection contract must explicitly
+include its intended lines.
+Unknown / duplicate saved line
+identifier
+Reject: Line {n}: Select a valid line belonging to this document. / Line {n}: Duplicate line identifier.
+Item missing / inactive / unavailable
+Reject: Line {n}: Select an active Item available to your company. Item Code reference is at most
+30 characters.
+Description blank / overlength
+Reject: Line {n}: Enter Description. / Line {n}: Description must be 200 characters or fewer.
+Quantity invalid
+Reject blank, nonnumeric, zero, negative, more than 9 whole digits or more than 3 decimals: Line
+{n}: Enter Quantity greater than 0, with up to 9 whole digits and 3 decimal places.
+Unit Price invalid
+Reject blank, nonnumeric, negative, more than 10 whole digits or more than 2 decimals: Line {n}:
+Enter Unit Price of 0 or more, with up to 10 whole digits and 2 decimal places. Zero is allowed.
+Line Warehouse differs from header
+Reject: Line {n}: Warehouse must match the document Warehouse. Derive Warehouse from the
+header; it is not independently editable per line.
+Caller changes calculated amounts
+Do not accept caller edits: Line {n}: Line Amount is calculated and cannot be edited. / Document
+Total is calculated and cannot be edited.
+Calculated line / total exceeds
+capacity
+Reject: {Line Amount / Document Total} exceeds the allowed numeric limit. Maximum 16 whole
+digits and 2 decimal places.
+Edit copied source lines
+Reject: Source-linked lines cannot be added, changed or removed.
+Edit Submitted lines
+Reject: Only Draft documents can be edited.
+Two users edit the same Draft
+Reject a stale revision without overwriting newer lines: This document has changed. Refresh and
+try again.
+QA examples - each of the four document types
+1. Create with two lines: Quantity 2 x Unit Price 125.50 = 251.00; Quantity 1.250 x Unit Price 10.00 = 12.50. Expect
+Total 263.50.
+2. Update first Quantity to 3: expect first Line Amount 376.50 and Total 389.00. Remove the second line: expect Total
+376.50. Removing the last line must fail.
+3. Submit a request with one valid line and one invalid line: nothing is saved. Test excess precision, blank Description,
+foreign line identifier, Warehouse mismatch and stale revision.
+4. Verify copied source lines and Submitted lines cannot be changed. Invoice Total must be greater than 0 before
+Invoice submission; line edits never record a payment or change Customer balance.
+These tests add explicit line-operation coverage. Source optionality, full source copying, document permissions, partial
+payments and all other v6 requirements remain applicable. UI implementation consumes the same parent-document
+line contract; the approved mockups remain valid.
+Mini ERP | OE API v6.1
+7 / 13
+
+PAGE 8
+Optional Source | Same simple rule
+Sales Quote has no Source. Sales Order, Shipper and Sales Invoice can be linked or standalone.
+Field label
+Business type
+Limit / format
+Required
+Rule / description
+Source Sales Quote
+Number
+Dropdown
+reference
+20 characters
+No /
+Order
+Only eligible Submitted Sales Quotes.
+Source Sales Order
+Number
+Dropdown
+reference
+20 characters
+No /
+Shipper
+Only eligible Submitted Sales Orders.
+Source Shipper Number
+Dropdown
+reference
+20 characters
+No /
+Invoice
+Only eligible Submitted Shippers.
+Source selected
+1. Offer only a Submitted previous document in the same company that the user can read and that is not already used
+by another downstream record. This release uses one full downstream document per source; partial payments do not
+introduce split shipments or split invoices.
+2. Copy Customer, Warehouse and all lines; save the source number for traceability. Inherited values remain read-only.
+3. Recheck source availability on save and submission. A saved downstream Draft reserves its source. Deleting that
+Draft releases the reservation. Prevent two users from reserving one source at once.
+Source blank
+1. Allow a standalone document. User enters Customer, Warehouse, dates and at least one valid item line. No
+upstream document is required.
+2. Invoice submission, payment validation, payment stamps and Customer balance logic work identically with or without
+Source.
+3. Before submission, changing/clearing Source requires confirmation to replace inherited details. Revalidate the
+resulting Draft and release/claim source references atomically. Submitted documents cannot change Source.
+Workflow, top to bottom
+Sales Quote
+¯
+ optional source for
+Sales Order
+¯
+ optional source for
+Shipper (Submitted = dispatch confirmed by authorized user)
+¯
+ optional source for
+Sales Invoice
+¯
+Customer payment
+Mini ERP | OE API v6
+6 / 11
+Mini ERP | OE API v6.1
+8 / 13
+
+PAGE 9
+API-03 / 04 | Quote and Sales Order
+As an OE user, I can prepare a quote and then create a linked or standalone Sales Order.
+Field label
+Business type
+Limit / format
+Required
+Rule / description
+Quote Date
+Date
+YYYY-MM-DD
+Yes /
+Quote
+Default current business date.
+Valid Until
+Date
+YYYY-MM-DD
+No /
+Quote
+On or after Quote Date.
+Order Date
+Date
+YYYY-MM-DD
+Yes /
+Order
+Default current business date; on or after linked Quote
+Date.
+Requested Delivery Date
+Date
+YYYY-MM-DD
+No
+On or after document date.
+Customer PO Number
+Text
+30 characters
+No /
+Order
+Customer reference.
+Shipping Address
+Text
+500 characters
+Yes
+Default Customer billing address; editable when
+standalone.
+Payment Terms
+Choice
+Due on receipt / Net
+15 / Net 30
+Yes
+Default from Customer; copy when linked.
+API-03 - Sales Quote acceptance
+1. Create as Draft; read/list, save changes and submit to Submitted. Quote has no Source field.
+2. Create a Sales Order from an eligible Submitted Quote or leave Source blank for a standalone Order.
+3. Return a Submitted Quote to Draft only if no Order uses it, including Draft Orders. Delete an unreferenced Draft only
+from list action.
+API-04 - Sales Order acceptance
+1. Create as Draft with optional Source Sales Quote Number. Copied fields are read-only; standalone fields are
+editable.
+2. Submission changes only document status to Submitted. It makes the Order eligible for a Shipper; there is no
+Pending or Shipped document status.
+3. Block Move to Draft if any Shipper uses the Order. A downstream Draft counts as usage.
+Mini ERP | OE API v6
+7 / 11
+Mini ERP | OE API v6.1
+9 / 13
+
+PAGE 10
+API-05 / 06 | Shipper and Invoice
+As an authorized user, I can confirm dispatch and issue an Invoice, with or without an upstream source.
+Field label
+Business type
+Limit / format
+Required
+Rule / description
+Shipment Date
+Date
+YYYY-MM-DD
+Yes /
+Shipper
+Not in the future; on/after source Order Date when
+linked.
+Shipping Address
+Text
+500 characters
+Yes /
+Shipper
+Default from source / Customer; editable standalone.
+Carrier
+Text
+100 characters
+On
+submit
+Transport provider; required before Shipper submission.
+Tracking Number
+Text
+50 characters
+No /
+Shipper
+Shipment reference.
+Invoice Date
+Date
+YYYY-MM-DD
+Yes /
+Invoice
+On/after linked Shipment Date; default current business
+date.
+Due Date
+Date
+YYYY-MM-DD
+Yes /
+Invoice
+Default from Payment Terms; on/after Invoice Date.
+Payment Terms
+Choice
+Due on receipt / Net
+15 / Net 30
+Yes /
+Invoice
+Copy from source or Customer; derive Due Date.
+API-05 - Shipper acceptance
+1. Create standalone or select a Submitted Sales Order. Save Draft; authorized dispatch action is labeled Save as
+Submitted.
+2. Submitted means dispatch has been confirmed. Do not create a Shipped document status or require a source Order.
+3. Carrier is required before Shipper submission: Enter Carrier before submitting the Shipper. Do not implement
+Inventory stock changes here. Coordinate dispatch authorization with Logistics. A linked Order remains Submitted.
+4. Block Move to Draft when any Invoice uses the Shipper as source, including a Draft Invoice.
+API-06 - Sales Invoice acceptance
+1. Create standalone or select a Submitted Shipper. Draft has no populated payment status and no payment entry.
+2. Require Invoice Total greater than 0 before submission. Submit once: add Invoice Total once to Customer balance
+and set payment status Unpaid. Reject zero or negative totals with Invoice Total must be greater than 0.
+3. Allow Move to Draft only if no downstream reference and no payment exists. Remove its unpaid balance contribution
+once and clear payment status in the same operation. Resubmission adds the total once again.
+4. Record-payment action leaves document status Submitted; paid is a payment status only.
+Mini ERP | OE API v6
+8 / 11
+Mini ERP | OE API v6.1
+10 / 13
+
+PAGE 11
+API-07 | Record Customer payment
+As an OE user, I can record partial or full payments from a Submitted Invoice and see what remains due.
+Field label
+Business type
+Limit / format
+Required
+Rule / description
+Invoice Total
+Calculated
+money
+16 whole + 2
+decimals
+Auto
+Read-only sum of Invoice lines.
+Total Paid
+Calculated
+money
+16 whole + 2
+decimals
+Auto
+Sum successful recorded payments; starts at 0.00.
+Amount Due
+Calculated
+money
+16 whole + 2
+decimals
+Auto
+Invoice Total minus Total Paid.
+Payment Status
+System choice
+Unpaid / Partially
+Paid / Paid
+Auto
+Populated only on Submitted Invoice; not directly
+editable.
+Payment Amount
+Money
+16 whole + 2
+decimals
+Yes /
+payment
+Editable new payment; strictly greater than 0 and at
+most current Amount Due.
+Payment Date
+Date
+YYYY-MM-DD
+Yes /
+payment
+On/after Invoice Date; not in future.
+Payment Reference
+Text
+50 characters
+Yes /
+payment
+Receipt, transfer or payment reference.
+Payment Number
+System text
+20 characters
+Auto
+Unique read-only identifier per recorded payment.
+1. Invoice 1,000.00, Total Paid 300.00, Amount Due 700.00: next payment may be any valid amount greater than 0 up
+to 700.00. A payment of 800.00 is rejected even though below Invoice Total.
+2. After payment, recalculate Total Paid and Amount Due and reduce Customer balance by the actual payment exactly
+once. Unpaid: paid = 0 and due > 0. Partially Paid: paid > 0 and due > 0. Paid: due = 0.
+3. Keep each payment in read-only history. No payment update/delete. Disable new payment once Paid. Repeated
+requests with the same request identifier return the same result, without another payment.
+4. Recheck the remaining due on the server in the same transaction as recording payment. Concurrent payments must
+never overpay or make Amount Due negative.
+5. Identical rules apply to source-linked and standalone Invoices. Amount Due is calculated by the server; do not trust
+the browser value.
+Mini ERP | OE API v6
+9 / 11
+Mini ERP | OE API v6.1
+11 / 13
+
+PAGE 12
+Validation messages | Every API
+Return field label and a clear message. The UI shows the same text beside the field or in the action error banner.
+When invalid
+Exact message
+Missing required field / line
+Enter {Field label}. / Add at least one item line.
+Invalid dropdown
+Select a valid {Field label} available to your company.
+Inactive reference
+Selected {Customer / Item / Warehouse} is inactive. Select an active record.
+Source no longer eligible
+Selected source is no longer available. Refresh and select another source, or leave Source blank.
+Copied value changed
+{Field label} must match the source document.
+Invalid date / sequence
+Enter a valid {Date label} in YYYY-MM-DD format. / {Date label} must be on or after {Earlier date
+label}.
+Future Shipment / Payment Date
+{Date label} cannot be in the future.
+Quantity invalid
+Line {n}: Enter Quantity greater than 0, with up to 3 decimal places.
+Unit Price invalid
+Line {n}: Enter Unit Price of 0 or more, with up to 2 decimal places.
+Text or number too large
+{Field label} must be {limit} characters or fewer. / {Field label} exceeds the allowed numeric limit.
+Submitted edit attempt
+Only Draft documents can be edited.
+Direct status update
+Use the available action to change Document Status.
+Blocked return to Draft
+Cannot move to Draft: this document is used as a source by {Document number}.
+Invoice has payment
+Cannot move to Draft: a payment has been recorded for this Invoice.
+Delete disallowed
+Only Draft documents with no downstream documents can be deleted.
+Insufficient permission
+You do not have permission to perform this action.
+Mini ERP | OE API v6
+10 / 11
+Mini ERP | OE API v6.1
+12 / 13
+
+PAGE 13
+Payment errors and API handoff
+Keep error behavior consistent for standalone and source-linked Invoices.
+When invalid
+Exact message
+Payment on Draft Invoice
+Submit the Invoice before recording a payment.
+Missing / nonnumeric amount
+Enter Payment Amount. / Enter a valid Payment Amount.
+Zero or negative amount
+Payment Amount must be greater than 0.
+Too many decimals
+Payment Amount can have at most 2 decimal places.
+Exceeds current due
+Payment Amount cannot exceed Amount Due ({current amount due}).
+Paid Invoice
+This Invoice is fully paid. No further payment can be recorded.
+Concurrent change
+Amount Due has changed to {current amount due}. Review the amount and try again.
+Missing reference / excess length
+Enter Payment Reference. / Payment Reference must be 50 characters or fewer.
+Date too early / future
+Payment Date must be on or after Invoice Date. / Payment Date cannot be in the future.
+Capabilities to expose - URL design remains with the team
+Customer create/list/get/update/status; document list/get/create-Draft/update-Draft/delete-eligible-Draft; submit;
+move-to-Draft; eligible-source lookup by document type; Customer / Item / Warehouse dropdown reads; create/list
+Invoice payments. Return saved number, current status, calculated totals, available actions and revision information.
+All Documents list accepts type, Customer, date range, Warehouse, document status and Invoice payment status
+filters. Combine filters. Invoice payment-status filters return Submitted Invoices only. Invalid date ranges return From
+Date must be on or before To Date.
+QA minimum checks
+1. For each type: new Draft, edit Draft, submit, denied direct edit, allowed return to Draft and blocked return with a
+downstream Draft.
+2. For Order, Shipper and Invoice: test optional Source both blank and selected, source-copy locks, invalid source and
+concurrent source use.
+3. Invoice 1,000.00: pay 300.00, reject 800.00, accept 700.00; balance and stamps correct. Repeat with and without
+Source.
+4. Test zero / negative / excess precision amount, Draft payment, duplicate request and simultaneous payments. No
+duplicate balance changes.
+5. Test permissions, Customer Country text, required/length/date/reference errors, no form Delete buttons and
+consistent filter results.
+Mini ERP | OE API v6
+11 / 11
+Mini ERP | OE API v6.1
+13 / 13

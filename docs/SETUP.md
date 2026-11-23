@@ -102,6 +102,18 @@ php bin/console.php migrate
 
 Expected first run: `Oracle connection OK. Schema: ...`, then `Applied: 001_foundation.php, 002_company_permissions.php, 003_multi_tenancy.php, 004_api_tokens.php`. Repeating unchanged completed migrations reports no pending shared migrations.
 
+### Include Sales migrations
+
+The default `migrate` command applies Shared migrations only. To prepare the Customer API, deploy the Sales migration files and run:
+
+```bash
+php bin/console.php migrate --module=sales --confirm-schema=YOUR_TEST_SCHEMA
+```
+
+Replace `YOUR_TEST_SCHEMA` with the intended configured Oracle schema. The command verifies that target, applies pending Shared migrations first, then runs `database/migrations/sales/` in filename order: `001_oe_permissions.php`, then `002_oe_customers.php`. Sales does not start if Shared migration validation or execution fails. `--module=shared` explicitly selects the default behavior; other module names are rejected.
+
+Each component is tracked separately in `ME_MIGRATIONS`. Repeating the command skips unchanged completed migrations and reports `No pending shared migrations.` / `No pending sales migrations.` Changed, removed or incomplete migrations stop execution and require the recovery procedure below. Do not run migrations concurrently. This command prepares schema and permission registrations; it does not prove that the Customer API is deployed or passes Oracle acceptance.
+
 If the company already exists, you should get a message confirming the same.
 
 Before upgrading an existing installation, back up data, stop application traffic and apply the pending tenant migration `003_multi_tenancy.php`. Sign in again afterward. On any failed/incomplete migration, stop and follow [migration failure guidance](#migration-failure), not a blind retry.

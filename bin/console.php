@@ -16,12 +16,30 @@ try {
     }
     $command = $argv[1] ?? 'help';
     if ($command === 'help') {
-        echo "Commands: doctor [--offline], migrate, bootstrap, seed, company:create CODE [NAME]\n";
+        echo "Commands: doctor [--offline], migrate [--module=shared|sales], bootstrap, seed, company:create CODE [NAME]\n";
+        echo "Migrations default to Shared only; --module=sales applies Shared before Sales.\n";
         echo "Write commands use the configured Oracle connection; --confirm-schema=NAME is optional.\n";
         exit(0);
     }
     if (!in_array($command, ['doctor', 'migrate', 'bootstrap', 'seed', 'company:create'], true)) {
         throw new InvalidArgumentException('Unknown command.');
+    }
+    $migrationModule = 'shared';
+    if ($command === 'migrate') {
+        $moduleProvided = false;
+        foreach (array_slice($argv, 2) as $argument) {
+            if (str_starts_with($argument, '--confirm-schema=')) {
+                continue;
+            }
+            if (!str_starts_with($argument, '--module=') || $moduleProvided) {
+                throw new InvalidArgumentException('Usage: migrate [--module=shared|sales] [--confirm-schema=NAME]');
+            }
+            $migrationModule = substr($argument, strlen('--module='));
+            if (!in_array($migrationModule, ['shared', 'sales'], true)) {
+                throw new InvalidArgumentException('Migration module must be shared or sales.');
+            }
+            $moduleProvided = true;
+        }
     }
     if ($command === 'doctor' && in_array('--offline', $argv, true)) {
         echo "PHP 8.4 and Composer bootstrap OK. Offline only: Oracle, migrations and login NOT VERIFIED.\n";
@@ -49,8 +67,13 @@ try {
     }
     echo 'Oracle connection OK. Schema: ' . $schema . "\n";
     if ($command === 'migrate') {
-        $completed = (new MigrationRunner($connection))->apply(dirname(__DIR__) . '/database/migrations/shared');
-        echo $completed === [] ? "No pending shared migrations.\n" : 'Applied: ' . implode(', ', $completed) . "\n";
+        $runner = new MigrationRunner($connection);
+        $components = $migrationModule === 'sales' ? ['shared', 'sales'] : ['shared'];
+        foreach ($components as $component) {
+            $completed = $runner->apply(dirname(__DIR__) . '/database/migrations/' . $component);
+            $label = $component === 'shared' ? 'Applied: ' : 'Applied sales migrations: ';
+            echo $completed === [] ? "No pending $component migrations.\n" : $label . implode(', ', $completed) . "\n";
+        }
     } elseif ($command === 'bootstrap' || $command === 'company:create') {
         $username = $_ENV['BOOTSTRAP_ADMIN_USER'] ?? getenv('BOOTSTRAP_ADMIN_USER');
         $password = $_ENV['BOOTSTRAP_ADMIN_PASSWORD'] ?? getenv('BOOTSTRAP_ADMIN_PASSWORD');

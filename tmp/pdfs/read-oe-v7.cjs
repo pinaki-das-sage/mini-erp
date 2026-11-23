@@ -1,0 +1,9 @@
+const fs=require('fs'),zlib=require('zlib');
+const input=process.argv[2] || 'C:/Users/sakhadka/Downloads/order_entry_oe_api_priorities_and_stories_v7_1.pdf';
+const raw=fs.readFileSync(input).toString('latin1');
+const objs=new Map([...raw.matchAll(/(\d+) 0 obj\s*([\s\S]*?)endobj/g)].map(m=>[+m[1],m[2]]));
+function stream(id){const body=objs.get(id)||'',m=/stream\r?\n/.exec(body);if(!m)return '';let b=Buffer.from(body.slice(m.index+m[0].length,body.lastIndexOf('endstream')),'latin1');if(body.includes('/FlateDecode'))b=zlib.inflateSync(b);return b.toString('latin1');}
+function strings(s){const result=[];for(let i=0;i<s.length;i++){if(s[i]!=='(')continue;let t='',depth=1;for(i++;i<s.length&&depth;i++){const ch=s[i];if(ch==='\\'){const n=s[++i];if(/[0-7]/.test(n)){let oct=n;for(let j=0;j<2&&/[0-7]/.test(s[i+1]);j++)oct+=s[++i];t+=String.fromCharCode(parseInt(oct,8));}else if(n==='\r'||n==='\n'){if(n==='\r'&&s[i+1]==='\n')i++;}else t+=({n:'\n',r:'\r',t:'\t',b:'\b',f:'\f'})[n]??n;}else if(ch==='('){depth++;t+=ch;}else if(ch===')'){if(--depth)t+=ch;}else t+=ch;}i--;result.push(new TextDecoder('windows-1252').decode(Buffer.from(t,'latin1')));}return result;}
+const pages=[];
+for(const [id,body]of objs){if(!/\/Type\s*\/Page\b/.test(body))continue;const ref=/\/Contents\s+(\d+) 0 R/.exec(body);if(!ref)throw Error('Missing contents '+id);let ids=[+ref[1]];if(!objs.get(ids[0]).includes('stream'))ids=[...objs.get(ids[0]).matchAll(/(\d+) 0 R/g)].map(m=>+m[1]);const lines=[];for(const cid of ids){const t=stream(cid);for(const bt of t.matchAll(/\bBT\b([\s\S]*?)\bET\b/g))lines.push(...strings(bt[1]));}pages.push('PAGE '+(pages.length+1)+'\n'+lines.join('\n'));}
+fs.writeFileSync(process.argv[3] || 'tmp/pdfs/oe-v7-reference.txt',pages.join('\n\n'));console.log(JSON.stringify({pages:pages.length,characters:pages.join('').length,output:'tmp/pdfs/oe-v7-reference.txt'}));
