@@ -1,0 +1,51 @@
+meta {
+  name: Update selected lead
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{base_url}}/api/v1/sales/leads/{{target_lead_id}}
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{access_token}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "status": "contacted",
+    "notes": "Synthetic follow-up",
+    "expected_version": {{?Current lead version}},
+    "action_reference": "{{?Action reference (reuse unchanged for retry)}}"
+  }
+}
+
+script:pre-request {
+  if (!/^[a-f0-9]{64}$/.test(bru.getVar("access_token") || "")) {
+    throw new Error("Run Login with Leads update permission first.");
+  }
+  const id = bru.getVar("target_lead_id") ?? bru.getEnvVar("target_lead_id");
+  if (typeof id !== "string" || !/^[a-f0-9]{32}$/.test(id)) {
+    throw new Error("Create a test lead or explicitly set target_lead_id from List leads.");
+  }
+}
+
+tests {
+  test("Updates the selected lead", function () {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().success).to.equal(true);
+    expect(Number.isInteger(res.getBody().result.current_version)).to.equal(true);
+  });
+}
+
+docs {
+  Requires sales.leads:update. Confirm target_lead_id and read its latest version first.
+  PATCH changes supplied fields only; blank optional fields clear them. Archived leads cannot be edited.
+  Enter the version as an unquoted positive integer. Use a new action reference for a new edit.
+  Retry uncertain requests with the original version, reference and body unchanged.
+}

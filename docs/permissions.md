@@ -46,12 +46,16 @@ return [
 Use lowercase, stable codes. CRUD flags default to zero, so list only supported operations. `ACTIVE` defaults to one. Adding the row automatically exposes those operations in the admin's permission editor; existing non-admin users do not automatically gain access.
 
 `php bin/console.php migrate` discovers all ordered `NNN-component` folders
-under `database/migrations/`: currently `001-shared`.
+under `database/migrations/`: currently `001-shared`, then `002-sales`.
 Add a unique numbered module folder and migration files; no CLI edit is needed.
 The prefix orders execution, while the suffix remains the stable ledger
-component (`shared`, `inventory`, etc.). Optional `migrate shared` targets just that
+component (`shared`, `sales`, etc.). Optional `migrate sales` targets just that
 component without applying prerequisites. Agree module/integration ordering
 with the foundation maintainer; see [setup](./SETUP.md#5-apply-migrations-to-the-approved-lab-schema).
+
+The [Leads blueprint](./entity-blueprint.md) registers `sales.leads` create/read/update
+and separate archive/restore actions, without delete. These appear automatically
+under Sales in the permission editor. No non-admin grants are seeded.
 
 For an additional business action, add a row:
 

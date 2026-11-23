@@ -3,12 +3,14 @@ declare(strict_types=1);
 
 namespace MiniErp\shared;
 
+use MiniErp\sales\LeadService;
 use MiniErp\shared\database\Connection;
 use MiniErp\shared\database\DatabaseError;
 use MiniErp\shared\database\MigrationRunner;
 use MiniErp\shared\database\OciConnection;
 use MiniErp\shared\security\Actor;
 use MiniErp\shared\security\AuthService;
+use MiniErp\shared\security\Authorization;
 use MiniErp\shared\security\Security;
 use MiniErp\shared\security\UserService;
 use MiniErp\shared\view\Renderer;
@@ -85,7 +87,12 @@ final class Kernel
                 return $this->page('shared/security/login.tpl', 'Sign in to Mini ERP');
             }
             if ($method === 'GET' && preg_match('#^/modules/(inventory|purchasing|sales|logistics)$#', $path, $match)) {
-                return $this->page($match[1] . '/index.tpl', ucfirst($match[1]), ['module' => $match[1], 'actor' => $this->actor()]);
+                $actor = $this->actor();
+                return $this->page($match[1] . '/index.tpl', ucfirst($match[1]), ['module' => $match[1], 'actor' => $actor,
+                    ...($match[1] === 'sales' ? ['leadPermissions' => $this->leadPermissions($actor)] : [])]);
+            }
+            if ($path === '/sales/leads' || str_starts_with($path, '/sales/leads/') || $path === '/api/sales/leads') {
+                return $this->leads($method, $path, $input, $headers, $query);
             }
             if ($method === 'GET' && $path === '/login') {
                 return $this->page('shared/security/login.tpl', 'Sign in to Mini ERP');
@@ -245,6 +252,82 @@ final class Kernel
             return $this->json(200, ['success' => true, 'result' => ['id' => $id], 'error' => null]);
         }
         throw new AppError('NOT_FOUND', 'Settings operation not found.', 404);
+    }
+
+    private function leadPermissions(Actor $actor): array
+    {
+        $grants = array_fill_keys((new Authorization($this->db()))->permissions($actor), true);
+        $permissions = [];
+        foreach (['read', 'create', 'update', 'archive', 'restore'] as $operation) {
+            $permissions[$operation] = isset($grants['sales.leads:' . $operation]);
+        }
+        return $permissions;
+    }
+
+    private function leads(string $method, string $path, array $input, array $headers, array $query): array
+    {
+        $actor = $this->actor();
+        $service = new LeadService($this->db());
+        if ($method === 'POST' && $path === '/api/sales/leads') {
+            Security::verifyCsrf($this->session, $headers['x-csrf-token'] ?? null);
+            if (strtolower(trim(explode(';', $headers['content-type'] ?? '')[0])) !== 'application/json') {
+                throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'Lead forms require JavaScript and JSON requests.', 415);
+            }
+            $operation = Api::string($input, 'operation');
+            unset($input['operation']);
+            if ($operation === 'create') {
+                $result = $service->create($actor, $input);
+            } elseif (in_array($operation, ['update', 'archive', 'restore'], true)) {
+                $id = Api::string($input, 'id');
+                unset($input['id']);
+                $result = $service->$operation($actor, $id, $input);
+            } else {
+                throw new AppError('VALIDATION_ERROR', 'Unknown lead operation.');
+            }
+            return $this->json($operation === 'create' ? 201 : 200, ['success' => true,
+                'operation_id' => $input['action_reference'], 'current_version' => $result['current_version'], 'result' => $result, 'error' => null]);
+        }
+        if ($method !== 'GET' || $path === '/api/sales/leads') {
+            throw new AppError('NOT_FOUND', 'Lead page or operation not found.', 404);
+        }
+        $data = ['actor' => $actor, 'leadPermissions' => $this->leadPermissions($actor),
+            'sources' => LeadService::SOURCES, 'statuses' => LeadService::STATUSES,
+            'actionReference' => bin2hex(random_bytes(16))];
+        if ($path === '/sales/leads') {
+            $result = $service->list($actor, $query);
+            foreach ($result['items'] as &$lead) {
+                $lead['url'] = $this->paths->url('/sales/leads/' . $lead['id']);
+            }
+            unset($lead);
+            $page = $result['page'];
+            $link = fn (int $number): string => $this->paths->url('/sales/leads') . '?' . http_build_query(array_replace($query, ['page' => $number]));
+            return $this->page('sales/leads/list.tpl', 'Leads', $data + $result + [
+                'filters' => ['search' => '', 'source' => '', 'status' => '', 'archived' => 'false', ...$query],
+                'previousUrl' => $page > 1 ? $link($page - 1) : '',
+                'nextUrl' => count($result['items']) === $result['page_size'] && $page < 1000000 ? $link($page + 1) : '',
+            ]);
+        }
+        if ($path === '/sales/leads/new') {
+            (new Authorization($this->db()))->requirePermission($actor, 'sales.leads', 'create');
+            return $this->page('sales/leads/form.tpl', 'Create lead', $data + [
+                'operation' => 'create', 'lead' => ['contact_name' => '', 'business_name' => '', 'email' => '',
+                    'phone' => '', 'source' => 'other', 'status' => 'new', 'notes' => ''],
+            ]);
+        }
+        if (preg_match('#\A/sales/leads/([a-f0-9]{32})(/edit)?\z#', $path, $match)) {
+            $lead = $service->detail($actor, $match[1]);
+            $data += ['lead' => $lead, 'detailUrl' => $this->paths->url('/sales/leads/' . $lead['id']),
+                'editUrl' => $this->paths->url('/sales/leads/' . $lead['id'] . '/edit')];
+            if (isset($match[2])) {
+                (new Authorization($this->db()))->requirePermission($actor, 'sales.leads', 'update');
+                if ($lead['archived']) {
+                    throw new AppError('INVALID_STATE', 'Restore the lead before editing.', 409);
+                }
+                return $this->page('sales/leads/form.tpl', 'Edit lead', $data + ['operation' => 'update']);
+            }
+            return $this->page('sales/leads/detail.tpl', 'Lead ' . $lead['lead_reference'], $data);
+        }
+        throw new AppError('NOT_FOUND', 'Lead page not found.', 404);
     }
 
     private function boolInput(array $input, string $key): bool

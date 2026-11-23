@@ -1,0 +1,62 @@
+meta {
+  name: Create test lead
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/v1/sales/leads
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{access_token}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "contact_name": "Alex Smith",
+    "business_name": "Example Distribution",
+    "email": "alex@example.test",
+    "phone": "+44 00123",
+    "source": "website",
+    "status": "new",
+    "notes": "Synthetic training lead",
+    "action_reference": "{{?Action reference (reuse unchanged for retry)}}"
+  }
+}
+
+script:pre-request {
+  if (!/^[a-f0-9]{64}$/.test(bru.getVar("access_token") || "")) {
+    throw new Error("Run Login with Leads create permission first.");
+  }
+}
+
+script:post-response {
+  const body = res.getBody();
+  if (res.getStatus() === 201 && body && body.success === true) {
+    const id = body.result && body.result.id;
+    if (typeof id !== "string" || !/^[a-f0-9]{32}$/.test(id)) {
+      throw new Error("Create did not return a valid lead ID.");
+    }
+    bru.setVar("target_lead_id", id);
+  }
+}
+
+tests {
+  test("Creates a test lead", function () {
+    expect(res.getStatus()).to.equal(201);
+    expect(res.getBody().success).to.equal(true);
+    expect(res.getBody().result.current_version).to.equal(1);
+  });
+}
+
+docs {
+  Writes real data. Use only an approved sandbox and synthetic contact details.
+  Requires sales.leads:create, not administrator status.
+  Use a unique action reference for each new action; after an uncertain result reuse the same reference and body.
+  Success selects target_lead_id in runtime variables. A failed request leaves any previous selection unchanged.
+}

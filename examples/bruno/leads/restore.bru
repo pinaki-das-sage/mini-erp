@@ -1,0 +1,48 @@
+meta {
+  name: Restore selected lead
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/api/v1/sales/leads/{{target_lead_id}}/restore
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{access_token}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "expected_version": {{?Current lead version}},
+    "action_reference": "{{?Action reference (reuse unchanged for retry)}}"
+  }
+}
+
+script:pre-request {
+  if (!/^[a-f0-9]{64}$/.test(bru.getVar("access_token") || "")) {
+    throw new Error("Run Login with Leads restore permission first.");
+  }
+  const id = bru.getVar("target_lead_id") ?? bru.getEnvVar("target_lead_id");
+  if (typeof id !== "string" || !/^[a-f0-9]{32}$/.test(id)) {
+    throw new Error("Create a test lead or explicitly set target_lead_id from List leads.");
+  }
+}
+
+tests {
+  test("Restores the selected lead", function () {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().success).to.equal(true);
+    expect(Number.isInteger(res.getBody().result.current_version)).to.equal(true);
+  });
+}
+
+docs {
+  Requires sales.leads:restore. The selected lead must currently be archived.
+  Read its current version using Read selected lead. Restoring preserves the business status.
+  Retry an uncertain result with the original version, reference and body unchanged.
+}

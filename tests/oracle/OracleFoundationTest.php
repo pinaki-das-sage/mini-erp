@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace MiniErp\Tests\oracle;
 
+use MiniErp\sales\LeadService;
 use MiniErp\shared\AppError;
 use MiniErp\shared\Api;
 use MiniErp\shared\Config;
@@ -12,6 +13,7 @@ use MiniErp\shared\database\TransactionContext;
 use MiniErp\shared\database\TransactionManager;
 use MiniErp\shared\NeutralNote;
 use MiniErp\shared\security\AuthService;
+use MiniErp\shared\security\Actor;
 use MiniErp\shared\security\Authorization;
 use MiniErp\shared\security\CompanyBootstrap;
 use MiniErp\shared\security\UserService;
@@ -34,6 +36,85 @@ final class OracleFoundationTest extends TestCase
         }
         $this->connection = OciConnection::connect($this->config);
         self::assertSame(strtoupper($expected), $this->connection->query('SELECT USER AS SCHEMA_NAME FROM DUAL')[0]['SCHEMA_NAME']);
+    }
+
+    public function testLeadsPersistReplayArchiveRestoreAndRejectForeignCompanyAndLostUpdates(): void
+    {
+        $companyIds = [];
+        $userId = 'lead-test-' . bin2hex(random_bytes(8));
+        $manager = new TransactionManager($this->connection);
+        $service = new LeadService($this->connection);
+        try {
+            $manager->run(function (TransactionContext $tx) use (&$companyIds, $userId): void {
+                foreach ([1, 2] as $number) {
+                    $id = (int) $tx->query('SELECT ME_COMPANY_SEQ.NEXTVAL AS ID FROM DUAL')[0]['ID'];
+                    $companyIds[] = $id;
+                    $tx->execute("INSERT INTO ME_COMPANY (ID, CODE, NAME) VALUES (:id, :code, 'Lead test company')",
+                        ['id' => $id, 'code' => strtoupper($userId) . '-' . $number]);
+                    $tx->execute("INSERT INTO ME_USERS (COMPANY_ID, ID, USERNAME, DISPLAY_NAME, PASSWORD_HASH)
+                        VALUES (:company_id, :id, :username, 'Lead test user', :hash)",
+                        ['company_id' => $id, 'id' => $userId . '-' . $number, 'username' => $userId,
+                            'hash' => password_hash(bin2hex(random_bytes(16)), PASSWORD_DEFAULT)]);
+                }
+            });
+            $actor = new Actor($userId . '-1', $userId, [], $companyIds[0]);
+            try {
+                $service->create($actor, ['contact_name' => 'Denied', 'phone' => '123', 'action_reference' => 'denied']);
+                self::fail('New users must not have Leads access.');
+            } catch (AppError $error) {
+                self::assertSame('FORBIDDEN', $error->errorCode);
+            }
+            $manager->run(function (TransactionContext $tx) use ($actor): void {
+                foreach (['create', 'read', 'update', 'archive', 'restore'] as $operation) {
+                    $tx->execute("INSERT INTO ME_USER_PERMISSIONS (COMPANY_ID, USER_ID, OBJECT_CODE, OPERATION)
+                        VALUES (:company_id, :user_id, 'sales.leads', :operation)",
+                        ['company_id' => $actor->companyId, 'user_id' => $actor->id, 'operation' => $operation]);
+                }
+            });
+            $create = ['contact_name' => 'Alex', 'email' => 'alex@example.test', 'notes' => str_repeat("\u{1F642}", 1000), 'action_reference' => 'create'];
+            $lead = $service->create($actor, $create);
+            self::assertSame($lead, $service->create($actor, $create));
+            self::assertSame($create['notes'], $service->detail($actor, $lead['id'])['notes']);
+            $observer = new LeadService(OciConnection::connect($this->config));
+            self::assertSame(1, $observer->detail($actor, $lead['id'])['current_version']);
+            self::assertSame($lead['id'], $service->list($actor, ['search' => 'Alex'])['items'][0]['id']);
+            $service->update($actor, $lead['id'], ['status' => 'contacted', 'expected_version' => 1, 'action_reference' => 'update']);
+            try {
+                $service->update($actor, $lead['id'], ['status' => 'lost', 'expected_version' => 1, 'action_reference' => 'stale']);
+                self::fail('Stale edit must fail.');
+            } catch (AppError $error) {
+                self::assertSame('STALE_VERSION', $error->errorCode);
+            }
+            self::assertSame([], $this->connection->query("SELECT ACTION_REFERENCE FROM ME_ACTIONS WHERE COMPANY_ID = :company_id AND ACTION_REFERENCE = 'stale'",
+                ['company_id' => $actor->companyId]));
+            $service->archive($actor, $lead['id'], ['expected_version' => 2, 'action_reference' => 'archive']);
+            self::assertSame([], $service->list($actor)['items']);
+            self::assertTrue($service->detail($actor, $lead['id'])['archived']);
+            self::assertCount(1, $service->list($actor, ['archived' => 'true'])['items']);
+            $service->restore($actor, $lead['id'], ['expected_version' => 3, 'action_reference' => 'restore']);
+            self::assertFalse($observer->detail($actor, $lead['id'])['archived']);
+            self::assertSame(4, $observer->detail($actor, $lead['id'])['current_version']);
+            $foreign = new Actor($userId . '-2', $userId, [], $companyIds[1], true);
+            try {
+                $service->archive($foreign, $lead['id'], ['expected_version' => 4, 'action_reference' => 'foreign']);
+                self::fail('Even an administrator cannot mutate another company lead.');
+            } catch (AppError $error) {
+                self::assertSame('NOT_FOUND', $error->errorCode);
+            }
+            self::assertSame([], $service->list($foreign)['items']);
+            $events = $this->connection->query('SELECT EVENT_TYPE FROM ME_AUDIT WHERE COMPANY_ID = :company_id ORDER BY EVENT_TYPE',
+                ['company_id' => $actor->companyId]);
+            self::assertSame(['LEAD_ARCHIVE', 'LEAD_CREATE', 'LEAD_RESTORE', 'LEAD_UPDATE'], array_column($events, 'EVENT_TYPE'));
+        } finally {
+            $manager->run(function (TransactionContext $tx) use ($companyIds): void {
+                foreach ($companyIds as $companyId) {
+                    foreach (['ME_SAL_LEADS', 'ME_AUDIT', 'ME_ACTIONS', 'ME_USER_PERMISSIONS', 'ME_USERS'] as $table) {
+                        $tx->execute("DELETE FROM $table WHERE COMPANY_ID = :company_id", ['company_id' => $companyId]);
+                    }
+                    $tx->execute('DELETE FROM ME_COMPANY WHERE ID = :company_id', ['company_id' => $companyId]);
+                }
+            });
+        }
     }
 
     public function testTwoWritesCommitTogetherAndFailureRollsBothBack(): void

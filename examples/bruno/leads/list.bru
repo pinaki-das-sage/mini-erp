@@ -1,0 +1,36 @@
+meta {
+  name: List leads
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/v1/sales/leads?page=1&page_size=25&archived=false
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{access_token}}
+  Accept: application/json
+}
+
+script:pre-request {
+  if (!/^[a-f0-9]{64}$/.test(bru.getVar("access_token") || "")) {
+    throw new Error("Run Login with Leads read permission first.");
+  }
+}
+
+tests {
+  test("Lists a page of active leads", function () {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().success).to.equal(true);
+    expect(Array.isArray(res.getBody().result.items)).to.equal(true);
+  });
+}
+
+docs {
+  Requires sales.leads:read. Optional search, status and source filters are supported.
+  archived=false lists active leads; true lists archived leads; all lists both.
+  Select a test lead ID explicitly with target_lead_id before detail or write requests.
+}
