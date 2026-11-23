@@ -30,6 +30,7 @@ final readonly class NeutralNote
             throw new AppError('VALIDATION_ERROR', 'Text must contain 1-500 characters and version must be positive.');
         }
         (new Authorization($this->connection))->requirePermission($actor, 'shared.note', 'update');
+        $actor->requireRole('trainee');
         $executor = new ActionExecutor(new TransactionManager($this->connection));
         return $executor->run($actor, $reference, ['note_id' => 'welcome', 'text' => $text, 'expected_version' => $version],
             function (TransactionContext $tx) use ($actor, $text, $version): array {

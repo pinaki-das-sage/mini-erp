@@ -46,6 +46,14 @@ final class ConsoleTest extends TestCase
         self::assertSame('', $writes);
     }
 
+    public function testUnknownMigrationComponentFailsExplicitlyWithoutWrites(): void
+    {
+        [$status, , $error, $writes] = $this->runConsole('success', 'migrate', 'missing');
+        self::assertSame(1, $status);
+        self::assertStringContainsString('Unknown migration component', $error);
+        self::assertSame('', $writes);
+    }
+
     public function testBootstrapUsesDefaultCredentialsWithoutConfigurationOrSchemaArgument(): void
     {
         [$status, $output, $error, $writes] = $this->runConsole('success', 'bootstrap');

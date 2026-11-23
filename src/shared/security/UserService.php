@@ -19,7 +19,7 @@ final readonly class UserService
         if ($offset !== null && ($offset < 0 || $limit < 1 || $limit > 100)) {
             throw new AppError('VALIDATION_ERROR', 'Invalid user-list pagination.');
         }
-        $sql = 'SELECT ID, USERNAME, DISPLAY_NAME, IS_ADMIN, ACTIVE, VERSION FROM ME_USERS WHERE COMPANY_ID = :company_id ORDER BY USERNAME';
+        $sql = 'SELECT USER_ID AS ID, USERNAME, DISPLAY_NAME, IS_ADMIN, ACTIVE, VERSION FROM ME_USERS WHERE COMPANY_ID = :company_id ORDER BY USERNAME';
         $parameters = ['company_id' => $actor->companyId];
         if ($offset !== null) {
             $sql .= ' OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY';
@@ -31,7 +31,7 @@ final readonly class UserService
     public function detail(Actor $actor, string $id): array
     {
         $actor->requireAdmin();
-        $rows = $this->connection->query('SELECT ID, USERNAME, DISPLAY_NAME, IS_ADMIN, ACTIVE, VERSION FROM ME_USERS WHERE ID = :id AND COMPANY_ID = :company_id',
+        $rows = $this->connection->query('SELECT USER_ID AS ID, USERNAME, DISPLAY_NAME, IS_ADMIN, ACTIVE, VERSION FROM ME_USERS WHERE USER_ID = :id AND COMPANY_ID = :company_id',
             ['id' => $id, 'company_id' => $actor->companyId]);
         if ($rows === []) {
             throw new AppError('NOT_FOUND', 'User not found.', 404);
@@ -58,7 +58,7 @@ final readonly class UserService
             return $this->transaction($actor, function (TransactionContext $tx) use ($actor, $username, $name, $password, $admin): string {
                 $id = bin2hex(random_bytes(16));
                 $tx->execute(
-                    'INSERT INTO ME_USERS (ID, USERNAME, DISPLAY_NAME, PASSWORD_HASH, IS_ADMIN, MUST_CHANGE_PASSWORD, COMPANY_ID)
+                    'INSERT INTO ME_USERS (USER_ID, USERNAME, DISPLAY_NAME, PASSWORD_HASH, IS_ADMIN, MUST_CHANGE_PASSWORD, COMPANY_ID)
                      VALUES (:id, :username, :name, :hash, :admin, 1, :company_id)',
                     ['id' => $id, 'company_id' => $actor->companyId, 'username' => $username, 'name' => $name, 'hash' => password_hash($password, PASSWORD_DEFAULT), 'admin' => $admin ? 1 : 0],
                 );
@@ -89,7 +89,7 @@ final readonly class UserService
             }
             $tx->execute(
                 'UPDATE ME_USERS SET DISPLAY_NAME = :name, IS_ADMIN = :admin, ACTIVE = :active,
-                 VERSION = VERSION + 1, SECURITY_VERSION = SECURITY_VERSION + 1 WHERE ID = :id AND COMPANY_ID = :company_id',
+                 VERSION = VERSION + 1, SECURITY_VERSION = SECURITY_VERSION + 1 WHERE USER_ID = :id AND COMPANY_ID = :company_id',
                 ['id' => $id, 'company_id' => $actor->companyId, 'name' => $name, 'admin' => $admin ? 1 : 0, 'active' => $active ? 1 : 0],
             );
             $this->audit($tx, $actor, $id, 'USER_UPDATED', ['before' => $user, 'name' => $name, 'admin' => $admin, 'active' => $active]);
@@ -120,7 +120,7 @@ final readonly class UserService
                 $tx->execute('INSERT INTO ME_USER_PERMISSIONS (USER_ID, OBJECT_CODE, OPERATION, COMPANY_ID) VALUES (:id, :object, :operation, :company_id)',
                     ['id' => $id, 'company_id' => $actor->companyId, 'object' => $object, 'operation' => $operation]);
             }
-            $tx->execute('UPDATE ME_USERS SET VERSION = VERSION + 1, SECURITY_VERSION = SECURITY_VERSION + 1 WHERE ID = :id AND COMPANY_ID = :company_id',
+            $tx->execute('UPDATE ME_USERS SET VERSION = VERSION + 1, SECURITY_VERSION = SECURITY_VERSION + 1 WHERE USER_ID = :id AND COMPANY_ID = :company_id',
                 ['id' => $id, 'company_id' => $actor->companyId]);
             $this->audit($tx, $actor, $id, 'PERMISSIONS_CHANGED', ['before' => $before, 'grants' => array_keys($validated)]);
         });
@@ -133,7 +133,7 @@ final readonly class UserService
         $this->transaction($actor, function (TransactionContext $tx) use ($actor, $id, $password, $version): void {
             $this->lockUser($tx, $id, $version, $actor->companyId);
             $tx->execute('UPDATE ME_USERS SET PASSWORD_HASH = :hash, MUST_CHANGE_PASSWORD = 1,
-                VERSION = VERSION + 1, SECURITY_VERSION = SECURITY_VERSION + 1 WHERE ID = :id AND COMPANY_ID = :company_id',
+                VERSION = VERSION + 1, SECURITY_VERSION = SECURITY_VERSION + 1 WHERE USER_ID = :id AND COMPANY_ID = :company_id',
                 ['id' => $id, 'company_id' => $actor->companyId, 'hash' => password_hash($password, PASSWORD_DEFAULT)]);
             $this->audit($tx, $actor, $id, 'PASSWORD_RESET', []);
         });
@@ -146,13 +146,13 @@ final readonly class UserService
             throw new AppError('VALIDATION_ERROR', 'Choose a different password.');
         }
         $this->transaction($actor, function (TransactionContext $tx) use ($actor, $oldPassword, $newPassword): void {
-            $rows = $tx->query('SELECT ID, PASSWORD_HASH FROM ME_USERS WHERE ID = :id AND COMPANY_ID = :company_id AND ACTIVE = 1 FOR UPDATE',
+            $rows = $tx->query('SELECT USER_ID AS ID, PASSWORD_HASH FROM ME_USERS WHERE USER_ID = :id AND COMPANY_ID = :company_id AND ACTIVE = 1 FOR UPDATE',
                 ['id' => $actor->id, 'company_id' => $actor->companyId]);
             if ($rows === [] || !password_verify($oldPassword, $rows[0]['PASSWORD_HASH'])) {
                 throw new AppError('FORBIDDEN', 'Current password is incorrect.', 403);
             }
             $tx->execute('UPDATE ME_USERS SET PASSWORD_HASH = :hash, MUST_CHANGE_PASSWORD = 0,
-                VERSION = VERSION + 1, SECURITY_VERSION = SECURITY_VERSION + 1 WHERE ID = :id AND COMPANY_ID = :company_id',
+                VERSION = VERSION + 1, SECURITY_VERSION = SECURITY_VERSION + 1 WHERE USER_ID = :id AND COMPANY_ID = :company_id',
                 ['id' => $actor->id, 'company_id' => $actor->companyId, 'hash' => password_hash($newPassword, PASSWORD_DEFAULT)]);
             $this->audit($tx, $actor, $actor->id, 'PASSWORD_CHANGED', []);
         }, false);
@@ -165,7 +165,7 @@ final readonly class UserService
             if ($tx->query('SELECT ID FROM ME_COMPANY WHERE ID = :company_id AND ACTIVE = 1 FOR UPDATE', ['company_id' => $actor->companyId]) === []) {
                 throw new AppError('INVALID_STATE', 'Company is not configured.', 409);
             }
-            $rows = $tx->query('SELECT IS_ADMIN, ACTIVE, SECURITY_VERSION, MUST_CHANGE_PASSWORD FROM ME_USERS WHERE ID = :id AND COMPANY_ID = :company_id',
+            $rows = $tx->query('SELECT IS_ADMIN, ACTIVE, SECURITY_VERSION, MUST_CHANGE_PASSWORD FROM ME_USERS WHERE USER_ID = :id AND COMPANY_ID = :company_id',
                 ['id' => $actor->id, 'company_id' => $actor->companyId]);
             if ($rows === [] || (int) $rows[0]['ACTIVE'] !== 1 || (int) $rows[0]['SECURITY_VERSION'] !== $actor->securityVersion) {
                 throw new AppError('SESSION_EXPIRED', 'Sign in again.', 403);
@@ -179,7 +179,7 @@ final readonly class UserService
 
     private function lockUser(TransactionContext $tx, string $id, int $version, int $companyId): array
     {
-        $rows = $tx->query('SELECT ID, DISPLAY_NAME, IS_ADMIN, ACTIVE, VERSION FROM ME_USERS WHERE ID = :id AND COMPANY_ID = :company_id FOR UPDATE',
+        $rows = $tx->query('SELECT USER_ID AS ID, DISPLAY_NAME, IS_ADMIN, ACTIVE, VERSION FROM ME_USERS WHERE USER_ID = :id AND COMPANY_ID = :company_id FOR UPDATE',
             ['id' => $id, 'company_id' => $companyId]);
         if ($rows === []) {
             throw new AppError('NOT_FOUND', 'User not found.', 404);

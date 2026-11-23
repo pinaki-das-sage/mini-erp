@@ -17,14 +17,18 @@ final readonly class ActionExecutor
         return hash('sha256', json_encode(self::canonical($payload), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
     }
 
-    public function run(Actor $actor, string $reference, array $payload, callable $operation): array
+    /** The caller must authorize the actor before claiming or replaying an action. */
+    public function run(Actor $actor, string $reference, array $payload, callable $operation, string $eventType = 'NEUTRAL_NOTE_UPDATE'): array
     {
-        $actor->requireRole('trainee');
         if (!preg_match('/^[a-zA-Z0-9_-]{1,100}$/', $reference)) {
             throw new AppError('VALIDATION_ERROR', 'Provide an action reference of 1-100 letters, digits, underscores or hyphens.');
         }
         $hash = self::fingerprint($payload);
-        return $this->transactions->run(function (TransactionContext $tx) use ($actor, $reference, $payload, $operation, $hash): array {
+        if ($eventType !== 'NEUTRAL_NOTE_UPDATE') {
+            // Preserve legacy note hashes while binding other actions to their event type.
+            $hash = hash('sha256', $eventType . "\0" . $hash);
+        }
+        return $this->transactions->run(function (TransactionContext $tx) use ($actor, $reference, $payload, $operation, $hash, $eventType): array {
             try {
                 $tx->execute(
                     'INSERT INTO ME_ACTIONS (ACTION_REFERENCE, ACTOR_ID, PAYLOAD_HASH, COMPANY_ID) VALUES (:reference, :actor, :hash, :company_id)',
@@ -49,7 +53,7 @@ final readonly class ActionExecutor
             );
             $tx->execute(
                 'INSERT INTO ME_AUDIT (ID, ACTION_REFERENCE, ACTOR_ID, EVENT_TYPE, DETAILS_JSON, COMPANY_ID) VALUES (:id, :reference, :actor, :type, :details, :company_id)',
-                ['id' => bin2hex(random_bytes(16)), 'company_id' => $actor->companyId, 'reference' => $reference, 'actor' => $actor->id, 'type' => 'NEUTRAL_NOTE_UPDATE', 'details' => json_encode(['input' => $payload, 'result' => $result], JSON_THROW_ON_ERROR)],
+                ['id' => bin2hex(random_bytes(16)), 'company_id' => $actor->companyId, 'reference' => $reference, 'actor' => $actor->id, 'type' => $eventType, 'details' => json_encode(['input' => $payload, 'result' => $result], JSON_THROW_ON_ERROR)],
             );
             return $result;
         });
