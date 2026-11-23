@@ -49,8 +49,8 @@ try {
     }
     echo 'Oracle connection OK. Schema: ' . $schema . "\n";
     if ($command === 'migrate') {
-        $completed = (new MigrationRunner($connection))->apply(dirname(__DIR__) . '/database/migrations/shared');
-        echo $completed === [] ? "No pending shared migrations.\n" : 'Applied: ' . implode(', ', $completed) . "\n";
+        $completed = (new MigrationRunner($connection))->apply(dirname(__DIR__) . '/database/migrations/logistics');
+        echo $completed === [] ? "No pending logistics migrations.\n" : 'Applied logistics migrations: ' . implode(', ', $completed) . "\n";
     } elseif ($command === 'bootstrap' || $command === 'company:create') {
         $username = $_ENV['BOOTSTRAP_ADMIN_USER'] ?? getenv('BOOTSTRAP_ADMIN_USER');
         $password = $_ENV['BOOTSTRAP_ADMIN_PASSWORD'] ?? getenv('BOOTSTRAP_ADMIN_PASSWORD');
