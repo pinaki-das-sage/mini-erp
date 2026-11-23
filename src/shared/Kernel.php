@@ -71,7 +71,7 @@ final class Kernel
                     throw new AppError('NOT_READY', 'Seed the foundation first.', 503);
                 }
                 if ($this->db()->query(
-                    'SELECT ID FROM ME_USERS WHERE IS_ADMIN = 1 AND ACTIVE = 1 AND COMPANY_ID = 1',
+                    'SELECT USER_ID FROM ME_USERS WHERE IS_ADMIN = 1 AND ACTIVE = 1 AND COMPANY_ID = 1',
                 ) === []) {
                     throw new AppError('NOT_READY', 'Bootstrap the company administrator first.', 503);
                 }
