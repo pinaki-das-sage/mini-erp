@@ -45,7 +45,13 @@ return [
 
 Use lowercase, stable codes. CRUD flags default to zero, so list only supported operations. `ACTIVE` defaults to one. Adding the row automatically exposes those operations in the admin's permission editor; existing non-admin users do not automatically gain access.
 
-The shared CLI currently applies shared migrations. Module teams should use `MigrationRunner::apply()` with their reviewed module directory and the same migration ledger; component directory names must be distinct. Agree module migration ordering with the foundation maintainer.
+`php bin/console.php migrate` discovers all ordered `NNN-component` folders
+under `database/migrations/`: currently `001-shared`.
+Add a unique numbered module folder and migration files; no CLI edit is needed.
+The prefix orders execution, while the suffix remains the stable ledger
+component (`shared`, `inventory`, etc.). Optional `migrate shared` targets just that
+component without applying prerequisites. Agree module/integration ordering
+with the foundation maintainer; see [setup](./SETUP.md#5-apply-migrations-to-the-approved-lab-schema).
 
 For an additional business action, add a row:
 

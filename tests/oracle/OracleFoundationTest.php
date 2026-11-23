@@ -130,7 +130,7 @@ final class OracleFoundationTest extends TestCase
         $password = 'oracle-fixture-password';
         $manager = new TransactionManager($this->connection);
         $manager->run(function (TransactionContext $tx) use ($adminId, $username, $object, $password): void {
-            $tx->execute('INSERT INTO ME_USERS (ID, USERNAME, DISPLAY_NAME, PASSWORD_HASH, IS_ADMIN, COMPANY_ID)
+            $tx->execute('INSERT INTO ME_USERS (USER_ID, USERNAME, DISPLAY_NAME, PASSWORD_HASH, IS_ADMIN, COMPANY_ID)
                 VALUES (:id, :username, :name, :hash, 1, 1)',
                 ['id' => $adminId, 'username' => $username, 'name' => 'Oracle test admin', 'hash' => password_hash($password, PASSWORD_DEFAULT)]);
             $tx->execute("INSERT INTO ME_OBJECTS (CODE, NAME, MODULE_CODE, ALLOW_READ) VALUES (:object, 'Test items', 'tests', 1)", ['object' => $object]);
@@ -180,11 +180,11 @@ final class OracleFoundationTest extends TestCase
                     $tx->execute('DELETE FROM ME_SECURITY_AUDIT WHERE TARGET_ID = :id', ['id' => $userId]);
                     $tx->execute('DELETE FROM ME_USER_PERMISSIONS WHERE USER_ID = :id', ['id' => $userId]);
                     $tx->execute('DELETE FROM ME_USER_ROLES WHERE USER_ID = :id', ['id' => $userId]);
-                    $tx->execute('DELETE FROM ME_USERS WHERE ID = :id', ['id' => $userId]);
+                    $tx->execute('DELETE FROM ME_USERS WHERE USER_ID = :id', ['id' => $userId]);
                 }
                 $tx->execute('DELETE FROM ME_OBJECT_ACTIONS WHERE OBJECT_CODE = :object', ['object' => $object]);
                 $tx->execute('DELETE FROM ME_OBJECTS WHERE CODE = :object', ['object' => $object]);
-                $tx->execute('DELETE FROM ME_USERS WHERE ID = :id', ['id' => $adminId]);
+                $tx->execute('DELETE FROM ME_USERS WHERE USER_ID = :id', ['id' => $adminId]);
             });
         }
     }

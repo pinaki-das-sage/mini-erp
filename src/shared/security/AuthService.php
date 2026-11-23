@@ -13,7 +13,7 @@ final readonly class AuthService
     public function authenticate(string $username, #[\SensitiveParameter] string $password, string $company): Actor
     {
         $rows = $this->connection->query(
-            'SELECT U.ID, U.USERNAME, U.PASSWORD_HASH, U.IS_ADMIN, U.SECURITY_VERSION, U.MUST_CHANGE_PASSWORD, U.COMPANY_ID, C.NAME AS COMPANY_NAME
+            'SELECT U.USER_ID AS ID, U.USERNAME, U.PASSWORD_HASH, U.IS_ADMIN, U.SECURITY_VERSION, U.MUST_CHANGE_PASSWORD, U.COMPANY_ID, C.NAME AS COMPANY_NAME
              FROM ME_USERS U JOIN ME_COMPANY C ON U.COMPANY_ID = C.ID
              WHERE U.USERNAME = :username AND U.ACTIVE = 1 AND C.CODE = :company AND C.ACTIVE = 1',
             ['username' => strtolower(trim($username)), 'company' => strtoupper(trim($company))],
@@ -27,9 +27,9 @@ final readonly class AuthService
     public function actor(string $id, int $companyId, ?int $securityVersion = null): Actor
     {
         $rows = $this->connection->query(
-            'SELECT U.ID, U.USERNAME, U.IS_ADMIN, U.SECURITY_VERSION, U.MUST_CHANGE_PASSWORD, U.COMPANY_ID, C.NAME AS COMPANY_NAME
+            'SELECT U.USER_ID AS ID, U.USERNAME, U.IS_ADMIN, U.SECURITY_VERSION, U.MUST_CHANGE_PASSWORD, U.COMPANY_ID, C.NAME AS COMPANY_NAME
              FROM ME_USERS U JOIN ME_COMPANY C ON U.COMPANY_ID = C.ID
-             WHERE U.ID = :id AND U.COMPANY_ID = :company_id AND U.ACTIVE = 1 AND C.ACTIVE = 1',
+             WHERE U.USER_ID = :id AND U.COMPANY_ID = :company_id AND U.ACTIVE = 1 AND C.ACTIVE = 1',
             ['id' => $id, 'company_id' => $companyId],
         );
         if ($rows === []) {

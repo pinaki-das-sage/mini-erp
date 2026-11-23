@@ -67,7 +67,7 @@ final readonly class CompanyBootstrap
     private function bootstrapAdmin(TransactionContext $tx, int $companyId, string $username, #[\SensitiveParameter] string $password): bool
     {
         $defaultCredentials = $username === 'admin' && $password === 'admin';
-        $existing = $tx->query('SELECT ID, IS_ADMIN, ACTIVE FROM ME_USERS WHERE USERNAME = :username AND COMPANY_ID = :company_id',
+        $existing = $tx->query('SELECT USER_ID AS ID, IS_ADMIN, ACTIVE FROM ME_USERS WHERE USERNAME = :username AND COMPANY_ID = :company_id',
             ['username' => $username, 'company_id' => $companyId]);
         if ($existing !== []) {
             if ((int) $existing[0]['IS_ADMIN'] !== 1 || (int) $existing[0]['ACTIVE'] !== 1) {
@@ -75,12 +75,12 @@ final readonly class CompanyBootstrap
             }
             return false;
         }
-        if ($tx->query('SELECT ID FROM ME_USERS WHERE IS_ADMIN = 1 AND ACTIVE = 1 AND COMPANY_ID = :company_id', ['company_id' => $companyId]) !== []) {
+        if ($tx->query('SELECT USER_ID FROM ME_USERS WHERE IS_ADMIN = 1 AND ACTIVE = 1 AND COMPANY_ID = :company_id', ['company_id' => $companyId]) !== []) {
             throw new AppError('INVALID_STATE', 'An administrator already exists. Create further users through Settings.', 409);
         }
         $id = $companyId === 1 ? 'bootstrap-admin' : 'admin-' . bin2hex(random_bytes(16));
         $tx->execute(
-            'INSERT INTO ME_USERS (ID, USERNAME, DISPLAY_NAME, PASSWORD_HASH, IS_ADMIN, MUST_CHANGE_PASSWORD, COMPANY_ID)
+            'INSERT INTO ME_USERS (USER_ID, USERNAME, DISPLAY_NAME, PASSWORD_HASH, IS_ADMIN, MUST_CHANGE_PASSWORD, COMPANY_ID)
              VALUES (:id, :username, :name, :hash, 1, :must_change, :company_id)',
             ['id' => $id, 'company_id' => $companyId, 'username' => $username, 'name' => 'Administrator',
                 'hash' => password_hash($password, PASSWORD_DEFAULT), 'must_change' => $defaultCredentials ? 0 : 1],

@@ -6,6 +6,7 @@ namespace MiniErp\Tests\unit;
 use MiniErp\shared\Config;
 use MiniErp\shared\Kernel;
 use MiniErp\shared\database\Connection;
+use MiniErp\shared\database\MigrationRunner;
 use PHPUnit\Framework\TestCase;
 
 final class KernelTest extends TestCase
@@ -95,6 +96,30 @@ final class KernelTest extends TestCase
         });
         $session = [];
         self::assertSame(503, (new Kernel(Config::fromArray([]), $session, $db))->handle('GET', '/ready', [])['status']);
+    }
+
+    public function testReadinessRecognizesSharedMigrationsInSequencedDirectory(): void
+    {
+        $db = $this->createMock(Connection::class);
+        $runner = new MigrationRunner($db);
+        $directories = $runner->directories(dirname(__DIR__, 2) . '/database/migrations');
+        $plan = $runner->plan($directories['shared']);
+        $db->method('query')->willReturnCallback(static function (string $sql) use ($plan): array {
+            if (str_contains($sql, 'USER_TABLES')) {
+                return array_fill(0, 14, ['TABLE_NAME' => 'fixture-table']);
+            }
+            if (str_contains($sql, "STATUS <> 'APPLIED'")) {
+                return [];
+            }
+            if (str_contains($sql, 'FROM ME_MIGRATIONS')) {
+                self::assertStringContainsString("COMPONENT = 'shared'", $sql);
+                return array_map(static fn (array $migration): array => ['VERSION' => $migration['version'],
+                    'CHECKSUM' => $migration['checksum'], 'STATUS' => 'APPLIED'], $plan);
+            }
+            return [['ID' => 'fixture']];
+        });
+        $session = [];
+        self::assertSame(200, (new Kernel(Config::fromArray([]), $session, $db))->handle('GET', '/ready', [])['status']);
     }
 
     public function testLoginUsesServerActorAndRotatesCsrf(): void

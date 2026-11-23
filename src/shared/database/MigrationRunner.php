@@ -9,6 +9,57 @@ final readonly class MigrationRunner
 {
     public function __construct(private Connection $connection) {}
 
+    /** @return array<string, string> Component name => directory, in execution order. */
+    public function directories(string $root): array
+    {
+        if (!is_dir($root) || !is_readable($root)) {
+            throw new AppError('MIGRATION_ERROR', 'Migration root does not exist or is unreadable.', 503);
+        }
+        $entries = scandir($root);
+        if ($entries === false) {
+            throw new AppError('MIGRATION_ERROR', 'Cannot enumerate migration directories.', 503);
+        }
+        sort($entries, SORT_STRING);
+        $directories = [];
+        $sequences = [];
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..' || !is_dir($root . '/' . $entry)) {
+                continue;
+            }
+            if (is_link($root . '/' . $entry)
+                || !preg_match('/\A([0-9]{3})-([a-z][a-z0-9_]{0,99})\z/', $entry, $match)
+                || $match[1] === '000') {
+                throw new AppError('MIGRATION_ERROR', 'Migration folders must use NNN-component (001-999), without symlinks: ' . $entry, 503);
+            }
+            if (isset($sequences[$match[1]]) || isset($directories[$match[2]])) {
+                throw new AppError('MIGRATION_ERROR', 'Duplicate migration sequence or component: ' . $entry, 503);
+            }
+            $sequences[$match[1]] = true;
+            $directories[$match[2]] = $root . '/' . $entry;
+        }
+        if ($directories === []) {
+            throw new AppError('MIGRATION_ERROR', 'No migration component directories found.', 503);
+        }
+        return $directories;
+    }
+
+    /** @return array<string, list<string>> Applied versions per component, including unchanged components. */
+    public function applyAll(string $root, ?string $component = null): array
+    {
+        $directories = $this->directories($root);
+        if ($component !== null) {
+            if (!isset($directories[$component])) {
+                throw new AppError('MIGRATION_ERROR', 'Unknown migration component: ' . $component, 503);
+            }
+            $directories = [$component => $directories[$component]];
+        }
+        $completed = [];
+        foreach ($directories as $name => $directory) {
+            $completed[$name] = $this->apply($directory);
+        }
+        return $completed;
+    }
+
     public function plan(string $directory): array
     {
         if (!is_dir($directory)) {
@@ -42,7 +93,8 @@ final readonly class MigrationRunner
     public function apply(string $directory): array
     {
         $plan = $this->plan($directory);
-        $component = basename($directory);
+        $name = basename($directory);
+        $component = preg_match('/\A[0-9]{3}-(.+)\z/', $name, $match) ? $match[1] : $name;
         if ($this->connection->query("SELECT TABLE_NAME FROM USER_TABLES WHERE TABLE_NAME = 'ME_MIGRATIONS'") === []) {
             $this->connection->executeSchema(
                 "CREATE TABLE ME_MIGRATIONS (
