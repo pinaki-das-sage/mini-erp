@@ -1,0 +1,3 @@
+# Preserve the exact bytes of these already-applied historical migrations.
+/database/migrations/shared/005_purchasing.php -text
+/database/migrations/shared/006_drop_purchasing.php -text

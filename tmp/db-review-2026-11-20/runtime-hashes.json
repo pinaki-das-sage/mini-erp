@@ -1,5 +1,0 @@
-{
-  "public/openapi.yaml": "d2f67ae18c05f43f72857f11ae1dd6cfb8cf8ff3c6db3e01462e29e77df0302a",
-  "database/migrations/sales/002_oe_customers.php": "95ffb7dd8b0b14c7f723b53ee6eabbe434bdf43bbf7688c42fcc661e4468b825",
-  "src/sales/CustomerService.php": "03038ec48ab20ebbea4bd107ea815585aeed6e30929d3c87c9df9f9c937f5d54"
-}

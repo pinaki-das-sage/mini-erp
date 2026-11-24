@@ -10,3 +10,20 @@
 /playwright-report/
 /test-results/
 /local-docs/
+
+# Local working documents and generated artifacts.
+/tmp/
+/output/
+/database/migrations/sales.zip
+/src/sales.zip
+/tests/unit/sales.zip
+/src/sales/docs/
+/docs/oe-design.md
+/docs/sales-and-order-entry-db-design.md
+/docs/sales-and-order-entry-design.md
+/docs/sales-and-order-entry-erd.md
+/docs/sales-api-contract-summary.md
+/docs/sales-erd.mmd
+/docs/sales-linked-flow-db-walkthrough.md
+/docs/sales-order-diagram.png
+/docs/sales-order-lifecycle.mmd
