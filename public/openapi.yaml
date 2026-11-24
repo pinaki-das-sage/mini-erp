@@ -132,11 +132,15 @@ paths:
       tags: [ Sales Quotes ]
       summary: Create a Draft Quote
       operationId: createQuote
+      description: |
+        Saves a Draft using customer_code and whole-number quantity strings. action_reference is optional,
+        matching Customers. The PHP backend is implemented; Inventory master-data validation must be connected
+        before create or submit can succeed (otherwise INVENTORY_UNAVAILABLE, HTTP 503).
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/QuoteCreateRequest" } } }
       responses: { "201": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
-      x-implementation-status: planned
+      x-implementation-status: integration-pending
     get:
       tags: [ Sales Quotes ]
       summary: List Sales Quotes
@@ -152,7 +156,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/QuoteList" }
         default: { $ref: "#/components/responses/Error" }
-      x-implementation-status: planned
+      x-implementation-status: implemented
 
   /sales/quotes/{quote_number}:
     parameters:
@@ -162,7 +166,7 @@ paths:
       summary: Get a Quote
       operationId: getQuote
       responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
-      x-implementation-status: planned
+      x-implementation-status: implemented
     patch:
       tags: [ Sales Quotes ]
       summary: Update a Draft Quote
@@ -171,7 +175,21 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/QuoteUpdateRequest" } } }
       responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
-      x-implementation-status: planned
+      x-implementation-status: integration-pending
+
+  /sales/quotes/{quote_number}/update:
+    parameters:
+      - { $ref: "#/components/parameters/QuoteNumber" }
+    post:
+      tags: [ Sales Quotes ]
+      summary: Update a Draft Quote using POST
+      operationId: updateQuoteViaPost
+      description: Same validation, permissions and optional action_reference retry identity as PATCH.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/QuoteUpdateRequest" } } }
+      responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
+      x-implementation-status: integration-pending
 
   /sales/quotes/{quote_number}/submit:
     parameters:
@@ -180,11 +198,13 @@ paths:
       tags: [ Sales Quotes ]
       summary: Submit a saved Draft Quote
       operationId: submitQuote
-      requestBody: { $ref: "#/components/requestBodies/SalesDocumentAction" }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
       responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
       description: Requires the sales.quotes:submit permission. Validate the saved Draft header and all lines; no
         Inventory availability or reservation check.
-      x-implementation-status: planned
+      x-implementation-status: integration-pending
 
   /sales/quotes/{quote_number}/move-to-draft:
     parameters:
@@ -193,9 +213,11 @@ paths:
       tags: [ Sales Quotes ]
       summary: Return an eligible Submitted Quote to Draft
       operationId: moveQuoteToDraft
-      requestBody: { $ref: "#/components/requestBodies/SalesDocumentAction" }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
       responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
-      x-implementation-status: planned
+      x-implementation-status: implemented
 
   /sales/quotes/{quote_number}/delete:
     parameters:
@@ -204,11 +226,13 @@ paths:
       tags: [ Sales Quotes ]
       summary: Delete an eligible Draft Quote
       operationId: deleteQuote
-      requestBody: { $ref: "#/components/requestBodies/SalesDocumentAction" }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
       responses:
         "200": { $ref: "#/components/responses/QuoteDeleted" }
         default: { $ref: "#/components/responses/Error" }
-      x-implementation-status: planned
+      x-implementation-status: implemented
 
   /sales/orders:
     post:
@@ -965,7 +989,7 @@ components:
                 $ref: "#/components/schemas/SalesLineInput"
                 not: { required: [ line_id ] }
                 unevaluatedProperties: false
-      required: [ action_reference, customer_code, warehouse_id, lines ]
+      required: [ customer_code, warehouse_id, lines ]
       unevaluatedProperties: false
     QuoteUpdateRequest:
       type: object
@@ -979,8 +1003,15 @@ components:
               type: array
               minItems: 1
               items: { $ref: "#/components/schemas/SalesLineInput", unevaluatedProperties: false }
-      required: [ action_reference, expected_version, lines ]
+      required: [ expected_version, lines ]
       unevaluatedProperties: false
+    QuoteActionRequest:
+      type: object
+      required: [ expected_version ]
+      properties:
+        action_reference: { $ref: "#/components/schemas/ActionReference" }
+        expected_version: { type: integer, minimum: 1, maximum: 9999999999 }
+      additionalProperties: false
     SalesDocumentActionRequest:
       type: object
       required: [ action_reference, expected_version ]
@@ -1037,7 +1068,7 @@ components:
       allOf:
         - { $ref: "#/components/schemas/ApiSuccess" }
         - properties:
-            operation_id: { type: string }
+            operation_id: { type: [ string, "null" ] }
             current_version: { type: "null" }
             result:
               type: object

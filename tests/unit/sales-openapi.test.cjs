@@ -28,6 +28,19 @@ test('all local references resolve and operation IDs remain unique', () => {
   assert.equal(new Set(ids).size, ids.length);
 });
 
+test('Quote writes accept optional retry references and keep saved-document versions', () => {
+  for (const name of ['QuoteCreateRequest', 'QuoteUpdateRequest', 'QuoteActionRequest']) {
+    assert(!schemas[name].required.includes('action_reference'));
+  }
+  assert(schemas.QuoteUpdateRequest.required.includes('expected_version'));
+  assert(schemas.QuoteActionRequest.required.includes('expected_version'));
+  assert(spec.paths['/sales/quotes/{quote_number}/update'].post);
+  assert.equal(schemas.QuoteDeleteResponse.allOf[1].properties.operation_id.type[1], 'null');
+  assert.match(operation('/sales/quotes').description, /INVENTORY_UNAVAILABLE/);
+  assert.equal(operation('/sales/orders').requestBody.content['application/json'].schema.$ref, '#/components/schemas/OrderCreateRequest');
+  assert(schemas.SalesDocumentActionRequest.required.includes('action_reference'));
+});
+
 test('Customer contract matches the updated backend without changing login company support', () => {
   assert.equal(schemas.CustomerRecordId.maximum, 999999999999999);
   assert(!schemas.CustomerCreateRequest.required.includes('action_reference'));
