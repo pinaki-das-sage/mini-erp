@@ -293,7 +293,6 @@ paths:
           application/json:
             schema:
               allOf:
-                - $ref: '#/components/schemas/Command'
                 - type: object
                   required: [driver_code, first_name, last_name, licence_number, licence_expiry]
                   properties:
@@ -380,7 +379,7 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-    put:
+    post:
       tags: [Drivers]
       summary: Update a driver profile
       operationId: updateDriver
@@ -390,7 +389,6 @@ paths:
           application/json:
             schema:
               allOf:
-                - $ref: '#/components/schemas/Command'
                 - type: object
                   required: [driver_code, first_name, last_name, licence_number, licence_expiry]
                   properties:
@@ -435,7 +433,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
-    delete:
+  /logistics/drivers/{id}/delete:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
       tags: [Drivers]
       summary: Delete or deactivate a driver profile
       description: >
@@ -443,13 +444,23 @@ paths:
         historical Trip references is deactivated. A driver assigned to an
         active Trip cannot be deleted or deactivated.
       operationId: deleteDriver
+      requestBody:
+        required: true
+        description: The API requires a JSON content type on writes; send an empty object.
+        content:
+          application/json:
+            schema:
+              type: object
+              maxProperties: 0
+            example: {}
       responses:
         '200':
-          description: Driver deleted or deactivated
+          description: Empty object returned after the driver is deleted or deactivated
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DriverDeleteEnvelope'
+                type: object
+                maxProperties: 0
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1279,25 +1290,6 @@ components:
             country_code:
               type: string
               maxLength: 2
-
-    DriverDeleteResult:
-      type: object
-      required: [id, deleted, deactivated]
-      properties:
-        id:
-          type: integer
-        deleted:
-          type: boolean
-        deactivated:
-          type: boolean
-
-    DriverDeleteEnvelope:
-      allOf:
-        - $ref: '#/components/schemas/GenericSuccess'
-        - type: object
-          properties:
-            result:
-              $ref: '#/components/schemas/DriverDeleteResult'
 
     VehicleEnvelope:
       allOf:
