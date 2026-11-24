@@ -28,13 +28,69 @@ test('all local references resolve and operation IDs remain unique', () => {
   assert.equal(new Set(ids).size, ids.length);
 });
 
+test('all documented updates use POST update routes', () => {
+  for (const [route, operations] of Object.entries(spec.paths)) {
+    assert.equal(operations.patch, undefined, route);
+  }
+  for (const route of ['/sales/customers/{id}', '/sales/quotes/{quote_number}', '/sales/orders/{order_number}', '/sales/invoices/{invoice_number}']) {
+    assert(spec.paths[route + '/update'].post, route);
+    assert(spec.paths[route].get, route);
+  }
+});
+
 test('Customer contract matches the updated backend without changing login company support', () => {
   assert.equal(schemas.CustomerRecordId.maximum, 999999999999999);
   assert(!schemas.CustomerCreateRequest.required.includes('action_reference'));
+  assert(!schemas.CustomerCreateRequest.required.includes('customer_code'));
+  assert.equal(schemas.CustomerCreateRequest.allOf[1].properties.customer_code, undefined);
+  assert.equal(schemas.Customer.allOf[1].properties.customer_code.readOnly, true);
+  assert.equal(operation('/sales/customers').requestBody.content['application/json'].example.customer_code, undefined);
+  assert.match(operation('/sales/customers').description, /CUST-001/);
   assert(!(schemas.CustomerUpdateRequest.required || []).includes('action_reference'));
   assert.match(schemas.Customer.allOf[1].properties.amount_customer_owes_us.description, /stored/);
   assert.equal(operation('/auth/login').requestBody.content['application/json'].schema.properties.company.enum, undefined);
   assert(spec.paths['/sales/customers/{id}/update']);
+});
+
+test('Quote contract matches optional retry keys, workflow grants and joined Customer name', () => {
+  for (const name of ['QuoteCreateRequest', 'QuoteUpdateRequest', 'QuoteActionRequest']) {
+    assert(!schemas[name].required.includes('action_reference'));
+  }
+  assert(schemas.QuoteUpdateRequest.required.includes('expected_version'));
+  assert(schemas.QuoteActionRequest.required.includes('expected_version'));
+  assert(spec.paths['/sales/quotes/{quote_number}/update'].post);
+  assert(schemas.QuoteSummary.allOf[1].required.includes('customer_name'));
+  assert.match(operation('/sales/quotes/{quote_number}/move-to-draft').description, /sales.quotes:update/);
+  assert.match(operation('/sales/quotes').description, /Draft saves validate local fields without calling Inventory/);
+  assert.match(operation('/sales/quotes').description, /INVENTORY_UNAVAILABLE \(HTTP 503\)/);
+});
+
+test('login and component schemas use valid JSON Schema types', () => {
+  const types = new Set(['array', 'boolean', 'integer', 'null', 'number', 'object', 'string']);
+  function visit(node) {
+    if (!node || typeof node !== 'object') return;
+    if (node.type) for (const type of [].concat(node.type)) assert(types.has(type), `Invalid schema type: ${type}`);
+    for (const [key, value] of Object.entries(node)) if (!key.startsWith('x-')) visit(value);
+  }
+  const login = operation('/auth/login').requestBody.content['application/json'].schema;
+  visit(login);
+  visit(schemas);
+  assert.equal(login.properties.username.type, 'string');
+  assert.equal(login.properties.password.type, 'string');
+});
+
+test('storage documentation matches Product migration without leaking database columns into API fields', () => {
+  const stored = schemas.DatabaseSalesDocumentLineRow;
+  assert(stored.required.includes('PRODUCT_ID'));
+  assert.equal(stored.properties.ITEM_CODE, undefined);
+  assert.equal(stored['x-database-columns'].PRODUCT_ID.type, 'NUMBER(10)');
+  assert(stored['x-database-constraints'].some(value => /ME_OE_LINE_PRODUCT_FK/.test(value)));
+  assert.match(schemas.SalesLine['x-database-field-mapping'].product_id, /PRODUCT_ID/);
+  assert.equal(schemas.Customer.allOf[1].properties['RECORD#'], undefined);
+  for (const [name, schema] of Object.entries(schemas)) {
+    for (const definition of Object.values(schema['x-database-columns'] || {})) assert.notEqual(definition.default, 'AS', name);
+    if (name.startsWith('Database')) assert.equal(schema.properties['RECORD#'].default, undefined, name);
+  }
 });
 
 test('Invoice sources are Orders and removed Shipper definitions leave no references', () => {
@@ -55,6 +111,16 @@ test('whole-number quantities match the line migration and preserve valid Quote 
   const migration = fs.readFileSync(path.join(root, 'database/migrations/sales/006_oe_document_lines.php'), 'utf8');
   assert.match(migration, /QUANTITY = TRUNC\(QUANTITY\)/);
   assert(schemas.QuoteFields.properties.requested_delivery_date);
+});
+
+test('Sales product references use numeric Inventory IDs with the product_id field', () => {
+  const productId = new RegExp(schemas.SalesLineInput.properties.product_id.pattern);
+  for (const value of ['1', '83', '9999999999']) assert(productId.test(value), value);
+  for (const value of ['ITEM-001', '0', '-1', '1.5', '1e2', '10000000000']) assert(!productId.test(value), value);
+  assert(schemas.SalesLineInput.required.includes('product_id'));
+  assert.equal(schemas.SalesLineInput.properties.item_code, undefined);
+  assert.deepEqual(schemas.QuoteFields.properties.warehouse_id.enum, ['W01']);
+  assert.equal(schemas.QuoteCreateRequest.example.lines[0].product_id, '163');
 });
 
 test('money, phone and payment reference patterns accept actual API values', () => {
@@ -93,7 +159,7 @@ test('lifecycle permissions and reservation rollback remain explicit', () => {
   for (const type of ['quotes', 'orders', 'invoices']) {
     const singular = { quotes: 'quote', orders: 'order', invoices: 'invoice' }[type];
     const route = `/sales/${type}/{${singular}_number}`;
-    assert.match(operation(route + '/submit').description, new RegExp(`sales\\.${type}:submit`));
+    assert.match(operation(route + '/submit').description, new RegExp(`sales\\.${type}:${type === 'quotes' ? 'update' : 'submit'}`));
     if (type !== 'quotes') assert.match(operation(route + '/move-to-draft').description, new RegExp(`sales\\.${type}:return_to_draft`));
   }
   const submit = operation('/sales/orders/{order_number}/submit');

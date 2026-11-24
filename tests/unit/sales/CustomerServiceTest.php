@@ -22,7 +22,7 @@ final class CustomerServiceTest extends TestCase
 
     private function input(string $reference = 'create-1'): array
     {
-        return ['action_reference' => $reference, 'customer_code' => 'CUST-001', 'customer_name' => ' Example Traders ',
+        return ['action_reference' => $reference, 'customer_name' => ' Example Traders ',
             'billing_address_line_1' => '12 Market Road', 'city' => 'Bengaluru', 'country' => 'India', 'postal_code' => '001234'];
     }
 
@@ -43,6 +43,7 @@ final class CustomerServiceTest extends TestCase
         $service = new CustomerService($db);
         $saved = $service->create($this->actor(), $this->input());
         self::assertSame(1, $saved['id']);
+        self::assertSame('CUST-001', $saved['customer_code']);
         self::assertSame('Example Traders', $saved['customer_name']);
         self::assertSame('001234', $saved['postal_code']);
         self::assertSame('NET_30', $saved['payment_terms']);
@@ -84,6 +85,7 @@ final class CustomerServiceTest extends TestCase
         self::assertCount(1, $db->customers);
         self::assertCount(3, $db->audit);
         self::assertSame('F', $service->get($this->actor(), '1')['is_active']);
+        self::assertSame(2, $db->nextCode, 'Replays and updates must not consume Customer Codes.');
     }
 
     public function testChangedPayloadActorAndOperationCannotReuseReference(): void
@@ -97,15 +99,60 @@ final class CustomerServiceTest extends TestCase
         self::assertCount(1, $db->audit);
     }
 
-    public function testDuplicateCodeRollsBackClaimAndIsUniqueWithinCompanyOnly(): void
+    public function testGeneratedCodesAreSharedAcrossCompaniesAndCollisionRollsBackClaim(): void
     {
         $db = new CustomerMemoryConnection();
         $service = new CustomerService($db);
         $service->create($this->actor(), $this->input());
+        $db->nextCode = 1; // Simulate a sequence that was incorrectly reset.
         $this->rejection(fn () => $service->create($this->actor(), $this->input('duplicate')), 'DUPLICATE_CUSTOMER', 409);
         self::assertArrayNotHasKey('7:duplicate', $db->actions);
-        self::assertSame(2, $service->create($this->actor(8), $this->input())['id']);
+        $other = $service->create($this->actor(8), $this->input());
+        self::assertSame(2, $other['id']);
+        self::assertSame('CUST-002', $other['customer_code']);
         self::assertCount(2, $db->customers);
+    }
+
+    public function testCodesGrowPastPaddingAndStopAtColumnCapacity(): void
+    {
+        $db = new CustomerMemoryConnection();
+        $db->nextCode = 999;
+        $service = new CustomerService($db);
+        self::assertSame('CUST-999', $service->create($this->actor(), $this->input('last-padded'))['customer_code']);
+        self::assertSame('CUST-1000', $service->create($this->actor(), $this->input('first-unpadded'))['customer_code']);
+        $db->nextCode = 999999999999999;
+        self::assertSame('CUST-999999999999999', $service->create($this->actor(), $this->input('last-code'))['customer_code']);
+        $this->rejection(fn () => $service->create($this->actor(), $this->input('exhausted')), 'NUMBERING_UNAVAILABLE', 503);
+        self::assertCount(3, $db->customers);
+        self::assertArrayNotHasKey('7:exhausted', $db->actions);
+    }
+
+    #[DataProvider('unavailableNumbers')]
+    public function testMissingOrInvalidNumberingRollsBackClaim(mixed $number): void
+    {
+        $db = $this->createMock(Connection::class);
+        $db->method('query')->willReturnCallback(static function (string $sql) use ($number): array {
+            if (str_contains($sql, 'FROM ME_OBJECTS')) {
+                return [['ACTIVE' => 1, 'ALLOW_CREATE' => 1]];
+            }
+            if ($number instanceof DatabaseError) {
+                throw $number;
+            }
+            return [['CODE_NUMBER' => $number]];
+        });
+        $db->expects(self::once())->method('begin');
+        $db->expects(self::once())->method('execute')->willReturnCallback(static function (string $sql): int {
+            self::assertStringStartsWith('INSERT INTO ME_ACTIONS', $sql);
+            return 1;
+        });
+        $db->expects(self::once())->method('rollback');
+        $db->expects(self::never())->method('commit');
+        $this->rejection(fn () => (new CustomerService($db))->create($this->actor(), $this->input()), 'NUMBERING_UNAVAILABLE', 503);
+    }
+
+    public static function unavailableNumbers(): array
+    {
+        return [[null], [1], ['0'], ['-1'], ['1e3'], ['1000000000000000'], ['###############'], [new DatabaseError(2289)]];
     }
 
     public function testLastCommittedFieldChangeWinsAndOmittedFieldsStayUnchanged(): void
@@ -138,7 +185,7 @@ final class CustomerServiceTest extends TestCase
         self::assertSame([], $db->audit);
         self::assertSame(1, $db->rollbacks);
         $db->failAudit = false;
-        self::assertSame('CUST-001', $service->create($this->actor(), $this->input())['customer_code']);
+        self::assertSame('CUST-002', $service->create($this->actor(), $this->input())['customer_code']);
     }
 
     public function testForeignCompanyReadsAndWritesAreNotFound(): void
@@ -180,7 +227,8 @@ final class CustomerServiceTest extends TestCase
     {
         return [
             [['customer_name' => '   ']], [['customer_name' => str_repeat('x', 101)]],
-            [['customer_code' => 'A/B']], [['email_address' => 'not-email']], [['phone_number' => '123abc']],
+            [['customer_code' => 'A/B']], [['customer_code' => 'CUST-001']], [['customer_code' => null]],
+            [['email_address' => 'not-email']], [['phone_number' => '123abc']],
             [['postal_code' => 123]], [['country' => null]], [['is_active' => true]], [['payment_terms' => '']],
             [['notes' => null]], [['company_id' => 8]], [['id' => 5]], [['amount_customer_owes_us' => '20.00']],
         ];
@@ -200,7 +248,7 @@ final class CustomerServiceTest extends TestCase
 
     public function testMissingRequiredFieldsUseBusinessLabels(): void
     {
-        foreach (['customer_code' => 'Customer Code', 'customer_name' => 'Customer Name', 'billing_address_line_1' => 'Billing Address Line 1', 'city' => 'City', 'country' => 'Country'] as $key => $label) {
+        foreach (['customer_name' => 'Customer Name', 'billing_address_line_1' => 'Billing Address Line 1', 'city' => 'City', 'country' => 'Country'] as $key => $label) {
             $db = new CustomerMemoryConnection();
             $input = $this->input();
             unset($input[$key]);
@@ -340,10 +388,10 @@ final class CustomerServiceTest extends TestCase
         self::assertSame(200, $api->handle('GET', '/api/v1/sales/customers/1', [], $headers)['status']);
         self::assertSame(200, $api->handle('GET', '/api/v1/sales/customers', [], $headers)['status']);
         $patch = ['action_reference' => 'patch', 'is_active' => 'F'];
-        $changed = $api->handle('PATCH', '/api/v1/sales/customers/1', $patch, $headers);
+        $changed = $api->handle('POST', '/api/v1/sales/customers/1/update', $patch, $headers);
         self::assertSame(200, $changed['status']);
         self::assertNull(json_decode($changed['body'], true)['current_version']);
-        self::assertSame(200, $api->handle('PATCH', '/api/v1/sales/customers/1', [...$patch, 'action_reference' => 'next', 'is_active' => 'T'], $headers)['status']);
+        self::assertSame(200, $api->handle('POST', '/api/v1/sales/customers/1/update', [...$patch, 'action_reference' => 'next', 'is_active' => 'T'], $headers)['status']);
         self::assertSame(404, $api->handle('DELETE', '/api/v1/sales/customers/1', [], $headers)['status']);
         $db->admin = false;
         self::assertSame(403, $api->handle('GET', '/api/v1/sales/customers', [], $headers)['status']);
@@ -383,7 +431,7 @@ final class CustomerServiceTest extends TestCase
         self::assertSame(403, $api->handle('POST', '/api/v1/sales/customers', $this->input(), $headers)['status']);
         $db->grants = ['7:admin:sales.customers:update'];
         $patch = ['action_reference' => 'granted-update', 'city' => 'Delhi'];
-        self::assertSame(200, $api->handle('PATCH', '/api/v1/sales/customers/1', $patch, $headers)['status']);
+        self::assertSame(200, $api->handle('POST', '/api/v1/sales/customers/1/update', $patch, $headers)['status']);
         self::assertSame(200, $api->handle('POST', '/api/v1/sales/customers/1/update', $patch, $headers)['status']);
         $db->grants = [];
         self::assertSame(403, $api->handle('POST', '/api/v1/sales/customers/1/update', $patch, $headers)['status']);
@@ -405,14 +453,16 @@ final class CustomerServiceTest extends TestCase
             self::assertSame(200, $response['status']);
             self::assertSame($city, json_decode($response['body'], true)['result']['city']);
         }
-        self::assertSame(200, $api->handle('PATCH', '/api/v1/sales/customers/1', ['is_active' => 'F'], $headers)['status']);
+        self::assertSame(200, $api->handle('POST', '/api/v1/sales/customers/1/update', ['is_active' => 'F'], $headers)['status']);
         self::assertSame(5, count($db->actions));
         self::assertCount(5, $db->audit);
         foreach (array_keys($db->actions) as $key) {
             self::assertMatchesRegularExpression('/\A7:[a-f0-9]{32}\z/', $key);
         }
-        self::assertSame(409, $api->handle('POST', '/api/v1/sales/customers', $input, $headers)['status']);
-        self::assertCount(5, $db->actions);
+        $second = $api->handle('POST', '/api/v1/sales/customers', $input, $headers);
+        self::assertSame(201, $second['status']);
+        self::assertSame('CUST-002', json_decode($second['body'], true)['result']['customer_code']);
+        self::assertCount(6, $db->actions);
     }
 
     public function testExplicitInvalidReferencesAreRejectedRatherThanReplaced(): void
@@ -426,7 +476,7 @@ final class CustomerServiceTest extends TestCase
         self::assertSame([], $db->customers);
     }
 
-    public function testPostUpdateSharesPatchValidationAuthorizationAndRetryIdentity(): void
+    public function testPostUpdateValidationAuthorizationAndRetryIdentity(): void
     {
         $db = new CustomerMemoryConnection();
         $api = new Api($db, Config::fromArray([]));
@@ -444,7 +494,7 @@ final class CustomerServiceTest extends TestCase
         self::assertSame('BTM Layout 2nd Stage', $body['result']['billing_address_line_1']);
         self::assertSame('Example Traders', $body['result']['customer_name']);
         self::assertSame($updated['body'], $api->handle('POST', $url, $input, $headers)['body']);
-        self::assertSame($updated['body'], $api->handle('PATCH', '/api/v1/sales/customers/1', $input, $headers)['body']);
+        self::assertSame(404, $api->handle('PATCH', '/api/v1/sales/customers/1', $input, $headers)['status']);
         self::assertCount(2, $db->audit);
         self::assertSame(409, $api->handle('POST', $url, [...$input, 'is_active' => 'T'], $headers)['status']);
         self::assertSame(400, $api->handle('POST', $url, ['action_reference' => 'bad-field', 'amount_customer_owes_us' => '1.00'], $headers)['status']);
@@ -467,6 +517,7 @@ final class CustomerMemoryConnection implements Connection
     public bool $locked = false;
     public int $commits = 0;
     public int $rollbacks = 0;
+    public int $nextCode = 1;
     private ?array $snapshot = null;
     private int $nextId = 1;
 
@@ -544,6 +595,15 @@ final class CustomerMemoryConnection implements Connection
 
     public function query(string $sql, array $parameters = []): array
     {
+        if (str_contains($sql, 'ME_OE_CUST_CODE_SEQ.NEXTVAL')) {
+            if ($this->snapshot === null) {
+                throw new \LogicException('Sequence must be consumed inside the create transaction.');
+            }
+            if ($this->nextCode > 999999999999999) {
+                throw new DatabaseError(8004);
+            }
+            return [['CODE_NUMBER' => (string) $this->nextCode++]];
+        }
         if (str_contains($sql, 'FROM ME_API_TOKENS')) {
             return [['USER_ID' => 'admin', 'COMPANY_ID' => 7, 'SECURITY_VERSION' => 1, 'EXPIRES_AT' => time() + 3600, 'REVOKED_AT' => null]];
         }

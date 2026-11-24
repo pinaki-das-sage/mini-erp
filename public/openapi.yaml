@@ -26,9 +26,9 @@ paths:
               type: object
               required: [ company, username, password ]
               properties:
-                company: { type: string }
-                username: { type: string }
-                password: { type: string, format: password }
+                company: { type: string, enum: [ SIA-MINI-ERP ] }
+                username: { type: admin, format: username }
+                password: { type: admin, format: password }
       responses:
         "200":
           content:
@@ -93,19 +93,6 @@ paths:
       operationId: getCustomer
       description: Read an active or inactive Customer by numeric id within the signed-in company.
       responses: { "200": { $ref: "#/components/responses/Customer" }, default: { $ref: "#/components/responses/Error" } }
-    patch:
-      tags: [ Customers ]
-      summary: Update or activate/deactivate a Customer
-      operationId: updateCustomer
-      description: Update supplied fields by numeric id. Set is_active to T or F; omitted fields retain their saved
-        values. action_reference is optional; omit it for a normal request.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/CustomerUpdateRequest" }
-            example: { is_active: "F" }
-      responses: { "200": { $ref: "#/components/responses/Customer" }, default: { $ref: "#/components/responses/Error" } }
 
   /sales/customers/{id}/update:
     parameters:
@@ -113,10 +100,9 @@ paths:
     post:
       tags: [ Customers ]
       summary: Update or activate/deactivate a Customer using POST
-      operationId: updateCustomerViaPost
-      description: Alternative to PATCH for hosts that restrict HTTP methods. Uses the same service, authorization
-        and validation as PATCH. action_reference is optional; when supplied, the same reference and input can
-        be retried across either update route. Omitted fields retain their saved values.
+      operationId: updateCustomer
+      description: Update supplied fields by numeric id using POST. action_reference is optional; when supplied,
+        the same reference and input can be retried. Omitted fields retain their saved values.
       requestBody:
         required: true
         content:
@@ -132,11 +118,16 @@ paths:
       tags: [ Sales Quotes ]
       summary: Create a Draft Quote
       operationId: createQuote
+      description: |
+        Create a Draft using customer_code and whole-number quantity strings. action_reference is optional,
+        matching Customers. Draft saves validate local fields without calling Inventory; no stock check
+        or reservation. Active Item/Warehouse validation is deferred to Submit. Its adapter is not connected
+        yet, so Submit returns INVENTORY_UNAVAILABLE (HTTP 503) and preserves the Draft.
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/QuoteCreateRequest" } } }
       responses: { "201": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
-      x-implementation-status: planned
+      x-implementation-status: implemented
     get:
       tags: [ Sales Quotes ]
       summary: List Sales Quotes
@@ -152,7 +143,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/QuoteList" }
         default: { $ref: "#/components/responses/Error" }
-      x-implementation-status: planned
+      x-implementation-status: implemented
 
   /sales/quotes/{quote_number}:
     parameters:
@@ -162,16 +153,22 @@ paths:
       summary: Get a Quote
       operationId: getQuote
       responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
-      x-implementation-status: planned
-    patch:
+      x-implementation-status: implemented
+
+  /sales/quotes/{quote_number}/update:
+    parameters:
+      - { $ref: "#/components/parameters/QuoteNumber" }
+    post:
       tags: [ Sales Quotes ]
-      summary: Update a Draft Quote
+      summary: Update a Draft Quote using POST
       operationId: updateQuote
+      description: Save the complete Draft lines and local header fields using Update permission. Inventory reference
+        validation is deferred to Submit. action_reference is optional for safe retries.
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/QuoteUpdateRequest" } } }
       responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
-      x-implementation-status: planned
+      x-implementation-status: implemented
 
   /sales/quotes/{quote_number}/submit:
     parameters:
@@ -180,11 +177,13 @@ paths:
       tags: [ Sales Quotes ]
       summary: Submit a saved Draft Quote
       operationId: submitQuote
-      requestBody: { $ref: "#/components/requestBodies/SalesDocumentAction" }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
       responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
       description: Requires the sales.quotes:submit permission. Validate the saved Draft header and all lines; no
         Inventory availability or reservation check.
-      x-implementation-status: planned
+      x-implementation-status: integration-pending
 
   /sales/quotes/{quote_number}/move-to-draft:
     parameters:
@@ -193,9 +192,12 @@ paths:
       tags: [ Sales Quotes ]
       summary: Return an eligible Submitted Quote to Draft
       operationId: moveQuoteToDraft
-      requestBody: { $ref: "#/components/requestBodies/SalesDocumentAction" }
+      description: Requires sales.quotes:return_to_draft and no downstream document link, including a Draft Order.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
       responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
-      x-implementation-status: planned
+      x-implementation-status: implemented
 
   /sales/quotes/{quote_number}/delete:
     parameters:
@@ -204,11 +206,14 @@ paths:
       tags: [ Sales Quotes ]
       summary: Delete an eligible Draft Quote
       operationId: deleteQuote
-      requestBody: { $ref: "#/components/requestBodies/SalesDocumentAction" }
+      description: Requires sales.quotes:delete and an unreferenced Draft. Consumed Quote numbers are never reused.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
       responses:
         "200": { $ref: "#/components/responses/QuoteDeleted" }
         default: { $ref: "#/components/responses/Error" }
-      x-implementation-status: planned
+      x-implementation-status: implemented
 
   /sales/orders:
     post:
@@ -269,7 +274,11 @@ paths:
         progress: all lines assigned to Delivered Trips means Closed; otherwise any valid assignment means In
         Progress; no valid assignments means Submitted."
       x-implementation-status: planned
-    patch:
+
+  /sales/orders/{order_number}/update:
+    parameters:
+      - { $ref: "#/components/parameters/OrderNumber" }
+    post:
       tags: [ Sales Orders ]
       summary: Update a Draft Order
       operationId: updateOrder
@@ -376,7 +385,11 @@ paths:
       operationId: getInvoice
       responses: { "200": { $ref: "#/components/responses/Invoice" }, default: { $ref: "#/components/responses/Error" } }
       x-implementation-status: planned
-    patch:
+
+  /sales/invoices/{invoice_number}/update:
+    parameters:
+      - { $ref: "#/components/parameters/InvoiceNumber" }
+    post:
       tags: [ Sales Invoices ]
       summary: Update a Draft Invoice
       operationId: updateInvoice
@@ -397,7 +410,7 @@ paths:
       responses: { "200": { $ref: "#/components/responses/Invoice" }, default: { $ref: "#/components/responses/Error" } }
       description: Requires the sales.invoices:submit permission. Revalidate saved fields, lines and optional Order
         source; Invoice Date must be on/after Order Date. Require Invoice Total greater than 0. Set Submitted
-        and Unpaid; add debt to the stored Customer balance once in the same transaction. The source Order
+        and Unpaid; add its debt to the stored Customer balance once in the same transaction. The source Order
         need not be delivered. Repeated requests cannot duplicate debt.
       x-implementation-status: planned
 
@@ -444,7 +457,7 @@ paths:
       responses: { "201": { $ref: "#/components/responses/Payment" }, default: { $ref: "#/components/responses/Error" } }
       description: Requires payment action permission. Recheck locked current Amount Due on a same-company Submitted
         Invoice; 0 < Payment Amount <= Amount Due. Date is on/after Invoice Date and not future. Record once
-        with request identity, totals and Customer balance in one transaction; replay identical committed
+        with request identity, totals and stored Customer balance in one transaction; replay identical committed
         requests before stale/state checks. Reject reused keys with different input, overpayment and new
         payments once Paid. No edit, delete or reversal; Logistics changes do not alter money.
       x-implementation-status: planned
@@ -798,7 +811,7 @@ components:
       minLength: 1
       pattern: "^[A-Za-z0-9-]+$"
       example: CUST-001
-      description: Entered business code, unique within company and immutable after creation.
+      description: Entered business code, case-sensitive and unique within company; preserves entered case and is immutable after creation.
     CustomerDetails:
       type: object
       properties:
@@ -863,6 +876,104 @@ components:
         supplied field wins.
     Customer:
       type: object
+      description: Customer stored in ME_OE_CUSTOMERS after migration 004. API id maps to RECORD#; company context
+        maps to CNY#. Optional null database text is returned as an empty string. The read-only balance maps to
+        AMOUNT_CUSTOMER_OWES_US.
+      x-database-table: ME_OE_CUSTOMERS
+      x-database-schema:
+        $ref: "#/components/schemas/DatabaseCustomerRow"
+      x-database-columns:
+        CUSTOMER_CODE:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+        CUSTOMER_NAME:
+          type: VARCHAR2(100 CHAR)
+          nullable: false
+        IS_ACTIVE:
+          type: CHAR(1)
+          nullable: false
+          default: T
+        CONTACT_NAME:
+          type: VARCHAR2(100 CHAR)
+          nullable: true
+        EMAIL_ADDRESS:
+          type: VARCHAR2(254 CHAR)
+          nullable: true
+        PHONE_NUMBER:
+          type: VARCHAR2(25 CHAR)
+          nullable: true
+        BILLING_ADDRESS_LINE_1:
+          type: VARCHAR2(150 CHAR)
+          nullable: false
+        BILLING_ADDRESS_LINE_2:
+          type: VARCHAR2(150 CHAR)
+          nullable: true
+        CITY:
+          type: VARCHAR2(80 CHAR)
+          nullable: false
+        STATE_PROVINCE:
+          type: VARCHAR2(80 CHAR)
+          nullable: true
+        POSTAL_CODE:
+          type: VARCHAR2(20 CHAR)
+          nullable: true
+        COUNTRY:
+          type: VARCHAR2(80 CHAR)
+          nullable: false
+        PAYMENT_TERMS:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+          default: NET_30
+        NOTES:
+          type: VARCHAR2(500 CHAR)
+          nullable: true
+        RECORD#:
+          type: NUMBER(15)
+          nullable: false
+          default: AS
+          identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: NUMBER(10)
+          nullable: false
+        AMOUNT_CUSTOMER_OWES_US:
+          type: NUMBER(18,2)
+          nullable: false
+          default: 0
+        WHENCREATED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+      x-database-primary-key:
+        - CNY#
+        - RECORD#
+      x-database-unique-constraints:
+        - - CNY#
+          - CUSTOMER_CODE
+      x-database-field-mapping:
+        id: RECORD#
+        company_context: CNY#
+        customer_code: CUSTOMER_CODE
+        customer_name: CUSTOMER_NAME
+        contact_name: CONTACT_NAME
+        email_address: EMAIL_ADDRESS
+        phone_number: PHONE_NUMBER
+        billing_address_line_1: BILLING_ADDRESS_LINE_1
+        billing_address_line_2: BILLING_ADDRESS_LINE_2
+        city: CITY
+        state_province: STATE_PROVINCE
+        postal_code: POSTAL_CODE
+        country: COUNTRY
+        payment_terms: PAYMENT_TERMS
+        notes: NOTES
+        is_active: IS_ACTIVE
+        amount_customer_owes_us: AMOUNT_CUSTOMER_OWES_US
+      x-database-internal-fields:
+        - WHENCREATED
+        - WHENMODIFIED
       allOf:
         - { $ref: "#/components/schemas/CustomerDetails" }
         - type: object
@@ -874,9 +985,8 @@ components:
               readOnly: true
               pattern: "^[0-9]{1,16}\\.[0-9]{2}$"
               default: "0.00"
-              description: Server-maintained balance stored on the Customer, returned as an exact decimal string. Customer
-                metadata requests cannot change it. Invoice and Payment services maintain it transactionally
-                when implemented.
+              description: Read-only balance stored as AMOUNT_CUSTOMER_OWES_US NUMBER(18,2), returned as an exact
+                decimal string. Invoice and Payment services must maintain it transactionally; Customer metadata requests cannot change it.
       required:
         [
           id,
@@ -930,6 +1040,24 @@ components:
         unit_price: { $ref: "#/components/schemas/SalesUnitPrice" }
         description: { type: string, minLength: 1, maxLength: 200 }
     SalesLine:
+      x-database-table: ME_OE_DOCUMENT_LINES
+      x-database-schema:
+        $ref: "#/components/schemas/DatabaseSalesDocumentLineRow"
+      x-database-field-mapping:
+        line_id: RECORD# serialized as a decimal string
+        line_number: LINE_NUMBER
+        item_code: ITEM_CODE
+        description: DESCRIPTION
+        quantity: QUANTITY serialized as a whole-number string
+        unit_price: UNIT_PRICE serialized as an exact decimal string
+        warehouse_id: Parent ME_OE_DOCUMENTS.WAREHOUSE_ID
+      x-database-derived-fields:
+        - line_amount
+      x-database-internal-fields:
+        - CNY#
+        - DOCUMENT_RECORD#
+        - WHENCREATED
+        - WHENMODIFIED
       type: object
       allOf:
         - { $ref: "#/components/schemas/SalesLineInput" }
@@ -965,7 +1093,7 @@ components:
                 $ref: "#/components/schemas/SalesLineInput"
                 not: { required: [ line_id ] }
                 unevaluatedProperties: false
-      required: [ action_reference, customer_code, warehouse_id, lines ]
+      required: [ customer_code, warehouse_id, lines ]
       unevaluatedProperties: false
     QuoteUpdateRequest:
       type: object
@@ -979,8 +1107,15 @@ components:
               type: array
               minItems: 1
               items: { $ref: "#/components/schemas/SalesLineInput", unevaluatedProperties: false }
-      required: [ action_reference, expected_version, lines ]
+      required: [ expected_version, lines ]
       unevaluatedProperties: false
+    QuoteActionRequest:
+      type: object
+      required: [ expected_version ]
+      properties:
+        action_reference: { $ref: "#/components/schemas/ActionReference" }
+        expected_version: { type: integer, minimum: 1, maximum: 9999999999 }
+      additionalProperties: false
     SalesDocumentActionRequest:
       type: object
       required: [ action_reference, expected_version ]
@@ -993,8 +1128,9 @@ components:
       allOf:
         - { $ref: "#/components/schemas/QuoteFields" }
         - type: object
-          required: [ quote_number, status, document_total, current_version, available_actions ]
+          required: [ quote_number, customer_name, status, document_total, current_version, available_actions ]
           properties:
+            customer_name: { type: string, minLength: 1, maxLength: 100, readOnly: true }
             quote_number: { $ref: "#/components/schemas/SalesDocumentNumber", readOnly: true }
             status: { type: string, enum: [ Draft, Submitted ], readOnly: true }
             document_total: { $ref: "#/components/schemas/SalesAmount" }
@@ -1016,6 +1152,35 @@ components:
           notes
         ]
     Quote:
+      x-database-table: ME_OE_DOCUMENTS
+      x-database-schema:
+        $ref: "#/components/schemas/DatabaseSalesDocumentRow"
+      x-database-field-mapping:
+        company_context: CNY#
+        customer_code: Resolve ME_OE_CUSTOMERS.CUSTOMER_CODE within CNY# to CUSTOMER_RECORD#
+        warehouse_id: WAREHOUSE_ID
+        payment_terms: PAYMENT_TERMS
+        notes: NOTES
+        current_version: VERSION
+        expected_version: VERSION
+        status:
+          Draft: DRAFT
+          Submitted: SUBMITTED
+          In Progress: IN_PROGRESS
+          Closed: CLOSED
+        quote_number: DOCUMENT_NUMBER
+        quote_date: DOCUMENT_DATE
+        valid_until: VALID_UNTIL
+        requested_delivery_date: REQUESTED_DELIVERY_DATE
+        shipping_address: SHIPPING_ADDRESS
+      x-database-internal-fields:
+        - RECORD#
+        - WHENCREATED
+        - WHENMODIFIED
+      x-database-document-type: SALES_QUOTE
+      x-database-derived-fields:
+        - document_total
+        - available_actions
       type: object
       allOf:
         - { $ref: "#/components/schemas/QuoteSummary" }
@@ -1037,7 +1202,7 @@ components:
       allOf:
         - { $ref: "#/components/schemas/ApiSuccess" }
         - properties:
-            operation_id: { type: string }
+            operation_id: { type: [ string, "null" ] }
             current_version: { type: "null" }
             result:
               type: object
@@ -1046,6 +1211,12 @@ components:
                 quote_number: { $ref: "#/components/schemas/SalesDocumentNumber" }
                 deleted: { type: boolean, const: true }
     SalesSourceNumber:
+      x-database-table: ME_OE_SOURCE_LINKS
+      x-database-schema:
+        $ref: "#/components/schemas/DatabaseSalesSourceLinkRow"
+      x-database-mapping: Resolve the same-company source DOCUMENT_NUMBER to SOURCE_DOCUMENT_RECORD#;
+        TARGET_DOCUMENT_RECORD# identifies the current target. No link row represents a standalone document. Unique
+        source and target constraints enforce one-to-one links.
       anyOf:
         - { $ref: "#/components/schemas/SalesDocumentNumber" }
         - { type: "null" }
@@ -1061,6 +1232,8 @@ components:
       description: Linked lines must match all source lines once, in source order; additions, changes and removals
         are forbidden.
     SalesSourceLine:
+      x-database-field-mapping:
+        source_line_id: SOURCE_LINE_RECORD# serialized as a decimal string, or null
       type: object
       allOf:
         - { $ref: "#/components/schemas/SalesLine" }
@@ -1196,6 +1369,36 @@ components:
         - payment_terms
         - notes
     Order:
+      x-database-table: ME_OE_DOCUMENTS
+      x-database-schema:
+        $ref: "#/components/schemas/DatabaseSalesDocumentRow"
+      x-database-field-mapping:
+        company_context: CNY#
+        customer_code: Resolve ME_OE_CUSTOMERS.CUSTOMER_CODE within CNY# to CUSTOMER_RECORD#
+        warehouse_id: WAREHOUSE_ID
+        payment_terms: PAYMENT_TERMS
+        notes: NOTES
+        current_version: VERSION
+        expected_version: VERSION
+        status:
+          Draft: DRAFT
+          Submitted: SUBMITTED
+          In Progress: IN_PROGRESS
+          Closed: CLOSED
+        order_number: DOCUMENT_NUMBER
+        order_date: DOCUMENT_DATE
+        requested_delivery_date: REQUESTED_DELIVERY_DATE
+        customer_po_number: CUSTOMER_PO_NUMBER
+        shipping_address: SHIPPING_ADDRESS
+        source_quote_number: Resolve source DOCUMENT_NUMBER through ME_OE_SOURCE_LINKS for this target document
+      x-database-internal-fields:
+        - RECORD#
+        - WHENCREATED
+        - WHENMODIFIED
+      x-database-document-type: SALES_ORDER
+      x-database-derived-fields:
+        - document_total
+        - available_actions
       type: object
       allOf:
         - { $ref: "#/components/schemas/OrderSummary" }
@@ -1353,6 +1556,38 @@ components:
           shipping_address
         ]
     Invoice:
+      x-database-table: ME_OE_DOCUMENTS
+      x-database-schema:
+        $ref: "#/components/schemas/DatabaseSalesDocumentRow"
+      x-database-field-mapping:
+        company_context: CNY#
+        customer_code: Resolve ME_OE_CUSTOMERS.CUSTOMER_CODE within CNY# to CUSTOMER_RECORD#
+        warehouse_id: WAREHOUSE_ID
+        payment_terms: PAYMENT_TERMS
+        notes: NOTES
+        current_version: VERSION
+        expected_version: VERSION
+        status:
+          Draft: DRAFT
+          Submitted: SUBMITTED
+          In Progress: IN_PROGRESS
+          Closed: CLOSED
+        invoice_number: DOCUMENT_NUMBER
+        invoice_date: DOCUMENT_DATE
+        due_date: DUE_DATE
+        shipping_address: SHIPPING_ADDRESS
+        source_order_number: Resolve source DOCUMENT_NUMBER through ME_OE_SOURCE_LINKS for this target document
+      x-database-internal-fields:
+        - RECORD#
+        - WHENCREATED
+        - WHENMODIFIED
+      x-database-document-type: SALES_INVOICE
+      x-database-derived-fields:
+        - document_total
+        - available_actions
+        - total_paid
+        - amount_due
+        - payment_status
       type: object
       allOf:
         - { $ref: "#/components/schemas/InvoiceSummary" }
@@ -1384,6 +1619,9 @@ components:
               required: [ invoice_number, deleted ]
     PaymentAmount: { type: string, pattern: "^(?=[0-9.]*[1-9])[0-9]{1,16}(?:\\.[0-9]{1,2})?$" }
     PaymentCreateRequest:
+      x-database-field-mapping:
+        action_reference: ACTION_REFERENCE; references ME_ACTIONS(COMPANY_ID, ACTION_REFERENCE) with company context
+        expected_version: Invoice ME_OE_DOCUMENTS.VERSION; not stored in the payment row
       type: object
       properties:
         action_reference: { $ref: "#/components/schemas/ActionReference" }
@@ -1394,6 +1632,23 @@ components:
       required: [ action_reference, expected_version, payment_amount, payment_date, payment_reference ]
       additionalProperties: false
     PaymentRecord:
+      x-database-table: ME_OE_PAYMENTS
+      x-database-schema:
+        $ref: "#/components/schemas/DatabaseSalesPaymentRow"
+      x-database-field-mapping:
+        payment_number: PAYMENT_NUMBER
+        invoice_number: Resolve INVOICE_RECORD# to ME_OE_DOCUMENTS.DOCUMENT_NUMBER within CNY#
+        payment_amount: PAYMENT_AMOUNT serialized as an exact decimal string
+        payment_date: PAYMENT_DATE
+        payment_reference: PAYMENT_REFERENCE
+        created_at: WHENCREATED
+        created_by: No direct payment column; requires actor lookup through ME_ACTIONS using CNY# = COMPANY_ID and
+          ACTION_REFERENCE
+      x-database-internal-fields:
+        - RECORD#
+        - CNY#
+        - ACTION_REFERENCE
+        - WHENMODIFIED
       type: object
       properties:
         payment_number: { type: string, minLength: 1, maxLength: 20, readOnly: true }
@@ -1401,7 +1656,12 @@ components:
         payment_amount: { $ref: "#/components/schemas/SalesAmount", pattern: "^(?=[0-9.]*[1-9])[0-9]{1,16}\\.[0-9]{2}$" }
         payment_date: { $ref: "#/components/schemas/PaymentCreateRequest/properties/payment_date", readOnly: true }
         payment_reference: { $ref: "#/components/schemas/PaymentCreateRequest/properties/payment_reference", readOnly: true }
-        created_by: { type: string, maxLength: 40, readOnly: true, minLength: 1 }
+        created_by:
+          type: string
+          maxLength: 40
+          minLength: 1
+          readOnly: true
+          description: Actor identifier resolved from the linked ME_ACTIONS record; not a column of ME_OE_PAYMENTS.
         created_at: { type: string, format: date-time, readOnly: true }
       required:
         [
@@ -1536,6 +1796,12 @@ components:
         - { $ref: "#/components/schemas/PagedSuccess" }
         - properties: { result: { properties: { items: { items: { $ref: "#/components/schemas/EligibleOrderSummary" } } } } }
     OrderTripFields:
+      x-database-field-mapping:
+        trip_reference: TRIP_ID translated through the Logistics provider identifier
+        trip_status: TRIP_STATUS
+        trip_assigned: Derived from the current valid Trip assignment
+      x-database-internal-fields:
+        - LOGISTICS_TRIP_LINE_ID
       type: object
       required: [ trip_reference, trip_assigned, trip_status ]
       properties:
@@ -1560,3 +1826,793 @@ components:
       allOf:
         - { $ref: "#/components/schemas/SalesSourceLine" }
         - { $ref: "#/components/schemas/OrderTripFields" }
+    DatabaseCustomerRow:
+      type: object
+      description: Database row after migrations 001-008. Storage documentation only; this schema does not add
+        fields to API requests or responses.
+      x-database-table: ME_OE_CUSTOMERS
+      x-database-columns:
+        CUSTOMER_CODE:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+        CUSTOMER_NAME:
+          type: VARCHAR2(100 CHAR)
+          nullable: false
+        IS_ACTIVE:
+          type: CHAR(1)
+          nullable: false
+          default: T
+        CONTACT_NAME:
+          type: VARCHAR2(100 CHAR)
+          nullable: true
+        EMAIL_ADDRESS:
+          type: VARCHAR2(254 CHAR)
+          nullable: true
+        PHONE_NUMBER:
+          type: VARCHAR2(25 CHAR)
+          nullable: true
+        BILLING_ADDRESS_LINE_1:
+          type: VARCHAR2(150 CHAR)
+          nullable: false
+        BILLING_ADDRESS_LINE_2:
+          type: VARCHAR2(150 CHAR)
+          nullable: true
+        CITY:
+          type: VARCHAR2(80 CHAR)
+          nullable: false
+        STATE_PROVINCE:
+          type: VARCHAR2(80 CHAR)
+          nullable: true
+        POSTAL_CODE:
+          type: VARCHAR2(20 CHAR)
+          nullable: true
+        COUNTRY:
+          type: VARCHAR2(80 CHAR)
+          nullable: false
+        PAYMENT_TERMS:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+          default: NET_30
+        NOTES:
+          type: VARCHAR2(500 CHAR)
+          nullable: true
+        RECORD#:
+          type: NUMBER(15)
+          nullable: false
+          default: AS
+          identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: NUMBER(10)
+          nullable: false
+        AMOUNT_CUSTOMER_OWES_US:
+          type: NUMBER(18,2)
+          nullable: false
+          default: 0
+        WHENCREATED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+      x-database-constraints:
+        - CONSTRAINT ME_OE_CUST_PK PRIMARY KEY (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_CUST_COMPANY_FK FOREIGN KEY (CNY#) REFERENCES ME_COMPANY(ID)
+        - CONSTRAINT ME_OE_CUST_CODE_UK UNIQUE (CNY#, CUSTOMER_CODE)
+        - CONSTRAINT ME_OE_CUST_ACTIVE_CK CHECK (IS_ACTIVE IN ('T', 'F'))
+        - CONSTRAINT ME_OE_CUSTOMERS_TERMS_CK CHECK (PAYMENT_TERMS IN ('DUE_ON_RECEIPT', 'NET_15', 'NET_30'))
+        - CONSTRAINT ME_OE_CUST_BALANCE_CK CHECK (AMOUNT_CUSTOMER_OWES_US >= 0)
+      properties:
+        CUSTOMER_CODE:
+          type: string
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20 CHAR)
+        CUSTOMER_NAME:
+          type: string
+          maxLength: 100
+          x-oracle-type: VARCHAR2(100 CHAR)
+        IS_ACTIVE:
+          type: string
+          maxLength: 1
+          enum:
+            - T
+            - F
+          default: T
+          x-oracle-type: CHAR(1)
+        CONTACT_NAME:
+          type:
+            - string
+            - "null"
+          maxLength: 100
+          x-oracle-type: VARCHAR2(100 CHAR)
+        EMAIL_ADDRESS:
+          type:
+            - string
+            - "null"
+          maxLength: 254
+          x-oracle-type: VARCHAR2(254 CHAR)
+        PHONE_NUMBER:
+          type:
+            - string
+            - "null"
+          maxLength: 25
+          x-oracle-type: VARCHAR2(25 CHAR)
+        BILLING_ADDRESS_LINE_1:
+          type: string
+          maxLength: 150
+          x-oracle-type: VARCHAR2(150 CHAR)
+        BILLING_ADDRESS_LINE_2:
+          type:
+            - string
+            - "null"
+          maxLength: 150
+          x-oracle-type: VARCHAR2(150 CHAR)
+        CITY:
+          type: string
+          maxLength: 80
+          x-oracle-type: VARCHAR2(80 CHAR)
+        STATE_PROVINCE:
+          type:
+            - string
+            - "null"
+          maxLength: 80
+          x-oracle-type: VARCHAR2(80 CHAR)
+        POSTAL_CODE:
+          type:
+            - string
+            - "null"
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20 CHAR)
+        COUNTRY:
+          type: string
+          maxLength: 80
+          x-oracle-type: VARCHAR2(80 CHAR)
+        PAYMENT_TERMS:
+          type: string
+          maxLength: 20
+          enum:
+            - DUE_ON_RECEIPT
+            - NET_15
+            - NET_30
+          default: NET_30
+          x-oracle-type: VARCHAR2(20 CHAR)
+        NOTES:
+          type:
+            - string
+            - "null"
+          maxLength: 500
+          x-oracle-type: VARCHAR2(500 CHAR)
+        RECORD#:
+          type: integer
+          minimum: 1
+          maximum: 999999999999999
+          default: AS
+          x-oracle-type: NUMBER(15)
+          x-database-identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: integer
+          minimum: -9999999999
+          maximum: 9999999999
+          x-oracle-type: NUMBER(10)
+        AMOUNT_CUSTOMER_OWES_US:
+          type: string
+          pattern: ^[0-9]{1,16}(?:\.[0-9]{1,2})?$
+          description: Exact nonnegative Oracle decimal serialized as a string; database CHECK constraints apply.
+          default: "0.00"
+          x-oracle-type: NUMBER(18,2)
+        WHENCREATED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+      required:
+        - CUSTOMER_CODE
+        - CUSTOMER_NAME
+        - IS_ACTIVE
+        - CONTACT_NAME
+        - EMAIL_ADDRESS
+        - PHONE_NUMBER
+        - BILLING_ADDRESS_LINE_1
+        - BILLING_ADDRESS_LINE_2
+        - CITY
+        - STATE_PROVINCE
+        - POSTAL_CODE
+        - COUNTRY
+        - PAYMENT_TERMS
+        - NOTES
+        - RECORD#
+        - CNY#
+        - AMOUNT_CUSTOMER_OWES_US
+        - WHENCREATED
+        - WHENMODIFIED
+      additionalProperties: false
+      x-database-checks:
+        - AMOUNT_CUSTOMER_OWES_US >= 0
+    DatabaseSalesDocumentRow:
+      type: object
+      description: Database row after migrations 001-008. Storage documentation only; this schema does not add
+        fields to API requests or responses.
+      x-database-table: ME_OE_DOCUMENTS
+      x-database-columns:
+        RECORD#:
+          type: NUMBER(15)
+          nullable: false
+          default: AS
+          identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: NUMBER(10)
+          nullable: false
+        DOCUMENT_TYPE:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+        DOCUMENT_NUMBER:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+        CUSTOMER_RECORD#:
+          type: NUMBER(15)
+          nullable: false
+        WAREHOUSE_ID:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+        DOCUMENT_DATE:
+          type: DATE
+          nullable: false
+        STATUS:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+          default: DRAFT
+        VALID_UNTIL:
+          type: DATE
+          nullable: true
+        REQUESTED_DELIVERY_DATE:
+          type: DATE
+          nullable: true
+        CUSTOMER_PO_NUMBER:
+          type: VARCHAR2(30 CHAR)
+          nullable: true
+        SHIPPING_ADDRESS:
+          type: VARCHAR2(500 CHAR)
+          nullable: true
+        PAYMENT_TERMS:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+        DUE_DATE:
+          type: DATE
+          nullable: true
+        NOTES:
+          type: VARCHAR2(500 CHAR)
+          nullable: true
+        VERSION:
+          type: NUMBER(10)
+          nullable: false
+          default: 1
+        WHENCREATED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+      x-database-constraints:
+        - CONSTRAINT ME_OE_DOC_PK PRIMARY KEY (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_DOC_COMPANY_FK FOREIGN KEY (CNY#) REFERENCES ME_COMPANY (ID)
+        - CONSTRAINT ME_OE_DOC_CUSTOMER_FK FOREIGN KEY (CNY#, CUSTOMER_RECORD#) REFERENCES ME_OE_CUSTOMERS (CNY#,
+          RECORD#)
+        - CONSTRAINT ME_OE_DOC_NUMBER_UK UNIQUE (CNY#, DOCUMENT_TYPE, DOCUMENT_NUMBER)
+        - CONSTRAINT ME_OE_DOC_TYPE_CK CHECK ( DOCUMENT_TYPE IN ('SALES_QUOTE', 'SALES_ORDER', 'SALES_INVOICE') )
+        - CONSTRAINT ME_OE_DOC_STATUS_CK CHECK ( (DOCUMENT_TYPE IN ('SALES_QUOTE', 'SALES_INVOICE') AND STATUS IN
+          ('DRAFT', 'SUBMITTED')) OR (DOCUMENT_TYPE = 'SALES_ORDER' AND STATUS IN ('DRAFT', 'SUBMITTED',
+          'IN_PROGRESS', 'CLOSED')) )
+      properties:
+        RECORD#:
+          type: integer
+          minimum: 1
+          maximum: 999999999999999
+          default: AS
+          x-oracle-type: NUMBER(15)
+          x-database-identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: integer
+          minimum: -9999999999
+          maximum: 9999999999
+          x-oracle-type: NUMBER(10)
+        DOCUMENT_TYPE:
+          type: string
+          maxLength: 20
+          enum:
+            - SALES_QUOTE
+            - SALES_ORDER
+            - SALES_INVOICE
+          x-oracle-type: VARCHAR2(20 CHAR)
+        DOCUMENT_NUMBER:
+          type: string
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20 CHAR)
+        CUSTOMER_RECORD#:
+          type: integer
+          minimum: -999999999999999
+          maximum: 999999999999999
+          x-oracle-type: NUMBER(15)
+        WAREHOUSE_ID:
+          type: string
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20 CHAR)
+        DOCUMENT_DATE:
+          type: string
+          format: date
+          description: Business date serialized as YYYY-MM-DD.
+          x-oracle-type: DATE
+        STATUS:
+          type: string
+          maxLength: 20
+          enum:
+            - DRAFT
+            - SUBMITTED
+            - IN_PROGRESS
+            - CLOSED
+          default: DRAFT
+          x-oracle-type: VARCHAR2(20 CHAR)
+        VALID_UNTIL:
+          type:
+            - string
+            - "null"
+          format: date
+          description: Business date serialized as YYYY-MM-DD.
+          x-oracle-type: DATE
+        REQUESTED_DELIVERY_DATE:
+          type:
+            - string
+            - "null"
+          format: date
+          description: Business date serialized as YYYY-MM-DD.
+          x-oracle-type: DATE
+        CUSTOMER_PO_NUMBER:
+          type:
+            - string
+            - "null"
+          maxLength: 30
+          x-oracle-type: VARCHAR2(30 CHAR)
+        SHIPPING_ADDRESS:
+          type:
+            - string
+            - "null"
+          maxLength: 500
+          x-oracle-type: VARCHAR2(500 CHAR)
+        PAYMENT_TERMS:
+          type: string
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20 CHAR)
+        DUE_DATE:
+          type:
+            - string
+            - "null"
+          format: date
+          description: Business date serialized as YYYY-MM-DD.
+          x-oracle-type: DATE
+        NOTES:
+          type:
+            - string
+            - "null"
+          maxLength: 500
+          x-oracle-type: VARCHAR2(500 CHAR)
+        VERSION:
+          type: integer
+          minimum: -9999999999
+          maximum: 9999999999
+          default: 1
+          x-oracle-type: NUMBER(10)
+        WHENCREATED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+      required:
+        - RECORD#
+        - CNY#
+        - DOCUMENT_TYPE
+        - DOCUMENT_NUMBER
+        - CUSTOMER_RECORD#
+        - WAREHOUSE_ID
+        - DOCUMENT_DATE
+        - STATUS
+        - VALID_UNTIL
+        - REQUESTED_DELIVERY_DATE
+        - CUSTOMER_PO_NUMBER
+        - SHIPPING_ADDRESS
+        - PAYMENT_TERMS
+        - DUE_DATE
+        - NOTES
+        - VERSION
+        - WHENCREATED
+        - WHENMODIFIED
+      additionalProperties: false
+      x-database-status-by-type:
+        SALES_QUOTE:
+          - DRAFT
+          - SUBMITTED
+        SALES_ORDER:
+          - DRAFT
+          - SUBMITTED
+          - IN_PROGRESS
+          - CLOSED
+        SALES_INVOICE:
+          - DRAFT
+          - SUBMITTED
+      x-database-indexes:
+        - name: ME_OE_DOC_CUSTOMER_IX
+          columns:
+            - CNY#
+            - CUSTOMER_RECORD#
+    DatabaseSalesDocumentLineRow:
+      type: object
+      description: Database row after migrations 001-008. Storage documentation only; this schema does not add
+        fields to API requests or responses.
+      x-database-table: ME_OE_DOCUMENT_LINES
+      x-database-columns:
+        RECORD#:
+          type: NUMBER(15)
+          nullable: false
+          default: AS
+          identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: NUMBER(10)
+          nullable: false
+        DOCUMENT_RECORD#:
+          type: NUMBER(15)
+          nullable: false
+        LINE_NUMBER:
+          type: NUMBER(10)
+          nullable: false
+        ITEM_CODE:
+          type: VARCHAR2(30 CHAR)
+          nullable: false
+        DESCRIPTION:
+          type: VARCHAR2(200 CHAR)
+          nullable: true
+        QUANTITY:
+          type: NUMBER
+          nullable: false
+        UNIT_PRICE:
+          type: NUMBER(12,2)
+          nullable: false
+        SOURCE_LINE_RECORD#:
+          type: NUMBER(15)
+          nullable: true
+        TRIP_ID:
+          type: NUMBER
+          nullable: true
+        LOGISTICS_TRIP_LINE_ID:
+          type: NUMBER
+          nullable: true
+        TRIP_STATUS:
+          type: VARCHAR2(12 CHAR)
+          nullable: true
+        WHENCREATED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+      x-database-constraints:
+        - CONSTRAINT ME_OE_LINE_PK PRIMARY KEY (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_LINE_COMPANY_FK FOREIGN KEY (CNY#) REFERENCES ME_COMPANY (ID)
+        - CONSTRAINT ME_OE_LINE_DOCUMENT_FK FOREIGN KEY (CNY#, DOCUMENT_RECORD#) REFERENCES ME_OE_DOCUMENTS (CNY#,
+          RECORD#)
+        - CONSTRAINT ME_OE_LINE_SOURCE_FK FOREIGN KEY (CNY#, SOURCE_LINE_RECORD#) REFERENCES ME_OE_DOCUMENT_LINES
+          (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_LINE_POSITION_UK UNIQUE (CNY#, DOCUMENT_RECORD#, LINE_NUMBER)
+        - CONSTRAINT ME_OE_LINE_QTY_CK CHECK (QUANTITY > 0 AND QUANTITY = TRUNC(QUANTITY))
+        - CONSTRAINT ME_OE_LINE_PRICE_CK CHECK (UNIT_PRICE >= 0)
+        - CONSTRAINT ME_OE_LINE_NUMBER_CK CHECK (LINE_NUMBER > 0)
+      properties:
+        RECORD#:
+          type: integer
+          minimum: 1
+          maximum: 999999999999999
+          default: AS
+          x-oracle-type: NUMBER(15)
+          x-database-identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: integer
+          minimum: -9999999999
+          maximum: 9999999999
+          x-oracle-type: NUMBER(10)
+        DOCUMENT_RECORD#:
+          type: integer
+          minimum: -999999999999999
+          maximum: 999999999999999
+          x-oracle-type: NUMBER(15)
+        LINE_NUMBER:
+          type: integer
+          minimum: 1
+          maximum: 9999999999
+          x-oracle-type: NUMBER(10)
+        ITEM_CODE:
+          type: string
+          maxLength: 30
+          x-oracle-type: VARCHAR2(30 CHAR)
+        DESCRIPTION:
+          type:
+            - string
+            - "null"
+          maxLength: 200
+          x-oracle-type: VARCHAR2(200 CHAR)
+        QUANTITY:
+          type: integer
+          minimum: 1
+          description: Database permits any positive whole NUMBER; the API applies its documented 9-digit limit.
+          x-oracle-type: NUMBER
+        UNIT_PRICE:
+          type: string
+          pattern: ^[0-9]{1,10}(?:\.[0-9]{1,2})?$
+          description: Exact nonnegative Oracle decimal serialized as a string; database CHECK constraints apply.
+          x-oracle-type: NUMBER(12,2)
+        SOURCE_LINE_RECORD#:
+          type:
+            - integer
+            - "null"
+          minimum: -999999999999999
+          maximum: 999999999999999
+          x-oracle-type: NUMBER(15)
+        TRIP_ID:
+          type:
+            - number
+            - "null"
+          x-oracle-type: NUMBER
+        LOGISTICS_TRIP_LINE_ID:
+          type:
+            - number
+            - "null"
+          x-oracle-type: NUMBER
+        TRIP_STATUS:
+          type:
+            - string
+            - "null"
+          maxLength: 12
+          x-oracle-type: VARCHAR2(12 CHAR)
+        WHENCREATED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+      required:
+        - RECORD#
+        - CNY#
+        - DOCUMENT_RECORD#
+        - LINE_NUMBER
+        - ITEM_CODE
+        - DESCRIPTION
+        - QUANTITY
+        - UNIT_PRICE
+        - SOURCE_LINE_RECORD#
+        - TRIP_ID
+        - LOGISTICS_TRIP_LINE_ID
+        - TRIP_STATUS
+        - WHENCREATED
+        - WHENMODIFIED
+      additionalProperties: false
+      x-database-checks:
+        - QUANTITY > 0 AND QUANTITY = TRUNC(QUANTITY)
+        - UNIT_PRICE >= 0
+        - LINE_NUMBER > 0
+      x-database-indexes:
+        - name: ME_OE_LINE_SOURCE_IX
+          columns:
+            - CNY#
+            - SOURCE_LINE_RECORD#
+    DatabaseSalesSourceLinkRow:
+      type: object
+      description: Database row after migrations 001-008. Storage documentation only; this schema does not add
+        fields to API requests or responses.
+      x-database-table: ME_OE_SOURCE_LINKS
+      x-database-columns:
+        RECORD#:
+          type: NUMBER(15)
+          nullable: false
+          default: AS
+          identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: NUMBER(10)
+          nullable: false
+        SOURCE_DOCUMENT_RECORD#:
+          type: NUMBER(15)
+          nullable: false
+        TARGET_DOCUMENT_RECORD#:
+          type: NUMBER(15)
+          nullable: false
+        WHENCREATED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+      x-database-constraints:
+        - CONSTRAINT ME_OE_LINK_PK PRIMARY KEY (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_LINK_COMPANY_FK FOREIGN KEY (CNY#) REFERENCES ME_COMPANY (ID)
+        - CONSTRAINT ME_OE_LINK_SOURCE_UK UNIQUE (CNY#, SOURCE_DOCUMENT_RECORD#)
+        - CONSTRAINT ME_OE_LINK_TARGET_UK UNIQUE (CNY#, TARGET_DOCUMENT_RECORD#)
+        - CONSTRAINT ME_OE_LINK_SOURCE_FK FOREIGN KEY (CNY#, SOURCE_DOCUMENT_RECORD#) REFERENCES ME_OE_DOCUMENTS
+          (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_LINK_TARGET_FK FOREIGN KEY (CNY#, TARGET_DOCUMENT_RECORD#) REFERENCES ME_OE_DOCUMENTS
+          (CNY#, RECORD#)
+      properties:
+        RECORD#:
+          type: integer
+          minimum: 1
+          maximum: 999999999999999
+          default: AS
+          x-oracle-type: NUMBER(15)
+          x-database-identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: integer
+          minimum: -9999999999
+          maximum: 9999999999
+          x-oracle-type: NUMBER(10)
+        SOURCE_DOCUMENT_RECORD#:
+          type: integer
+          minimum: -999999999999999
+          maximum: 999999999999999
+          x-oracle-type: NUMBER(15)
+        TARGET_DOCUMENT_RECORD#:
+          type: integer
+          minimum: -999999999999999
+          maximum: 999999999999999
+          x-oracle-type: NUMBER(15)
+        WHENCREATED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+      required:
+        - RECORD#
+        - CNY#
+        - SOURCE_DOCUMENT_RECORD#
+        - TARGET_DOCUMENT_RECORD#
+        - WHENCREATED
+        - WHENMODIFIED
+      additionalProperties: false
+    DatabaseSalesPaymentRow:
+      type: object
+      description: Database row after migrations 001-008. Storage documentation only; this schema does not add
+        fields to API requests or responses.
+      x-database-table: ME_OE_PAYMENTS
+      x-database-columns:
+        RECORD#:
+          type: NUMBER(15)
+          nullable: false
+          default: AS
+          identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: NUMBER(10)
+          nullable: false
+        PAYMENT_NUMBER:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+        INVOICE_RECORD#:
+          type: NUMBER(15)
+          nullable: false
+        PAYMENT_AMOUNT:
+          type: NUMBER(18,2)
+          nullable: false
+        PAYMENT_DATE:
+          type: DATE
+          nullable: false
+        PAYMENT_REFERENCE:
+          type: VARCHAR2(50 CHAR)
+          nullable: false
+        ACTION_REFERENCE:
+          type: VARCHAR2(100)
+          nullable: false
+        WHENCREATED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+      x-database-constraints:
+        - CONSTRAINT ME_OE_PAY_PK PRIMARY KEY (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_PAY_COMPANY_FK FOREIGN KEY (CNY#) REFERENCES ME_COMPANY (ID)
+        - CONSTRAINT ME_OE_PAY_INVOICE_FK FOREIGN KEY (CNY#, INVOICE_RECORD#) REFERENCES ME_OE_DOCUMENTS (CNY#,
+          RECORD#)
+        - CONSTRAINT ME_OE_PAY_ACTION_FK FOREIGN KEY (CNY#, ACTION_REFERENCE) REFERENCES ME_ACTIONS (COMPANY_ID,
+          ACTION_REFERENCE)
+        - CONSTRAINT ME_OE_PAY_NUMBER_UK UNIQUE (CNY#, PAYMENT_NUMBER)
+        - CONSTRAINT ME_OE_PAY_ACTION_UK UNIQUE (CNY#, ACTION_REFERENCE)
+        - CONSTRAINT ME_OE_PAY_AMOUNT_CK CHECK (PAYMENT_AMOUNT > 0)
+      properties:
+        RECORD#:
+          type: integer
+          minimum: 1
+          maximum: 999999999999999
+          default: AS
+          x-oracle-type: NUMBER(15)
+          x-database-identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: integer
+          minimum: -9999999999
+          maximum: 9999999999
+          x-oracle-type: NUMBER(10)
+        PAYMENT_NUMBER:
+          type: string
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20 CHAR)
+        INVOICE_RECORD#:
+          type: integer
+          minimum: -999999999999999
+          maximum: 999999999999999
+          x-oracle-type: NUMBER(15)
+        PAYMENT_AMOUNT:
+          type: string
+          pattern: ^[0-9]{1,16}(?:\.[0-9]{1,2})?$
+          description: Exact nonnegative Oracle decimal serialized as a string; database CHECK constraints apply.
+          x-oracle-type: NUMBER(18,2)
+        PAYMENT_DATE:
+          type: string
+          format: date
+          description: Business date serialized as YYYY-MM-DD.
+          x-oracle-type: DATE
+        PAYMENT_REFERENCE:
+          type: string
+          maxLength: 50
+          x-oracle-type: VARCHAR2(50 CHAR)
+        ACTION_REFERENCE:
+          type: string
+          maxLength: 100
+          x-oracle-type: VARCHAR2(100)
+        WHENCREATED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+      required:
+        - RECORD#
+        - CNY#
+        - PAYMENT_NUMBER
+        - INVOICE_RECORD#
+        - PAYMENT_AMOUNT
+        - PAYMENT_DATE
+        - PAYMENT_REFERENCE
+        - ACTION_REFERENCE
+        - WHENCREATED
+        - WHENMODIFIED
+      additionalProperties: false
+      x-database-checks:
+        - PAYMENT_AMOUNT > 0
+      x-database-indexes:
+        - name: ME_OE_PAY_INVOICE_IX
+          columns:
+            - CNY#
+            - INVOICE_RECORD#

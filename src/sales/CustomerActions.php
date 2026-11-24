@@ -46,7 +46,7 @@ final readonly class CustomerActions
             $tx->execute('UPDATE ME_ACTIONS SET RESULT_JSON = :result WHERE COMPANY_ID = :company_id AND ACTION_REFERENCE = :reference',
                 [...$identity, 'result' => json_encode($result, JSON_THROW_ON_ERROR)]);
             $tx->execute('INSERT INTO ME_AUDIT (ID, COMPANY_ID, ACTION_REFERENCE, ACTOR_ID, EVENT_TYPE, DETAILS_JSON) VALUES (:id, :company_id, :reference, :actor, :event, :details)',
-                [...$identity, 'id' => bin2hex(random_bytes(16)), 'actor' => $actor->id, 'event' => $event,
+                [...$identity,   'id' => bin2hex(random_bytes(16)), 'actor' => $actor->id, 'event' => $event,
                     'details' => json_encode(['customer_record_id' => $result['id']], JSON_THROW_ON_ERROR)]);
             return $result;
         });

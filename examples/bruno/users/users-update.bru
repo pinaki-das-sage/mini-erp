@@ -4,8 +4,8 @@ meta {
   seq: 4
 }
 
-patch {
-  url: {{base_url}}/api/v1/users/{{target_user_id}}
+post {
+  url: {{base_url}}/api/v1/users/{{target_user_id}}/update
   body: json
   auth: none
 }

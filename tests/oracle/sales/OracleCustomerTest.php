@@ -30,12 +30,15 @@ final class OracleCustomerTest extends TestCase
         self::assertNotEmpty($admins, 'Prepare the shared foundation and an active administrator in the test schema.');
         $actor = new Actor($admins[0]['ID'], $admins[0]['USERNAME'], [], (int) $admins[0]['COMPANY_ID'], true);
         $prefix = 'ct-' . bin2hex(random_bytes(6));
-        $input = ['action_reference' => $prefix . '-create', 'customer_code' => $prefix, 'customer_name' => 'Customer API test',
+        $input = ['action_reference' => $prefix . '-create', 'customer_name' => $prefix,
             'billing_address_line_1' => 'Test address', 'city' => 'Test city', 'country' => 'India', 'postal_code' => '001234'];
         $service = new CustomerService($db);
         $observer = OciConnection::connect($config);
+        $createdIds = [];
         try {
             $created = $service->create($actor, $input);
+            $createdIds[] = $created['id'];
+            self::assertMatchesRegularExpression('/\ACUST-[0-9]{3,15}\z/D', $created['customer_code']);
             $id = (string) $created['id'];
             self::assertSame($created, (new CustomerService($observer))->get($actor, $id));
             self::assertSame('001234', $created['postal_code']);
@@ -46,12 +49,9 @@ final class OracleCustomerTest extends TestCase
             self::assertNotNull($stored[0]['WHENCREATED']);
             self::assertNotNull($stored[0]['WHENMODIFIED']);
             self::assertSame($created, $service->create($actor, $input));
-            try {
-                $service->create($actor, [...$input, 'action_reference' => $prefix . '-duplicate']);
-                self::fail('The real company/code constraint must reject a duplicate.');
-            } catch (AppError $error) {
-                self::assertSame('DUPLICATE_CUSTOMER', $error->errorCode);
-            }
+            $second = $service->create($actor, [...$input, 'action_reference' => $prefix . '-second-create', 'customer_name' => 'Second Customer']);
+            $createdIds[] = $second['id'];
+            self::assertNotSame($created['customer_code'], $second['customer_code']);
             $patch = ['action_reference' => $prefix . '-patch', 'is_active' => 'F', 'notes' => ''];
             $updated = $service->update($actor, $id, $patch);
             self::assertArrayNotHasKey('current_version', $updated);
@@ -95,16 +95,18 @@ final class OracleCustomerTest extends TestCase
             self::assertSame($updated, (new CustomerService($observer))->get($actor, $id));
             self::assertSame([], $observer->query('SELECT ACTION_REFERENCE FROM ME_ACTIONS WHERE COMPANY_ID = :company_id AND ACTION_REFERENCE = :reference',
                 ['company_id' => $actor->companyId, 'reference' => $prefix . '-rollback']));
-            self::assertCount(3, $observer->query('SELECT ID FROM ME_AUDIT WHERE COMPANY_ID = :company_id AND ACTION_REFERENCE LIKE :pattern',
+            self::assertCount(4, $observer->query('SELECT ID FROM ME_AUDIT WHERE COMPANY_ID = :company_id AND ACTION_REFERENCE LIKE :pattern',
                 ['company_id' => $actor->companyId, 'pattern' => $prefix . '%']));
         } finally {
-            (new TransactionManager($db))->run(static function (TransactionContext $tx) use ($actor, $prefix): void {
+            (new TransactionManager($db))->run(static function (TransactionContext $tx) use ($actor, $prefix, $createdIds): void {
                 foreach (['ME_AUDIT', 'ME_ACTIONS'] as $table) {
                     $tx->execute("DELETE FROM $table WHERE COMPANY_ID = :company_id AND ACTION_REFERENCE LIKE :pattern",
                         ['company_id' => $actor->companyId, 'pattern' => $prefix . '%']);
                 }
-                $tx->execute('DELETE FROM ME_OE_CUSTOMERS WHERE CNY# = :company_id AND CUSTOMER_CODE = :code',
-                    ['company_id' => $actor->companyId, 'code' => $prefix]);
+                foreach ($createdIds as $createdId) {
+                    $tx->execute('DELETE FROM ME_OE_CUSTOMERS WHERE CNY# = :company_id AND RECORD# = :id',
+                        ['company_id' => $actor->companyId, 'id' => $createdId]);
+                }
             });
         }
     }

@@ -1,6 +1,55 @@
 # API-first development
 
-The shared framework implements bearer authentication, permission-checked route registration, JSON responses and input/pagination helpers. The note and user-administration APIs are working examples. Inventory, Purchasing, Sales and Logistics endpoints remain team work.
+The shared framework implements bearer authentication, permission-checked route registration, JSON responses and input/pagination helpers. The note and user-administration APIs are working examples. Customer routes and the Quote backend are implemented; Quote Inventory validation is pending. Other domain endpoints remain team work.
+
+## Customer Code generation
+
+Customer creation generates an immutable code such as `CUST-001`, `CUST-002`, and `CUST-1000`. Omit `customer_code` from the create body; supplying it is rejected. A single Oracle sequence serves all companies, and rollbacks or cached sequence values can leave gaps. Numeric Customer URL IDs remain separate. Existing codes remain unchanged.
+
+Pause Customer creation while deploying the matching backend and applying `php bin/console.php migrate --module=sales` with the configured schema confirmation when required. Migration `011_oe_customer_code_sequence.php` starts above the largest existing uppercase `CUST-` code with a 1 to 15 digit suffix across all companies (or at 1 if none exist). Resume creation after both steps finish. Do not reset or cycle the sequence. Missing or exhausted numbering returns `NUMBERING_UNAVAILABLE` (503).
+
+`action_reference` remains optional: the same explicit reference and input replay the original result without consuming another Customer Code. Repeated requests without a reference create separate Customers with separate codes.
+
+## Sales Quote implementation and Inventory handoff
+
+The supplied Sales and Order Entry requirements and five-table OE design govern Quotes. Older starter briefs describe a different Sales workflow; do not copy their allocation states or exclude Quotes from this implementation.
+
+Quote routes under `/api/v1/sales/quotes` support create/list/get, POST `/{quote_number}/update`, and POST actions `submit`, `move-to-draft`, `delete`. Create uses Create authorization; edits, submit and return use Update; reads use Read; deletion uses Delete. Legacy named submit/return grants do not independently authorize Quote workflow. Every saved-document change requires `expected_version`. `action_reference` is optional, matching Customers: omit it for an independent request; preserve an explicit reference and payload for retries. All update endpoints use POST with an `/update` suffix because the hosting environment restricts HTTP methods.
+
+```json
+{
+  "customer_code": "CUST-001",
+  "warehouse_id": "W01",
+  "lines": [
+    {"product_id": "163", "description": "Sample product", "quantity": "5", "unit_price": "250.00"}
+  ]
+}
+```
+
+Shipping Address and Payment Terms default from the active Customer and remain saved snapshots. Customer Code and Name in responses come from the current Customer master. Quantities are positive whole-number strings with up to 9 digits. Prices allow 10 whole digits and 2 decimals; amounts and totals allow 16 whole digits and 2 decimals. Every edit supplies all intended lines, retaining saved `line_id` values for edits. Array order controls line display positions. Line validation errors identify the affected line.
+
+Sales migrations 005/006 install headers/lines. `007_oe_source_links.php` and `008_oe_payments.php` restore the supplied table migrations, already applied on the target database. `009_oe_document_numbering.php` creates separate Quote, Order, Invoice and Payment sequences together. The separate Quote numbering migration was consolidated into 009 at the requester's direction. If an earlier version of 009 or either former Quote numbering filename is already recorded as applied, reconcile migration history against existing sequences before the next run; do not recreate or reset sequences. The runner uses complete filenames and checksums as migration identities.
+
+Before running migrations on an existing installation, restore byte-for-byte originals of already-applied files from the server or your teammate if their recorded checksums differ from these pasted-source copies. The runner hashes entire files, including formatting and line endings. Do not change ledger checksums or rerun table creation to bypass a mismatch. Check `SELECT VERSION, CHECKSUM, STATUS FROM ME_MIGRATIONS WHERE COMPONENT = 'sales' ORDER BY VERSION` against the originals. If tables were created manually without ledger entries, reconcile their installation history before using the runner.
+
+After deploying matching files and verifying applied history, apply pending migrations with `php bin/console.php migrate --module=sales` against the intended Oracle schema. Already-applied table migrations are skipped. The Quote backend formats `SQ-` plus a 15-digit sequence. Future Order/Invoice/Payment services will format `SO-`, `SI-` and `PAY-` plus 15 digits; the new migration only creates their sequences. These numbers are never reused and fit within 20 characters. Check imported numbering namespaces before deployment.
+
+Migration `010_oe_inventory_product_reference.php` requires Inventory's `ME_INV_PRODUCTS` table and its `(COMPANY_ID, PRODUCT_ID)` primary key in the same schema. With application writes stopped, it adds numeric `PRODUCT_ID NUMBER(10)` and applies the approved mapping for company 1, document RECORD# 1, line RECORD# 1: `ITEM-001` becomes Product 163 (SKU RF-001, Bolt). It preserves line IDs, descriptions, quantities and prices; the affected unreferenced Draft Quote receives Warehouse W01 and one version increment. The migration verifies that Product 163 is active in company 1/W01 and rejects any other existing lines before schema changes, since they have no approved mapping. An empty line table is also supported. It makes PRODUCT_ID required, adds the company-scoped Product foreign key, and only then drops ITEM_CODE. Do not delete records or guess mappings to bypass preflight checks. Oracle DDL is not transactional, so inspect the ledger/schema and follow recovery if a run fails; do not blindly retry a partially applied migration. Deploy the matching Quote backend together with this migration. Quote requests and responses now use `product_id` (replacing `item_code`), carrying the Inventory Product ID as a positive decimal string of up to 10 digits, not a SKU. Update clients together with the backend; the old field is rejected. Quote Warehouse is W01. No direct stock-table access or stock columns are added to Sales.
+
+The source-link table is authoritative for downstream usage, including a Draft Order. Future Order services must lock the source Quote parent before claiming or releasing its link, validate source/target types and company, and save the link and complete copied lines atomically. The unique source and target constraints enforce one current target per source and one source per target. Returning a Quote to Draft or deleting it rechecks usage under that same parent lock.
+
+Inventory integration follows [the shared contract boundary](./shared-contracts.md#contract-matrix): call the owning PHP service using the trusted Actor/company and shared transaction. Do not query Inventory's private tables in runtime services, perform internal HTTP calls or store another stock balance in OE. Product references use Inventory's numeric PRODUCT_ID; its single Warehouse is W01. Exact provider signatures still need agreement. The foreign key enforces Product existence/company; the provider validates active status and Warehouse.
+
+| Workflow | Inventory involvement |
+| --- | --- |
+| Quote create/edit | Validate local fields, active Customer, dates, complete lines and totals. Save Draft without calling Inventory; Item/Warehouse reference validation is deferred to Submit. |
+| Quote submit | Validate active, same-company Item and Warehouse references. No availability check, reservation or stock change. |
+| Future Order submission | Use `getAvailability` for the company/Warehouse and combined Item quantities; the result is a snapshot. Inventory must confirm all reservations through `reserveStock` before the Order becomes Submitted. |
+| Eligible Order return/deletion | Coordinate `releaseReservation` and confirm release before the action completes. |
+
+`QuoteInventory::validate` is the local integration interface. Wire Inventory's real master-data adapter into the `QuoteService` constructed in `src/sales/api.php`. Inventory owns the lookup implementation; there is no real provider in this repository yet. Per the updated requested behavior, Drafts can be created and edited while Inventory is unavailable. The default `UnavailableQuoteInventory` returns `INVENTORY_UNAVAILABLE` (503) on Submit, preserving the saved Draft and its version. Test adapters validate caller behavior only; they never establish real stock availability.
+
+Before the Inventory handoff can be completed, agree active Item/Warehouse lookup, identifier mapping, exact signatures, company checks, error codes and lock order. For Order stock integration, also agree reservation source identity, replay/version behavior and all-or-nothing rollback on a later-line failure. Real concurrent-order and rollback acceptance tests require Inventory's implementation on the shared connection. This section specifies the integration requirement; it does not claim availability or reservations are connected.
 
 ## 1. Required story order
 
@@ -96,7 +145,7 @@ Collection script/contract checks: `node --test tests/unit/bruno-collection.test
 | `POST /note` | `text`, `action_reference`, positive integer `expected_version`; requires `shared.note:update` |
 | `GET /users?page=1&page_size=25` | Admin-only paged user list; requires `shared.user:read` |
 | `POST /users` | Admin-only create: `username`, `display_name`, `password`, boolean `is_admin`; HTTP 201 |
-| `PATCH /users/{id}` | Admin-only edit: `display_name`, booleans `is_admin`/`active`, positive integer `expected_version` |
+| `POST /users/{id}/update` | Admin-only edit: `display_name`, booleans `is_admin`/`active`, positive integer `expected_version` |
 | `POST /users/{id}/permissions` | Admin-only: `grants` array of `object:operation` strings, `expected_version` |
 | `POST /users/{id}/reset-password` | Admin-only: `password`, `expected_version`; next login requires password change |
 
