@@ -76,7 +76,7 @@ return static function (Api $api, Connection $connection): void {
     );
 
     $api->register(
-        'PUT',
+        'POST',
         '/logistics/drivers/{id}',
         'logistics.drivers',
         'update',
@@ -92,8 +92,8 @@ return static function (Api $api, Connection $connection): void {
     );
 
     $api->register(
-        'DELETE',
-        '/logistics/drivers/{id}',
+        'POST',
+        '/logistics/drivers/{id}/delete',
         'logistics.drivers',
         'delete',
         static function (
@@ -104,6 +104,7 @@ return static function (Api $api, Connection $connection): void {
         ) use ($drivers): array {
             $id = (int) $params['id'];
             return $drivers->deleteDriver($actor, $id);
-        }
+        },
+        wrapResponse: false
     );
 };

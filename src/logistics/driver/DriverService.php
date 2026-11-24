@@ -83,7 +83,7 @@ class DriverService
         );
     }
 
-    // PUT /logistics/driver/{id}
+    // POST /logistics/drivers/{id}
     public function updateDriver(Actor $actor, int $id, array $input): array
     {   
         $authorization = new Authorization($this->connection);
@@ -106,7 +106,7 @@ class DriverService
         );
     }
 
-    // DELETE /logistics/driver/{id}
+    // POST /logistics/drivers/{id}/delete
     public function deleteDriver(Actor $actor, int $id): array
     {
         $authorization = new Authorization($this->connection);
@@ -133,9 +133,7 @@ class DriverService
                 : $this->repository->delete($actor->companyId, $id)
         );
 
-        return $referenced
-            ? ['id' => $id, 'deleted' => false, 'deactivated' => true]
-            : ['id' => $id, 'deleted' => true, 'deactivated' => false];
+        return [];
     }
 
     private function actorId(Actor $actor): int
