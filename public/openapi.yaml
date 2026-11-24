@@ -2,9 +2,9 @@ openapi: 3.1.0
 info:
   title: Mini ERP Authentication and Purchasing API
   version: 1.12.5
-  description: Sample requests and expected responses for the current merged fields. HTTP 400 examples identify
-    error.field and error.message; line errors include the line number in the message. These are documented
-    expectations, not live backend validation results.
+  description: Sample requests and expected responses for the current merged fields. HTTP 400 examples
+    identify error.field and error.message; line errors include the line number in the message. These are
+    documented expectations, not live backend validation results.
 servers:
   - url: ./api/v1
     description: API relative to this OpenAPI file's deployment directory
@@ -23,11 +23,11 @@ paths:
       operationId: login
       summary: Login to Mini ERP
       description: >
-        Authenticate an active user in an active company and issue an opaque bearer token. Send JSON without
-        an Authorization header. Company codes and usernames are trimmed and normalized; passwords are
-        case-sensitive. Tokens expire after the configured lifetime (one hour by default). Login is limited to
-        five attempts per company/username and 100 attempts per source IP per fixed one-minute window,
-        including successful attempts.
+        Authenticate an active user in an active company and issue an opaque bearer token. Send JSON
+        without an Authorization header. Company codes and usernames are trimmed and normalized;
+        passwords are case-sensitive. Tokens expire after the configured lifetime (one hour by default).
+        Login is limited to five attempts per company/username and 100 attempts per source IP per fixed
+        one-minute window, including successful attempts.
       x-implementation-status: implemented
       security: []
       requestBody:
@@ -133,8 +133,9 @@ paths:
         - Vendors
       operationId: listVendors
       summary: List vendors
-      description: Returns two initial dummy vendors (101 and 102), plus vendors created through POST in this tab.
-        Supports pagination, search and status filters. Use GET /purchasing/vendors/{id} for a single vendor.
+      description: Returns two initial dummy vendors (101 and 102), plus vendors created through POST in this
+        tab. Supports pagination, search and status filters. Use GET /purchasing/vendors/{id} for a
+        single vendor.
       parameters:
         - name: page
           in: query
@@ -217,45 +218,45 @@ paths:
               vendor:
                 $ref: "#/components/examples/VendorCreateRequest"
         description: >-
-          Input fields must have concrete values; null is not accepted. Omit optional fields when no value is
-          available.
+          Input fields must have concrete values; null is not accepted. Omit optional fields when no
+          value is available.
 
 
-          Enter only the request fields shown in the examples. cnyid, id, createdby, modifiedby, whencreated
-          and whenmodified are assigned by the server and cannot be supplied. GET responses retain the full
-          saved record.
+          Enter only the request fields shown in the examples. cnyid, id, createdby, modifiedby,
+          whencreated and whenmodified are assigned by the server and cannot be supplied. GET responses
+          retain the full saved record.
 
 
           | Field | Rule |
 
           | --- | --- |
 
-          | `vendor_id` | Required; 1-20 letters, numbers or hyphens; unique within company; immutable after
-          save. |
+          | `vendor_id` | Required; 1-20 letters, numbers or hyphens; unique within company; immutable
+          after save. |
 
           | `name` | Required; trim surrounding spaces; must not be blank; maximum 100 characters. |
 
-          | `status` | active or inactive; default active. Deactivate/reactivate through authorized update;
-          preserve historical documents. |
+          | `status` | active or inactive; default active. Deactivate/reactivate through authorized
+          update; preserve historical documents. |
 
           | `contact` | Optional; maximum 100 characters; omit when not supplied. |
 
-          | `email` | Optional; maximum 254 characters; validate email format when supplied; omit when not
-          supplied. |
+          | `email` | Optional; maximum 100 characters; validate email format when supplied; omit when
+          not supplied. |
 
-          | `phone` | Optional 10-digit Indian mobile number, starting with 6-9; for example 9876543210. No
-          country code or spaces. |
+          | `phone` | Optional 10-digit Indian mobile number, starting with 6-9; for example 9876543210.
+          No country code or spaces. |
 
           | `addr_1` | Required, nonblank; maximum 150 characters. |
 
-          | `addr_2` | Optional; maximum 150 characters; omit when not supplied. |
+          | `addr_2` | Optional; maximum 250 characters; omit when not supplied. |
 
           | `city` | Required, nonblank; maximum 80 characters. |
 
           | `state` | Optional; maximum 80 characters; omit when not supplied. |
 
-          | `postal_code` | Optional string; maximum 20 letters/numbers; preserve leading zeros; omit when not
-          supplied. |
+          | `postal_code` | Optional string; maximum 10 letters/numbers; preserve leading zeros; omit
+          when not supplied. |
 
           | `country` | Required, nonblank free text; maximum 80 characters. |
 
@@ -280,11 +281,12 @@ paths:
       - name: id
         in: path
         required: true
-        description: Numeric internal id from a me_pur_vendor response, not the business vendor_id.
+        description: Internal string ID from a me_pur_vendor response, not the business vendor_id.
         schema:
-          type: integer
-          minimum: 1
-          example: 101
+          type: string
+          example: "101"
+          minLength: 1
+          maxLength: 40
     get:
       tags:
         - Vendors
@@ -327,8 +329,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "503":
           $ref: "#/components/responses/Unavailable"
-      description: Enter the id returned by POST /purchasing/vendors to retrieve that vendor. In Swagger dummy mode,
-        ID 101 is available initially and created vendors remain available until this tab reloads.
+      description: Enter the id returned by POST /purchasing/vendors to retrieve that vendor. In Swagger dummy
+        mode, ID 101 is available initially and created vendors remain available until this tab reloads.
     patch:
       tags:
         - Vendors
@@ -375,17 +377,23 @@ paths:
                       - message
                     properties:
                       id:
-                        type: integer
-                        minimum: 1
+                        type: string
                         description: Generated by the server; cannot be entered by the user.
                         readOnly: true
+                        maxLength: 40
+                        x-oracle-type: VARCHAR2(40)
+                        minLength: 1
                       cnyid:
                         type: integer
                         minimum: 1
                         description: Assigned by the server from the authenticated company; cannot be entered by the user.
                         readOnly: true
+                        maximum: 9999999999
+                        x-oracle-type: NUMBER(10)
                       name:
                         type: string
+                        maxLength: 100
+                        x-oracle-type: VARCHAR2(100)
                       message:
                         type: string
                   error:
@@ -464,11 +472,11 @@ paths:
                 $ref: "#/components/examples/VendorInvoiceRequest"
             schema:
               $ref: "#/components/schemas/PurchaseDocumentCreate"
-        description: Create the document and all entries together. docno and vendor_id are inputs. recordtype may be
-          order, receiver or invoice; if omitted it is inferred from the docno prefix. Entry IDs, company,
-          audit fields and parent links are assigned automatically. Optional doc_id must match the generated
-          parent ID. lineamount is calculated and a supplied value must match it. Null input values are not
-          accepted.
+        description: Create the document and all entries together. docno and vendor_id are inputs. recordtype may
+          be order, receiver or invoice; if omitted it is inferred from the docno prefix. Entry IDs,
+          company, audit fields and parent links are assigned automatically. Optional doc_id must match
+          the generated parent ID. lineamount is calculated and a supplied value must match it. Null
+          input values are not accepted.
       responses:
         "201":
           description: Purchasing document created successfully. name contains the generated document number.
@@ -501,17 +509,23 @@ paths:
                       - message
                     properties:
                       id:
-                        type: integer
-                        minimum: 1
+                        type: string
                         description: Generated by the server; cannot be entered by the user.
                         readOnly: true
+                        maxLength: 40
+                        x-oracle-type: VARCHAR2(40)
+                        minLength: 1
                       cnyid:
                         type: integer
                         minimum: 1
                         description: Assigned by the server from the authenticated company; cannot be entered by the user.
                         readOnly: true
+                        maximum: 9999999999
+                        x-oracle-type: NUMBER(10)
                       name:
                         type: string
+                        maxLength: 100
+                        x-oracle-type: VARCHAR2(100)
                       message:
                         type: string
                   error:
@@ -539,9 +553,10 @@ paths:
         in: path
         required: true
         schema:
-          type: integer
-          minimum: 1
-          example: 202
+          type: string
+          example: "202"
+          minLength: 1
+          maxLength: 40
     get:
       tags:
         - Purchasing Documents
@@ -556,8 +571,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/PurchaseDocumentNotFound"
-      description: "Returns the document with its entries array. Every entry doc_id matches the document id. Dummy
-        documents: 201 and 202."
+      description: "Returns the document with its entries array. Every entry doc_id matches the document id.
+        Dummy documents: 201 and 202."
     patch:
       tags:
         - Purchasing Documents
@@ -572,14 +587,14 @@ paths:
                 $ref: "#/components/examples/PurchaseDocumentUpdateRequest"
             schema:
               $ref: "#/components/schemas/PurchaseDocumentUpdate"
-        description: Update payment_terms/status and optionally entries in one request. An entry with id updates only
-          description/notes; optional lineno must match its saved line. An entry without id adds a new line.
-          New entries may supply doc_id matching this document. All changes succeed together or none are
-          saved.
+        description: Update payment_terms/status and optionally entries in one request. An entry with id updates
+          only description/notes; optional lineno must match its saved line. An entry without id adds a
+          new line. New entries may supply doc_id matching this document. All changes succeed together or
+          none are saved.
       responses:
         "200":
-          description: Only the submitted header fields and affected entry fields are returned inside result. Use GET
-            for the full saved document and generated entry IDs.
+          description: Only the submitted header fields and affected entry fields are returned inside result. Use
+            GET for the full saved document and generated entry IDs.
           content:
             application/json:
               examples:
@@ -626,9 +641,10 @@ paths:
         - name: doc_id
           in: query
           schema:
-            type: integer
-            minimum: 1
-            example: 201
+            type: string
+            example: "201"
+            minLength: 1
+            maxLength: 40
       responses:
         "200":
           description: Sample document entry list.
@@ -669,11 +685,12 @@ paths:
       - name: record
         in: path
         required: true
-        description: Numeric id from me_pur_docentry.
+        description: String ID from ME_PUR_DOC_ENTRY.
         schema:
-          type: integer
-          minimum: 1
-          example: 501
+          type: string
+          minLength: 1
+          maxLength: 40
+          example: "501"
     get:
       tags:
         - Purchasing Document Entries
@@ -721,14 +738,14 @@ components:
       summary: Sample read JSON response
       value:
         cnyid: 7
-        id: 501
-        doc_id: 202
+        id: "501"
+        doc_id: "202"
         lineno: 1
-        product_id: 1001
+        product_id: "1001"
         description: Office chair
         quantity: 2
-        unitcost: "125.50"
-        lineamount: "251.00"
+        unitcost: 125.5
+        lineamount: 251
         notes: Deliver to reception
         createdby: user-001
         modifiedby: user-001
@@ -738,28 +755,28 @@ components:
       summary: Sample list JSON response
       value:
         - cnyid: 7
-          id: 501
-          doc_id: 202
+          id: "501"
+          doc_id: "202"
           lineno: 1
-          product_id: 1001
+          product_id: "1001"
           description: Office chair
           quantity: 2
-          unitcost: "125.50"
-          lineamount: "251.00"
+          unitcost: 125.5
+          lineamount: 251
           notes: Deliver to reception
           createdby: user-001
           modifiedby: user-001
           whencreated: 2026-11-18T09:00:00.000Z
           whenmodified: 2026-11-18T09:00:00.000Z
         - cnyid: 7
-          id: 502
-          doc_id: 202
+          id: "502"
+          doc_id: "202"
           lineno: 2
-          product_id: 1002
+          product_id: "1002"
           description: Desk lamp
           quantity: 1
-          unitcost: "45.00"
-          lineamount: "45.00"
+          unitcost: 45
+          lineamount: 45
           notes: Pack separately
           createdby: user-001
           modifiedby: user-001
@@ -769,7 +786,7 @@ components:
       summary: "order: show order_id only"
       value:
         docno: PO-000203
-        vendor_id: 101
+        vendor_id: "101"
         doc_date: 2026-11-20
         vendor_ref: QUOTE-001
         delivery_addr: 12 Market Road, London
@@ -778,26 +795,26 @@ components:
         recordtype: order
         entries:
           - lineno: 1
-            product_id: 1001
+            product_id: "1001"
             description: Office chair
             quantity: 2
-            unitcost: "125.50"
-            lineamount: "251.00"
+            unitcost: 125.5
+            lineamount: 251
             notes: Deliver to reception
           - lineno: 2
-            product_id: 1002
+            product_id: "1002"
             description: Desk lamp
             quantity: 1
-            unitcost: "45.00"
-            lineamount: "45.00"
+            unitcost: 45
+            lineamount: 45
             notes: Pack separately
     PurchaseOrderResponse:
       summary: Sample JSON response
       value:
         cnyid: 7
-        id: 201
+        id: "201"
         docno: PO-000201
-        vendor_id: 101
+        vendor_id: "101"
         doc_date: 2026-11-18T00:00:00.000Z
         vendor_ref: QUOTE-001
         delivery_addr: 12 Market Road, London
@@ -806,18 +823,18 @@ components:
         duedate: null
         recordtype: order
         amountdue: null
-        total: "0.00"
+        total: 0
         createdby: user-001
         modifiedby: user-001
         whencreated: 2026-11-18T09:00:00.000Z
         whenmodified: 2026-11-18T09:00:00.000Z
-        order_id: 201
+        order_id: "201"
         entries: []
     ReceiverRequest:
       summary: "receiver: show receiver_id only"
       value:
         docno: RCV-000203
-        vendor_id: 101
+        vendor_id: "101"
         doc_date: 2026-11-20
         vendor_ref: QUOTE-001
         delivery_addr: 12 Market Road, London
@@ -826,26 +843,26 @@ components:
         recordtype: receiver
         entries:
           - lineno: 1
-            product_id: 1001
+            product_id: "1001"
             description: Office chair
             quantity: 2
-            unitcost: "125.50"
-            lineamount: "251.00"
+            unitcost: 125.5
+            lineamount: 251
             notes: Deliver to reception
           - lineno: 2
-            product_id: 1002
+            product_id: "1002"
             description: Desk lamp
             quantity: 1
-            unitcost: "45.00"
-            lineamount: "45.00"
+            unitcost: 45
+            lineamount: 45
             notes: Pack separately
     ReceiverResponse:
       summary: Sample JSON response
       value:
         cnyid: 7
-        id: 301
+        id: "301"
         docno: RCV-000301
-        vendor_id: 101
+        vendor_id: "101"
         doc_date: 2026-11-19T00:00:00.000Z
         vendor_ref: QUOTE-001
         delivery_addr: 12 Market Road, London
@@ -854,18 +871,18 @@ components:
         duedate: null
         recordtype: receiver
         amountdue: null
-        total: "0.00"
+        total: 0
         createdby: user-001
         modifiedby: user-001
         whencreated: 2026-11-19T09:00:00.000Z
         whenmodified: 2026-11-19T09:00:00.000Z
-        receiver_id: 301
+        receiver_id: "301"
         entries: []
     VendorInvoiceRequest:
       summary: "invoice: show invoice_id only"
       value:
         docno: INV-000203
-        vendor_id: 101
+        vendor_id: "101"
         doc_date: 2026-11-20
         vendor_ref: QUOTE-001
         delivery_addr: 12 Market Road, London
@@ -875,26 +892,26 @@ components:
         duedate: 2026-12-20
         entries:
           - lineno: 1
-            product_id: 1001
+            product_id: "1001"
             description: Office chair
             quantity: 2
-            unitcost: "125.50"
-            lineamount: "251.00"
+            unitcost: 125.5
+            lineamount: 251
             notes: Deliver to reception
           - lineno: 2
-            product_id: 1002
+            product_id: "1002"
             description: Desk lamp
             quantity: 1
-            unitcost: "45.00"
-            lineamount: "45.00"
+            unitcost: 45
+            lineamount: 45
             notes: Pack separately
     VendorInvoiceResponse:
       summary: Sample JSON response
       value:
         cnyid: 7
-        id: 202
+        id: "202"
         docno: INV-000202
-        vendor_id: 101
+        vendor_id: "101"
         doc_date: 2026-11-20T00:00:00.000Z
         vendor_ref: QUOTE-001
         delivery_addr: 12 Market Road, London
@@ -902,37 +919,37 @@ components:
         status: draft
         duedate: 2026-12-20
         recordtype: invoice
-        amountdue: "296.00"
-        total: "296.00"
+        amountdue: 296
+        total: 296
         createdby: user-001
         modifiedby: user-001
         whencreated: 2026-11-20T09:00:00.000Z
         whenmodified: 2026-11-20T09:00:00.000Z
-        invoice_id: 202
+        invoice_id: "202"
         entries:
           - cnyid: 7
-            id: 501
-            doc_id: 202
+            id: "501"
+            doc_id: "202"
             lineno: 1
-            product_id: 1001
+            product_id: "1001"
             description: Office chair
             quantity: 2
-            unitcost: "125.50"
-            lineamount: "251.00"
+            unitcost: 125.5
+            lineamount: 251
             notes: Deliver to reception
             createdby: user-001
             modifiedby: user-001
             whencreated: 2026-11-18T09:00:00.000Z
             whenmodified: 2026-11-18T09:00:00.000Z
           - cnyid: 7
-            id: 502
-            doc_id: 202
+            id: "502"
+            doc_id: "202"
             lineno: 2
-            product_id: 1002
+            product_id: "1002"
             description: Desk lamp
             quantity: 1
-            unitcost: "45.00"
-            lineamount: "45.00"
+            unitcost: 45
+            lineamount: 45
             notes: Pack separately
             createdby: user-001
             modifiedby: user-001
@@ -944,17 +961,17 @@ components:
         payment_terms: net_15
         status: pending
         entries:
-          - id: 501
+          - id: "501"
             lineno: 1
             description: Ergonomic office chair
             notes: Deliver upstairs
-          - doc_id: 202
+          - doc_id: "202"
             lineno: 3
-            product_id: 1003
+            product_id: "1003"
             description: Monitor stand
             quantity: 1
-            unitcost: "30.00"
-            lineamount: "30.00"
+            unitcost: 30
+            lineamount: 30
             notes: Handle with care
     PurchaseDocumentUpdated:
       summary: Only submitted header fields and affected entries
@@ -962,25 +979,25 @@ components:
         payment_terms: net_15
         status: pending
         entries:
-          - id: 501
+          - id: "501"
             lineno: 1
             description: Ergonomic office chair
             notes: Deliver upstairs
-          - doc_id: 202
+          - doc_id: "202"
             lineno: 3
-            product_id: 1003
+            product_id: "1003"
             description: Monitor stand
             quantity: 1
-            unitcost: "30.00"
-            lineamount: "30.00"
+            unitcost: 30
+            lineamount: 30
             notes: Handle with care
     PurchaseDocumentList:
       summary: Sample JSON list response
       value:
         - cnyid: 7
-          id: 201
+          id: "201"
           docno: PO-000201
-          vendor_id: 101
+          vendor_id: "101"
           doc_date: 2026-11-18T00:00:00.000Z
           vendor_ref: QUOTE-001
           delivery_addr: 12 Market Road, London
@@ -989,17 +1006,17 @@ components:
           duedate: null
           recordtype: order
           amountdue: null
-          total: "0.00"
+          total: 0
           createdby: user-001
           modifiedby: user-001
           whencreated: 2026-11-18T09:00:00.000Z
           whenmodified: 2026-11-18T09:00:00.000Z
-          order_id: 201
+          order_id: "201"
           entries: []
         - cnyid: 7
-          id: 202
+          id: "202"
           docno: INV-000202
-          vendor_id: 101
+          vendor_id: "101"
           doc_date: 2026-11-20T00:00:00.000Z
           vendor_ref: QUOTE-001
           delivery_addr: 12 Market Road, London
@@ -1007,37 +1024,37 @@ components:
           status: draft
           duedate: 2026-12-20
           recordtype: invoice
-          amountdue: "296.00"
-          total: "296.00"
+          amountdue: 296
+          total: 296
           createdby: user-001
           modifiedby: user-001
           whencreated: 2026-11-20T09:00:00.000Z
           whenmodified: 2026-11-20T09:00:00.000Z
-          invoice_id: 202
+          invoice_id: "202"
           entries:
             - cnyid: 7
-              id: 501
-              doc_id: 202
+              id: "501"
+              doc_id: "202"
               lineno: 1
-              product_id: 1001
+              product_id: "1001"
               description: Office chair
               quantity: 2
-              unitcost: "125.50"
-              lineamount: "251.00"
+              unitcost: 125.5
+              lineamount: 251
               notes: Deliver to reception
               createdby: user-001
               modifiedby: user-001
               whencreated: 2026-11-18T09:00:00.000Z
               whenmodified: 2026-11-18T09:00:00.000Z
             - cnyid: 7
-              id: 502
-              doc_id: 202
+              id: "502"
+              doc_id: "202"
               lineno: 2
-              product_id: 1002
+              product_id: "1002"
               description: Desk lamp
               quantity: 1
-              unitcost: "45.00"
-              lineamount: "45.00"
+              unitcost: 45
+              lineamount: 45
               notes: Pack separately
               createdby: user-001
               modifiedby: user-001
@@ -1068,7 +1085,7 @@ components:
       summary: JSON get response (numeric id is a path parameter, not a JSON body)
       value:
         cnyid: 7
-        id: 101
+        id: "101"
         vendor_id: V-001
         name: Example Vendor
         status: active
@@ -1089,35 +1106,35 @@ components:
     VendorSaved:
       summary: JSON response after creating a me_pur_vendor record
       value:
-        id: 103
+        id: "103"
         cnyid: 7
         name: Northstar Supplies
         message: Vendor created successfully.
     VendorUpdated:
       summary: JSON response after updating and deactivating a vendor
       value:
-        id: 101
+        id: "101"
         cnyid: 7
         name: Example Vendor
         message: Vendor updated successfully.
     PurchaseOrderCreated:
       summary: Purchase order created successfully
       value:
-        id: 203
+        id: "203"
         cnyid: 7
         name: PO-000203
         message: Purchase order created successfully.
     ReceiverCreated:
       summary: Receiver created successfully
       value:
-        id: 203
+        id: "203"
         cnyid: 7
         name: RCV-000203
         message: Receiver created successfully.
     VendorInvoiceCreated:
       summary: Vendor invoice created successfully
       value:
-        id: 203
+        id: "203"
         cnyid: 7
         name: INV-000203
         message: Vendor invoice created successfully.
@@ -1125,7 +1142,7 @@ components:
       summary: Dummy vendor list; POST-created vendors also appear here.
       value:
         - cnyid: 7
-          id: 101
+          id: "101"
           vendor_id: V-001
           name: Example Vendor
           status: active
@@ -1144,7 +1161,7 @@ components:
           whencreated: 2026-11-19T14:00:00Z
           whenmodified: 2026-11-19T14:00:00Z
         - cnyid: 7
-          id: 102
+          id: "102"
           vendor_id: V-003
           name: Southstar Supplies
           status: active
@@ -1170,7 +1187,7 @@ components:
         current_version: null
         result:
           - cnyid: 7
-            id: 101
+            id: "101"
             vendor_id: V-001
             name: Example Vendor
             status: active
@@ -1189,7 +1206,7 @@ components:
             whencreated: 2026-11-19T14:00:00Z
             whenmodified: 2026-11-19T14:00:00Z
           - cnyid: 7
-            id: 102
+            id: "102"
             vendor_id: V-003
             name: Southstar Supplies
             status: active
@@ -1215,7 +1232,7 @@ components:
         operation_id: null
         current_version: null
         result:
-          id: 103
+          id: "103"
           cnyid: 7
           name: Northstar Supplies
           message: Vendor created successfully.
@@ -1228,7 +1245,7 @@ components:
         current_version: null
         result:
           cnyid: 7
-          id: 101
+          id: "101"
           vendor_id: V-001
           name: Example Vendor
           status: active
@@ -1254,7 +1271,7 @@ components:
         operation_id: null
         current_version: null
         result:
-          id: 101
+          id: "101"
           cnyid: 7
           name: Example Vendor
           message: Vendor updated successfully.
@@ -1267,9 +1284,9 @@ components:
         current_version: null
         result:
           - cnyid: 7
-            id: 201
+            id: "201"
             docno: PO-000201
-            vendor_id: 101
+            vendor_id: "101"
             doc_date: 2026-11-18T00:00:00.000Z
             vendor_ref: QUOTE-001
             delivery_addr: 12 Market Road, London
@@ -1278,17 +1295,17 @@ components:
             duedate: null
             recordtype: order
             amountdue: null
-            total: "0.00"
+            total: 0
             createdby: user-001
             modifiedby: user-001
             whencreated: 2026-11-18T09:00:00.000Z
             whenmodified: 2026-11-18T09:00:00.000Z
-            order_id: 201
+            order_id: "201"
             entries: []
           - cnyid: 7
-            id: 202
+            id: "202"
             docno: INV-000202
-            vendor_id: 101
+            vendor_id: "101"
             doc_date: 2026-11-20T00:00:00.000Z
             vendor_ref: QUOTE-001
             delivery_addr: 12 Market Road, London
@@ -1296,37 +1313,37 @@ components:
             status: draft
             duedate: 2026-12-20
             recordtype: invoice
-            amountdue: "296.00"
-            total: "296.00"
+            amountdue: 296
+            total: 296
             createdby: user-001
             modifiedby: user-001
             whencreated: 2026-11-20T09:00:00.000Z
             whenmodified: 2026-11-20T09:00:00.000Z
-            invoice_id: 202
+            invoice_id: "202"
             entries:
               - cnyid: 7
-                id: 501
-                doc_id: 202
+                id: "501"
+                doc_id: "202"
                 lineno: 1
-                product_id: 1001
+                product_id: "1001"
                 description: Office chair
                 quantity: 2
-                unitcost: "125.50"
-                lineamount: "251.00"
+                unitcost: 125.5
+                lineamount: 251
                 notes: Deliver to reception
                 createdby: user-001
                 modifiedby: user-001
                 whencreated: 2026-11-18T09:00:00.000Z
                 whenmodified: 2026-11-18T09:00:00.000Z
               - cnyid: 7
-                id: 502
-                doc_id: 202
+                id: "502"
+                doc_id: "202"
                 lineno: 2
-                product_id: 1002
+                product_id: "1002"
                 description: Desk lamp
                 quantity: 1
-                unitcost: "45.00"
-                lineamount: "45.00"
+                unitcost: 45
+                lineamount: 45
                 notes: Pack separately
                 createdby: user-001
                 modifiedby: user-001
@@ -1340,7 +1357,7 @@ components:
         operation_id: null
         current_version: null
         result:
-          id: 203
+          id: "203"
           cnyid: 7
           name: PO-000203
           message: Purchase order created successfully.
@@ -1352,7 +1369,7 @@ components:
         operation_id: null
         current_version: null
         result:
-          id: 203
+          id: "203"
           cnyid: 7
           name: RCV-000203
           message: Receiver created successfully.
@@ -1364,7 +1381,7 @@ components:
         operation_id: null
         current_version: null
         result:
-          id: 203
+          id: "203"
           cnyid: 7
           name: INV-000203
           message: Vendor invoice created successfully.
@@ -1377,9 +1394,9 @@ components:
         current_version: null
         result:
           cnyid: 7
-          id: 201
+          id: "201"
           docno: PO-000201
-          vendor_id: 101
+          vendor_id: "101"
           doc_date: 2026-11-18T00:00:00.000Z
           vendor_ref: QUOTE-001
           delivery_addr: 12 Market Road, London
@@ -1388,12 +1405,12 @@ components:
           duedate: null
           recordtype: order
           amountdue: null
-          total: "0.00"
+          total: 0
           createdby: user-001
           modifiedby: user-001
           whencreated: 2026-11-18T09:00:00.000Z
           whenmodified: 2026-11-18T09:00:00.000Z
-          order_id: 201
+          order_id: "201"
           entries: []
         error: null
     PurchaseDocumentUpdatedSuccess:
@@ -1406,17 +1423,17 @@ components:
           payment_terms: net_15
           status: pending
           entries:
-            - id: 501
+            - id: "501"
               lineno: 1
               description: Ergonomic office chair
               notes: Deliver upstairs
-            - doc_id: 202
+            - doc_id: "202"
               lineno: 3
-              product_id: 1003
+              product_id: "1003"
               description: Monitor stand
               quantity: 1
-              unitcost: "30.00"
-              lineamount: "30.00"
+              unitcost: 30
+              lineamount: 30
               notes: Handle with care
         error: null
     PurchaseDocumentEntryListSuccess:
@@ -1427,28 +1444,28 @@ components:
         current_version: null
         result:
           - cnyid: 7
-            id: 501
-            doc_id: 202
+            id: "501"
+            doc_id: "202"
             lineno: 1
-            product_id: 1001
+            product_id: "1001"
             description: Office chair
             quantity: 2
-            unitcost: "125.50"
-            lineamount: "251.00"
+            unitcost: 125.5
+            lineamount: 251
             notes: Deliver to reception
             createdby: user-001
             modifiedby: user-001
             whencreated: 2026-11-18T09:00:00.000Z
             whenmodified: 2026-11-18T09:00:00.000Z
           - cnyid: 7
-            id: 502
-            doc_id: 202
+            id: "502"
+            doc_id: "202"
             lineno: 2
-            product_id: 1002
+            product_id: "1002"
             description: Desk lamp
             quantity: 1
-            unitcost: "45.00"
-            lineamount: "45.00"
+            unitcost: 45
+            lineamount: 45
             notes: Pack separately
             createdby: user-001
             modifiedby: user-001
@@ -1463,14 +1480,14 @@ components:
         current_version: null
         result:
           cnyid: 7
-          id: 501
-          doc_id: 202
+          id: "501"
+          doc_id: "202"
           lineno: 1
-          product_id: 1001
+          product_id: "1001"
           description: Office chair
           quantity: 2
-          unitcost: "125.50"
-          lineamount: "251.00"
+          unitcost: 125.5
+          lineamount: 251
           notes: Deliver to reception
           createdby: user-001
           modifiedby: user-001
@@ -1485,9 +1502,9 @@ components:
         current_version: null
         result:
           cnyid: 7
-          id: 202
+          id: "202"
           docno: INV-000202
-          vendor_id: 101
+          vendor_id: "101"
           doc_date: 2026-11-20T00:00:00.000Z
           vendor_ref: QUOTE-001
           delivery_addr: 12 Market Road, London
@@ -1495,37 +1512,37 @@ components:
           status: draft
           duedate: 2026-12-20
           recordtype: invoice
-          amountdue: "296.00"
-          total: "296.00"
+          amountdue: 296
+          total: 296
           createdby: user-001
           modifiedby: user-001
           whencreated: 2026-11-20T09:00:00.000Z
           whenmodified: 2026-11-20T09:00:00.000Z
-          invoice_id: 202
+          invoice_id: "202"
           entries:
             - cnyid: 7
-              id: 501
-              doc_id: 202
+              id: "501"
+              doc_id: "202"
               lineno: 1
-              product_id: 1001
+              product_id: "1001"
               description: Office chair
               quantity: 2
-              unitcost: "125.50"
-              lineamount: "251.00"
+              unitcost: 125.5
+              lineamount: 251
               notes: Deliver to reception
               createdby: user-001
               modifiedby: user-001
               whencreated: 2026-11-18T09:00:00.000Z
               whenmodified: 2026-11-18T09:00:00.000Z
             - cnyid: 7
-              id: 502
-              doc_id: 202
+              id: "502"
+              doc_id: "202"
               lineno: 2
-              product_id: 1002
+              product_id: "1002"
               description: Desk lamp
               quantity: 1
-              unitcost: "45.00"
-              lineamount: "45.00"
+              unitcost: 45
+              lineamount: 45
               notes: Pack separately
               createdby: user-001
               modifiedby: user-001
@@ -1536,8 +1553,8 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      description: Paste result.access_token from a successful login response without the Bearer prefix. Verify with
-        GET /auth/me.
+      description: Paste result.access_token from a successful login response without the Bearer prefix. Verify
+        with GET /auth/me.
   schemas:
     Login:
       type: object
@@ -1715,6 +1732,7 @@ components:
           maxLength: 100
           pattern: \S
           description: Vendor Name. Trim spaces; must not be blank.
+          x-oracle-type: VARCHAR2(100)
         status:
           type: string
           enum:
@@ -1722,54 +1740,65 @@ components:
             - inactive
           default: active
           description: Status. Active or Inactive; defaults to active on create. Use update to deactivate/reactivate.
+          maxLength: 10
+          x-oracle-type: VARCHAR2(10)
         contact:
           type: string
           maxLength: 100
           description: Contact Name. Optional primary sales or order contact.
+          x-oracle-type: VARCHAR2(100)
         email:
           type: string
           format: email
-          maxLength: 254
+          maxLength: 100
           description: Email Address. Validate format when entered; omit the field when no value is available.
+          x-oracle-type: VARCHAR2(100)
         phone:
           type: string
           minLength: 10
-          maxLength: 10
+          maxLength: 20
           pattern: ^[6-9][0-9]{9}$
           example: "9876543210"
-          description: "Optional Indian mobile number: 10 digits starting with 6, 7, 8 or 9. Example: 9876543210. No
-            country code or spaces."
+          description: "Optional Indian mobile number: 10 digits starting with 6, 7, 8 or 9. Example: 9876543210.
+            No country code or spaces."
+          x-oracle-type: VARCHAR2(20)
         addr_1:
           type: string
           minLength: 1
           maxLength: 150
           description: Address Line 1. Required main vendor address.
           pattern: \S
+          x-oracle-type: VARCHAR2(150)
         addr_2:
           type: string
-          maxLength: 150
+          maxLength: 250
           description: Address Line 2. Optional additional address details.
+          x-oracle-type: VARCHAR2(250)
         city:
           type: string
           minLength: 1
           maxLength: 80
           description: City. Required vendor city.
           pattern: \S
+          x-oracle-type: VARCHAR2(80)
         state:
           type: string
           maxLength: 80
           description: State / Province. Optional region name or code.
+          x-oracle-type: VARCHAR2(80)
         postal_code:
           type: string
-          maxLength: 20
+          maxLength: 10
           pattern: ^[A-Za-z0-9]+$
           description: Postal Code. Letters and numbers only; string retains leading zeros.
+          x-oracle-type: VARCHAR(10)
         country:
           type: string
           minLength: 1
           maxLength: 80
           description: Country. Required free text.
           pattern: \S
+          x-oracle-type: VARCHAR2(80)
         payment_terms:
           type: string
           enum:
@@ -1778,8 +1807,11 @@ components:
             - net_30
           default: net_30
           description: Payment Terms. Due on receipt, Net 15 or Net 30; defaults to net_30 on create.
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20)
     VendorCreate:
-      description: Create a vendor. Company, record ID and audit fields are assigned by the server and cannot be supplied.
+      description: Create a vendor. Company, record ID and audit fields are assigned by the server and cannot
+        be supplied.
       type: object
       additionalProperties: false
       required:
@@ -1795,12 +1827,14 @@ components:
           maxLength: 20
           pattern: ^[A-Za-z0-9-]+$
           description: Vendor ID. Unique within company and immutable after creation.
+          x-oracle-type: VARCHAR2(20)
         name:
           type: string
           minLength: 1
           maxLength: 100
           pattern: \S
           description: Vendor Name. Trim spaces; must not be blank.
+          x-oracle-type: VARCHAR2(100)
         status:
           type: string
           enum:
@@ -1808,54 +1842,65 @@ components:
             - inactive
           default: active
           description: Status. Active or Inactive; defaults to active on create. Use update to deactivate/reactivate.
+          maxLength: 10
+          x-oracle-type: VARCHAR2(10)
         contact:
           type: string
           maxLength: 100
           description: Contact Name. Optional primary sales or order contact.
+          x-oracle-type: VARCHAR2(100)
         email:
           type: string
           format: email
-          maxLength: 254
+          maxLength: 100
           description: Email Address. Validate format when entered; omit the field when no value is available.
+          x-oracle-type: VARCHAR2(100)
         phone:
           type: string
           minLength: 10
-          maxLength: 10
+          maxLength: 20
           pattern: ^[6-9][0-9]{9}$
           example: "9876543210"
-          description: "Optional Indian mobile number: 10 digits starting with 6, 7, 8 or 9. Example: 9876543210. No
-            country code or spaces."
+          description: "Optional Indian mobile number: 10 digits starting with 6, 7, 8 or 9. Example: 9876543210.
+            No country code or spaces."
+          x-oracle-type: VARCHAR2(20)
         addr_1:
           type: string
           minLength: 1
           maxLength: 150
           description: Address Line 1. Required main vendor address.
           pattern: \S
+          x-oracle-type: VARCHAR2(150)
         addr_2:
           type: string
-          maxLength: 150
+          maxLength: 250
           description: Address Line 2. Optional additional address details.
+          x-oracle-type: VARCHAR2(250)
         city:
           type: string
           minLength: 1
           maxLength: 80
           description: City. Required vendor city.
           pattern: \S
+          x-oracle-type: VARCHAR2(80)
         state:
           type: string
           maxLength: 80
           description: State / Province. Optional region name or code.
+          x-oracle-type: VARCHAR2(80)
         postal_code:
           type: string
-          maxLength: 20
+          maxLength: 10
           pattern: ^[A-Za-z0-9]+$
           description: Postal Code. Letters and numbers only; string retains leading zeros.
+          x-oracle-type: VARCHAR(10)
         country:
           type: string
           minLength: 1
           maxLength: 80
           description: Country. Required free text.
           pattern: \S
+          x-oracle-type: VARCHAR2(80)
         payment_terms:
           type: string
           enum:
@@ -1864,6 +1909,8 @@ components:
             - net_30
           default: net_30
           description: Payment Terms. Due on receipt, Net 15 or Net 30; defaults to net_30 on create.
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20)
     VendorUpdate:
       description: Only status and payment_terms may be updated. Supply at least one of these fields.
       type: object
@@ -1877,6 +1924,8 @@ components:
             - inactive
           default: active
           description: Status. Active or Inactive; defaults to active on create. Use update to deactivate/reactivate.
+          maxLength: 10
+          x-oracle-type: VARCHAR2(10)
         payment_terms:
           type: string
           enum:
@@ -1885,6 +1934,8 @@ components:
             - net_30
           default: net_30
           description: Payment Terms. Due on receipt, Net 15 or Net 30; defaults to net_30 on create.
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20)
     Vendor:
       description: Full vendor record returned by GET. Identity and audit fields are assigned by the server.
       unevaluatedProperties: false
@@ -1911,39 +1962,50 @@ components:
               minimum: 1
               description: Assigned by the server from the authenticated company; cannot be entered by the user.
               readOnly: true
+              maximum: 9999999999
+              x-oracle-type: NUMBER(10)
             id:
-              type: integer
-              minimum: 1
+              type: string
               description: Generated by the server; cannot be entered by the user.
               readOnly: true
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
+              minLength: 1
             vendor_id:
               type: string
               minLength: 1
               maxLength: 20
               pattern: ^[A-Za-z0-9-]+$
               description: Vendor ID. Unique within company and immutable after creation.
+              x-oracle-type: VARCHAR2(20)
             createdby:
               type: string
               minLength: 1
               pattern: \S
               description: Set by the server from the authenticated creator; retained on update.
               readOnly: true
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
             modifiedby:
               type: string
               minLength: 1
               pattern: \S
               description: Set by the server from the authenticated modifier.
               readOnly: true
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
             whencreated:
               type: string
               format: date-time
               description: Generated creation timestamp; retained on update.
               readOnly: true
+              x-oracle-type: TIMESTAMP
             whenmodified:
               type: string
               format: date-time
               description: Generated modification timestamp; cannot precede whencreated.
               readOnly: true
+              x-oracle-type: TIMESTAMP
     VendorResponse:
       $ref: "#/components/schemas/Vendor"
     OrderCreate:
@@ -1960,34 +2022,46 @@ components:
           maxLength: 20
           pattern: ^PO-
           description: Unique document number beginning with PO-.
+          x-oracle-type: VARCHAR2(20)
         vendor_id:
-          type: integer
-          minimum: 1
+          type: string
+          maxLength: 40
+          x-oracle-type: VARCHAR2(40)
+          minLength: 1
         recordtype:
           type: string
           enum:
             - order
+          maxLength: 10
+          x-oracle-type: VARCHAR2(10)
         order_id:
-          type: integer
-          minimum: 1
+          type: string
           description: Optional type key. Defaults to the generated document ID.
+          maxLength: 40
+          x-oracle-type: VARCHAR2(40)
+          minLength: 1
         doc_date:
           type: string
           format: date
+          x-oracle-type: DATE
         vendor_ref:
           type: string
-          maxLength: 30
+          maxLength: 40
+          x-oracle-type: VARCHAR2(40)
         delivery_addr:
           type: string
           minLength: 1
           pattern: \S
-          maxLength: 500
+          maxLength: 400
+          x-oracle-type: VARCHAR2(400)
         payment_terms:
           type: string
           enum:
             - due_on_receipt
             - net_15
             - net_30
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20)
         status:
           type: string
           enum:
@@ -1996,10 +2070,13 @@ components:
             - received
             - submitted
             - completed
+          maxLength: 10
+          x-oracle-type: VARCHAR2(10)
         duedate:
           type: string
           format: date
           description: Optional invoice due date; must agree with date and payment_terms.
+          x-oracle-type: DATE
         entries:
           type: array
           minItems: 1
@@ -2019,34 +2096,46 @@ components:
           maxLength: 20
           pattern: ^RCV-
           description: Unique document number beginning with RCV-.
+          x-oracle-type: VARCHAR2(20)
         vendor_id:
-          type: integer
-          minimum: 1
+          type: string
+          maxLength: 40
+          x-oracle-type: VARCHAR2(40)
+          minLength: 1
         recordtype:
           type: string
           enum:
             - receiver
+          maxLength: 10
+          x-oracle-type: VARCHAR2(10)
         receiver_id:
-          type: integer
-          minimum: 1
+          type: string
           description: Optional type key. Defaults to the generated document ID.
+          maxLength: 40
+          x-oracle-type: VARCHAR2(40)
+          minLength: 1
         doc_date:
           type: string
           format: date
+          x-oracle-type: DATE
         vendor_ref:
           type: string
-          maxLength: 30
+          maxLength: 40
+          x-oracle-type: VARCHAR2(40)
         delivery_addr:
           type: string
           minLength: 1
           pattern: \S
-          maxLength: 500
+          maxLength: 400
+          x-oracle-type: VARCHAR2(400)
         payment_terms:
           type: string
           enum:
             - due_on_receipt
             - net_15
             - net_30
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20)
         status:
           type: string
           enum:
@@ -2055,10 +2144,13 @@ components:
             - received
             - submitted
             - completed
+          maxLength: 10
+          x-oracle-type: VARCHAR2(10)
         duedate:
           type: string
           format: date
           description: Optional invoice due date; must agree with date and payment_terms.
+          x-oracle-type: DATE
         entries:
           type: array
           minItems: 1
@@ -2078,34 +2170,46 @@ components:
           maxLength: 20
           pattern: ^INV-
           description: Unique document number beginning with INV-.
+          x-oracle-type: VARCHAR2(20)
         vendor_id:
-          type: integer
-          minimum: 1
+          type: string
+          maxLength: 40
+          x-oracle-type: VARCHAR2(40)
+          minLength: 1
         recordtype:
           type: string
           enum:
             - invoice
+          maxLength: 10
+          x-oracle-type: VARCHAR2(10)
         invoice_id:
-          type: integer
-          minimum: 1
+          type: string
           description: Optional type key. Defaults to the generated document ID.
+          maxLength: 40
+          x-oracle-type: VARCHAR2(40)
+          minLength: 1
         doc_date:
           type: string
           format: date
+          x-oracle-type: DATE
         vendor_ref:
           type: string
-          maxLength: 30
+          maxLength: 40
+          x-oracle-type: VARCHAR2(40)
         delivery_addr:
           type: string
           minLength: 1
           pattern: \S
-          maxLength: 500
+          maxLength: 400
+          x-oracle-type: VARCHAR2(400)
         payment_terms:
           type: string
           enum:
             - due_on_receipt
             - net_15
             - net_30
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20)
         status:
           type: string
           enum:
@@ -2114,10 +2218,13 @@ components:
             - received
             - submitted
             - completed
+          maxLength: 10
+          x-oracle-type: VARCHAR2(10)
         duedate:
           type: string
           format: date
           description: Optional invoice due date; must agree with date and payment_terms.
+          x-oracle-type: DATE
         entries:
           type: array
           minItems: 1
@@ -2139,6 +2246,8 @@ components:
             - due_on_receipt
             - net_15
             - net_30
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20)
         status:
           type: string
           enum:
@@ -2147,6 +2256,8 @@ components:
             - received
             - submitted
             - completed
+          maxLength: 10
+          x-oracle-type: VARCHAR2(10)
         entries:
           type: array
           minItems: 1
@@ -2178,118 +2289,167 @@ components:
           minimum: 1
           readOnly: true
           description: Assigned from the company context; user cannot enter this field.
+          maximum: 9999999999
+          x-oracle-type: NUMBER(10)
         id:
-          type: integer
-          minimum: 1
+          type: string
           readOnly: true
           description: Generated record ID; user cannot enter this field.
+          maxLength: 40
+          x-oracle-type: VARCHAR2(40)
+          minLength: 1
         doc_id:
-          type: integer
-          minimum: 1
+          type: string
+          maxLength: 40
+          x-oracle-type: VARCHAR2(40)
+          minLength: 1
         lineno:
           type: integer
           minimum: 1
+          maximum: 9999999999
+          x-oracle-type: NUMBER(10)
         product_id:
-          type: integer
-          minimum: 1
+          type: string
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20)
+          minLength: 1
         description:
           type: string
           minLength: 1
           pattern: \S
           maxLength: 200
+          x-oracle-type: VARCHAR2(200)
         quantity:
           type: number
           exclusiveMinimum: 0
-          maximum: 999999999.999
           multipleOf: 0.001
+          exclusiveMaximum: 1e+35
+          x-oracle-type: NUMBER(38,3)
         unitcost:
-          type: string
-          pattern: ^(0|[1-9][0-9]{0,9})\.[0-9]{2}$
+          type: number
+          multipleOf: 0.01
+          exclusiveMaximum: 1e+36
+          exclusiveMinimum: -1e+36
+          x-oracle-type: NUMBER(38,2)
         lineamount:
-          type: string
+          type: number
           readOnly: true
+          multipleOf: 0.01
+          exclusiveMaximum: 1e+36
+          exclusiveMinimum: -1e+36
+          x-oracle-type: NUMBER(38,2)
         notes:
           type:
             - string
             - "null"
           maxLength: 500
+          x-oracle-type: VARCHAR2(500)
         createdby:
           type: string
           readOnly: true
           description: Assigned creator; retained on update.
+          maxLength: 40
+          x-oracle-type: VARCHAR2(40)
         modifiedby:
           type: string
           readOnly: true
           description: Assigned modifier.
+          maxLength: 40
+          x-oracle-type: VARCHAR2(40)
         whencreated:
           type: string
           format: date-time
           readOnly: true
+          x-oracle-type: TIMESTAMP
         whenmodified:
           type: string
           format: date-time
           readOnly: true
+          x-oracle-type: TIMESTAMP
     PurchaseDocument:
       oneOf:
         - type: object
           additionalProperties: false
           properties:
             vendor_id:
-              type: integer
-              minimum: 1
+              type: string
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
+              minLength: 1
             doc_date:
               type: string
               format: date-time
+              x-oracle-type: DATE
             vendor_ref:
               type: string
-              maxLength: 30
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
             delivery_addr:
               type: string
               minLength: 1
               pattern: \S
-              maxLength: 500
+              maxLength: 400
+              x-oracle-type: VARCHAR2(400)
             payment_terms:
               type: string
               enum:
                 - due_on_receipt
                 - net_15
                 - net_30
+              maxLength: 20
+              x-oracle-type: VARCHAR2(20)
             cnyid:
               type: integer
               minimum: 1
               readOnly: true
               description: Assigned from the company context; user cannot enter this field.
+              maximum: 9999999999
+              x-oracle-type: NUMBER(10)
             id:
-              type: integer
-              minimum: 1
+              type: string
               readOnly: true
               description: Generated record ID; user cannot enter this field.
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
+              minLength: 1
             createdby:
               type: string
               readOnly: true
               description: Assigned creator; retained on update.
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
             modifiedby:
               type: string
               readOnly: true
               description: Assigned modifier.
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
             whencreated:
               type: string
               format: date-time
               readOnly: true
+              x-oracle-type: TIMESTAMP
             whenmodified:
               type: string
               format: date-time
               readOnly: true
+              x-oracle-type: TIMESTAMP
             recordtype:
               type: string
               enum:
                 - order
+              maxLength: 10
+              x-oracle-type: VARCHAR2(10)
             order_id:
-              type: integer
-              minimum: 1
+              type: string
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
+              minLength: 1
             docno:
               type: string
               readOnly: true
+              maxLength: 20
+              x-oracle-type: VARCHAR2(20)
             status:
               type: string
               enum:
@@ -2298,20 +2458,31 @@ components:
                 - received
                 - submitted
                 - completed
+              maxLength: 10
+              x-oracle-type: VARCHAR2(10)
             total:
-              type: string
+              type: number
               readOnly: true
+              multipleOf: 0.01
+              exclusiveMaximum: 1000000000000000000
+              exclusiveMinimum: -1000000000000000000
+              x-oracle-type: NUMBER(20,2)
             duedate:
               type:
                 - string
                 - "null"
               format: date
               readOnly: true
+              x-oracle-type: DATE
             amountdue:
               type:
-                - string
+                - number
                 - "null"
               readOnly: true
+              multipleOf: 0.01
+              exclusiveMaximum: 1000000000000000000
+              exclusiveMinimum: -1000000000000000000
+              x-oracle-type: NUMBER(20,2)
             entries:
               type: array
               items:
@@ -2326,61 +2497,84 @@ components:
           additionalProperties: false
           properties:
             vendor_id:
-              type: integer
-              minimum: 1
+              type: string
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
+              minLength: 1
             doc_date:
               type: string
               format: date-time
+              x-oracle-type: DATE
             vendor_ref:
               type: string
-              maxLength: 30
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
             delivery_addr:
               type: string
               minLength: 1
               pattern: \S
-              maxLength: 500
+              maxLength: 400
+              x-oracle-type: VARCHAR2(400)
             payment_terms:
               type: string
               enum:
                 - due_on_receipt
                 - net_15
                 - net_30
+              maxLength: 20
+              x-oracle-type: VARCHAR2(20)
             cnyid:
               type: integer
               minimum: 1
               readOnly: true
               description: Assigned from the company context; user cannot enter this field.
+              maximum: 9999999999
+              x-oracle-type: NUMBER(10)
             id:
-              type: integer
-              minimum: 1
+              type: string
               readOnly: true
               description: Generated record ID; user cannot enter this field.
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
+              minLength: 1
             createdby:
               type: string
               readOnly: true
               description: Assigned creator; retained on update.
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
             modifiedby:
               type: string
               readOnly: true
               description: Assigned modifier.
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
             whencreated:
               type: string
               format: date-time
               readOnly: true
+              x-oracle-type: TIMESTAMP
             whenmodified:
               type: string
               format: date-time
               readOnly: true
+              x-oracle-type: TIMESTAMP
             recordtype:
               type: string
               enum:
                 - receiver
+              maxLength: 10
+              x-oracle-type: VARCHAR2(10)
             receiver_id:
-              type: integer
-              minimum: 1
+              type: string
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
+              minLength: 1
             docno:
               type: string
               readOnly: true
+              maxLength: 20
+              x-oracle-type: VARCHAR2(20)
             status:
               type: string
               enum:
@@ -2389,20 +2583,31 @@ components:
                 - received
                 - submitted
                 - completed
+              maxLength: 10
+              x-oracle-type: VARCHAR2(10)
             total:
-              type: string
+              type: number
               readOnly: true
+              multipleOf: 0.01
+              exclusiveMaximum: 1000000000000000000
+              exclusiveMinimum: -1000000000000000000
+              x-oracle-type: NUMBER(20,2)
             duedate:
               type:
                 - string
                 - "null"
               format: date
               readOnly: true
+              x-oracle-type: DATE
             amountdue:
               type:
-                - string
+                - number
                 - "null"
               readOnly: true
+              multipleOf: 0.01
+              exclusiveMaximum: 1000000000000000000
+              exclusiveMinimum: -1000000000000000000
+              x-oracle-type: NUMBER(20,2)
             entries:
               type: array
               items:
@@ -2417,61 +2622,84 @@ components:
           additionalProperties: false
           properties:
             vendor_id:
-              type: integer
-              minimum: 1
+              type: string
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
+              minLength: 1
             doc_date:
               type: string
               format: date-time
+              x-oracle-type: DATE
             vendor_ref:
               type: string
-              maxLength: 30
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
             delivery_addr:
               type: string
               minLength: 1
               pattern: \S
-              maxLength: 500
+              maxLength: 400
+              x-oracle-type: VARCHAR2(400)
             payment_terms:
               type: string
               enum:
                 - due_on_receipt
                 - net_15
                 - net_30
+              maxLength: 20
+              x-oracle-type: VARCHAR2(20)
             cnyid:
               type: integer
               minimum: 1
               readOnly: true
               description: Assigned from the company context; user cannot enter this field.
+              maximum: 9999999999
+              x-oracle-type: NUMBER(10)
             id:
-              type: integer
-              minimum: 1
+              type: string
               readOnly: true
               description: Generated record ID; user cannot enter this field.
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
+              minLength: 1
             createdby:
               type: string
               readOnly: true
               description: Assigned creator; retained on update.
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
             modifiedby:
               type: string
               readOnly: true
               description: Assigned modifier.
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
             whencreated:
               type: string
               format: date-time
               readOnly: true
+              x-oracle-type: TIMESTAMP
             whenmodified:
               type: string
               format: date-time
               readOnly: true
+              x-oracle-type: TIMESTAMP
             recordtype:
               type: string
               enum:
                 - invoice
+              maxLength: 10
+              x-oracle-type: VARCHAR2(10)
             invoice_id:
-              type: integer
-              minimum: 1
+              type: string
+              maxLength: 40
+              x-oracle-type: VARCHAR2(40)
+              minLength: 1
             docno:
               type: string
               readOnly: true
+              maxLength: 20
+              x-oracle-type: VARCHAR2(20)
             status:
               type: string
               enum:
@@ -2480,20 +2708,31 @@ components:
                 - received
                 - submitted
                 - completed
+              maxLength: 10
+              x-oracle-type: VARCHAR2(10)
             total:
-              type: string
+              type: number
               readOnly: true
+              multipleOf: 0.01
+              exclusiveMaximum: 1000000000000000000
+              exclusiveMinimum: -1000000000000000000
+              x-oracle-type: NUMBER(20,2)
             duedate:
               type:
                 - string
                 - "null"
               format: date
               readOnly: true
+              x-oracle-type: DATE
             amountdue:
               type:
-                - string
+                - number
                 - "null"
               readOnly: true
+              multipleOf: 0.01
+              exclusiveMaximum: 1000000000000000000
+              exclusiveMinimum: -1000000000000000000
+              x-oracle-type: NUMBER(20,2)
             entries:
               type: array
               items:
@@ -2515,36 +2754,51 @@ components:
         - unitcost
       properties:
         doc_id:
-          type: integer
-          minimum: 1
+          type: string
           description: Optional parent ID; if supplied it must match the parent document. Otherwise assigned
             automatically.
+          maxLength: 40
+          x-oracle-type: VARCHAR2(40)
+          minLength: 1
         lineno:
           type: integer
           minimum: 1
+          maximum: 9999999999
+          x-oracle-type: NUMBER(10)
         product_id:
-          type: integer
-          minimum: 1
+          type: string
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20)
+          minLength: 1
         description:
           type: string
           minLength: 1
           pattern: \S
           maxLength: 200
+          x-oracle-type: VARCHAR2(200)
         quantity:
           type: number
           exclusiveMinimum: 0
-          maximum: 999999999.999
           multipleOf: 0.001
+          exclusiveMaximum: 1e+35
+          x-oracle-type: NUMBER(38,3)
         unitcost:
-          type: string
-          pattern: ^(0|[1-9][0-9]{0,9})\.[0-9]{2}$
+          type: number
+          multipleOf: 0.01
+          exclusiveMaximum: 1e+36
+          exclusiveMinimum: -1e+36
+          x-oracle-type: NUMBER(38,2)
         notes:
           type: string
           maxLength: 500
+          x-oracle-type: VARCHAR2(500)
         lineamount:
-          type: string
-          pattern: ^(0|[1-9][0-9]{0,15})\.[0-9]{2}$
+          type: number
           description: Optional; must equal quantity × unitcost rounded half up to two decimals.
+          multipleOf: 0.01
+          exclusiveMaximum: 1e+36
+          exclusiveMinimum: -1e+36
+          x-oracle-type: NUMBER(38,2)
     DocumentEntryUpdate:
       type: object
       additionalProperties: false
@@ -2557,20 +2811,26 @@ components:
             - notes
       properties:
         id:
-          type: integer
-          minimum: 1
+          type: string
+          maxLength: 40
+          x-oracle-type: VARCHAR2(40)
+          minLength: 1
         lineno:
           type: integer
           minimum: 1
           description: Optional existing line number; must match the saved line.
+          maximum: 9999999999
+          x-oracle-type: NUMBER(10)
         description:
           type: string
           minLength: 1
           pattern: \S
           maxLength: 200
+          x-oracle-type: VARCHAR2(200)
         notes:
           type: string
           maxLength: 500
+          x-oracle-type: VARCHAR2(500)
   responses:
     PurchaseDocumentEntryNotFound:
       description: Entry not found in the authenticated company.
@@ -2938,17 +3198,23 @@ components:
                   - message
                 properties:
                   id:
-                    type: integer
-                    minimum: 1
+                    type: string
                     description: Generated by the server; cannot be entered by the user.
                     readOnly: true
+                    maxLength: 40
+                    x-oracle-type: VARCHAR2(40)
+                    minLength: 1
                   cnyid:
                     type: integer
                     minimum: 1
                     description: Assigned by the server from the authenticated company; cannot be entered by the user.
                     readOnly: true
+                    maximum: 9999999999
+                    x-oracle-type: NUMBER(10)
                   name:
                     type: string
+                    maxLength: 100
+                    x-oracle-type: VARCHAR2(100)
                   message:
                     type: string
               error:
@@ -2957,8 +3223,8 @@ components:
             savedVendor:
               $ref: "#/components/examples/VendorSavedSuccess"
     ValidationError:
-      description: Validation errors for editable request fields only. Select an example to see its input field and
-        message.
+      description: Validation errors for editable request fields only. Select an example to see its input field
+        and message.
       content:
         application/json:
           schema:
@@ -3085,9 +3351,9 @@ components:
                   field: addr_1
                   message: Address Line 1 must be 150 characters or fewer.
             additionalAddressTooLong:
-              summary: "addr_2: Address Line 2 must be 150 characters or fewer."
+              summary: "addr_2: Address Line 2 must be 250 characters or fewer."
               description: 'Invalid request fragment:
-                `{"addr_2":"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"}`.'
+                `{"addr_2":"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"}`.'
               x-message-source: pdf-page-2
               value:
                 success: false
@@ -3097,7 +3363,7 @@ components:
                 error:
                   code: VALIDATION_ERROR
                   field: addr_2
-                  message: Address Line 2 must be 150 characters or fewer.
+                  message: Address Line 2 must be 250 characters or fewer.
             cityTooLong:
               summary: "city: City must be 80 characters or fewer."
               description: 'Invalid request fragment:
@@ -3141,9 +3407,9 @@ components:
                   field: country
                   message: Country must be 80 characters or fewer.
             emailTooLong:
-              summary: "email: Email Address must be 254 characters or fewer."
+              summary: "email: Email Address must be 100 characters or fewer."
               description: 'Invalid request fragment:
-                `{"email":"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"}`.'
+                `{"email":"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"}`.'
               x-message-source: pdf-page-2
               value:
                 success: false
@@ -3153,7 +3419,7 @@ components:
                 error:
                   code: VALIDATION_ERROR
                   field: email
-                  message: Email Address must be 254 characters or fewer.
+                  message: Email Address must be 100 characters or fewer.
             phoneTooLong:
               summary: "phone: Phone Number must be exactly 10 digits."
               description: 'Invalid request fragment: `{"phone":"98765432101"}`.'
@@ -3168,8 +3434,8 @@ components:
                   field: phone
                   message: Phone Number must be exactly 10 digits.
             postalCodeTooLong:
-              summary: "postal_code: Postal Code must be 20 characters or fewer."
-              description: 'Invalid request fragment: `{"postal_code":"XXXXXXXXXXXXXXXXXXXXX"}`.'
+              summary: "postal_code: Postal Code must be 10 characters or fewer."
+              description: 'Invalid request fragment: `{"postal_code":"XXXXXXXXXXX"}`.'
               x-message-source: pdf-page-2
               value:
                 success: false
@@ -3179,7 +3445,7 @@ components:
                 error:
                   code: VALIDATION_ERROR
                   field: postal_code
-                  message: Postal Code must be 20 characters or fewer.
+                  message: Postal Code must be 10 characters or fewer.
             requiredAddress:
               summary: "addr_1: Enter Address Line 1."
               description: 'Invalid request fragment: `{"addr_1":"   "}`.'
@@ -3343,8 +3609,8 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
     Unavailable:
       description: >
-        Database or service is unavailable. A failed transactional write returns "Unable to save. Your changes
-        have not been saved. Try again."
+        Database or service is unavailable. A failed transactional write returns "Unable to save. Your
+        changes have not been saved. Try again."
       content:
         application/json:
           schema:
@@ -3601,33 +3867,36 @@ components:
                   field: status
                   message: "Select a valid status: active, inactive."
 x-pdf-validation-review:
-  scope: Current API contract; user-requested type names, conditional keys and PATCH restrictions override
-    earlier PDF mappings.
+  scope: Purchasing field names and Oracle data types follow the supplied ME_PUR_VENDOR, ME_PUR_DOC and
+    ME_PUR_DOC_ENTRY DDL. Existing API workflow and validation rules remain in effect; entries is the
+    nested document API relationship.
   source: Purchasing_PO_API_Through_Vendor_Invoice (1).pdf, version 4.0, 17 November 2026
   field_counts:
     me_pur_vendor: 19
     me_pur_doc: 20
-    me_pur_docentry: 14
+    me_pur_doc_entry: 14
   differences:
-    - completed has no transition in the PDF. submitted applies to Requisitions, which the current recordtype
-      examples do not represent.
-    - Entry notes and its 500-character limit are a merged-contract extension; PDF Notes is at document level.
+    - completed has no transition in the PDF. submitted applies to Requisitions, which the current
+      recordtype examples do not represent.
+    - Entry notes and its 500-character limit are a merged-contract extension; PDF Notes is at document
+      level.
     - Vendor and purchase document POST requests omit generated identity and audit fields. Document POST
-      examples omit calculated or inapplicable fields instead of submitting null. GET examples remain full
-      records. These are contract expectations; live backend parity is not verified here.
-    - The PDF does not prescribe internal-key, timestamp-format, calculated-value mismatch messages or HTTP
-      status codes. Those messages are marked merged-contract; 400/403/404/409/503 are contract status
-      mappings.
-    - Documents use order/order_id, receiver/receiver_id and invoice/invoice_id. Only the selected type key is
-      supplied. Entries use cnyid/id; identity and audit fields are generated.
+      examples omit calculated or inapplicable fields instead of submitting null. GET examples remain
+      full records. These are contract expectations; live backend parity is not verified here.
+    - The PDF does not prescribe internal-key, timestamp-format, calculated-value mismatch messages or
+      HTTP status codes. Those messages are marked merged-contract; 400/403/404/409/503 are contract
+      status mappings.
+    - Documents use order/order_id, receiver/receiver_id and invoice/invoice_id. Only the selected type
+      key is supplied. Entries use cnyid/id; identity and audit fields are generated.
   workflow_rules:
-    - Document POST creates the header and entries together. Document PATCH accepts payment_terms, status and
-      entries. An existing entry ID permits description/notes updates; an entry without ID adds a new line.
-    - Standalone document-entry endpoints support GET only. Parent links and generated identity/audit fields
-      cannot be changed through client input.
+    - Document POST creates the header and entries together. Document PATCH accepts payment_terms, status
+      and entries. An existing entry ID permits description/notes updates; an entry without ID adds a new
+      line.
+    - Standalone document-entry endpoints support GET only. Parent links and generated identity/audit
+      fields cannot be changed through client input.
     - Entry IDs and line numbers are unique within their scopes. Each entry belongs to the company and
       document returned by GET. Invalid nested changes leave the header and all entries unchanged.
-    - Invoice amountdue equals its line total. Invoice due date is calculated from its date and payment terms;
-      a supplied due date must agree. POST and GET both use vendor_id.
+    - Invoice amountdue equals its line total. Invoice due date is calculated from its date and payment
+      terms; a supplied due date must agree. POST and GET both use vendor_id.
     - Calculated line amounts are rounded half-up to 2 decimals before summing total. Reject excess input
       precision and overflow; no partial saved records or effects on failure.
