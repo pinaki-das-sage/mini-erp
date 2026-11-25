@@ -72,12 +72,13 @@ return static function (Api $api, Connection $connection): void {
             array $query
         ) use ($drivers): array {
             return $drivers->createDriver($actor, $input);
-        }
+        },
+        201
     );
 
     $api->register(
         'POST',
-        '/logistics/drivers/{id}',
+        '/logistics/drivers/{id}/update',
         'logistics.drivers',
         'update',
         static function (

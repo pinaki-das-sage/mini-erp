@@ -11,7 +11,7 @@ use MiniErp\shared\security\UserService;
 
 final class Api
 {
-    /** @var list<array{method: string, pattern: string, path: string, object: string, operation: string, handler: \Closure, status: int}> */
+    /** @var list<array{method: string, pattern: string, path: string, object: string, operation: string, handler: \Closure, status: int, wrapResponse: bool}> */
     private array $routes = [];
     private readonly TokenService $tokens;
 
@@ -75,8 +75,8 @@ final class Api
         }
     }
 
-    /** Handler receives Actor, JSON input, path parameters and query parameters; returns its service result. */
-    public function register(string $method, string $path, string $object, string $operation, callable $handler, int $status = 200): void
+    /** Handler receives Actor, JSON input, path parameters and query parameters; responses are enveloped unless wrapResponse is false. */
+    public function register(string $method, string $path, string $object, string $operation, callable $handler, int $status = 200, bool $wrapResponse = true): void
     {
         if (!in_array($method, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], true)
             || !preg_match('#\A/(?:[a-z][a-z0-9-]*|\{[a-z][a-z0-9_]*\})(?:/(?:[a-z][a-z0-9-]*|\{[a-z][a-z0-9_]*\}))*\z#', $path)
@@ -105,7 +105,7 @@ final class Api
         }
         $this->routes[] = ['method' => $method, 'pattern' => '#\A' . implode('/', $segments) . '\z#',
             'path' => $path, 'object' => $object, 'operation' => $operation,
-            'handler' => \Closure::fromCallable($handler), 'status' => $status];
+            'handler' => \Closure::fromCallable($handler), 'status' => $status, 'wrapResponse' => $wrapResponse];
     }
 
     /** @return array{status: int, headers: array<string, string>, body: string} */
@@ -155,7 +155,13 @@ final class Api
                     if (!is_array($result)) {
                         throw new \LogicException('API handlers must return an array service result.');
                     }
-                    return $this->response($route['status'], $result, is_string($input['action_reference'] ?? null) ? $input['action_reference'] : null);
+                    return $this->response(
+                        $route['status'],
+                        $result,
+                        is_string($input['action_reference'] ?? null) ? $input['action_reference'] : null,
+                        null,
+                        $route['wrapResponse'],
+                    );
                 }
             }
             throw new AppError('NOT_FOUND', 'API operation not found.', 404);
@@ -227,10 +233,14 @@ final class Api
         return $match[1];
     }
 
-    private function response(int $status, ?array $result, ?string $operation = null, ?array $error = null): array
+    private function response(int $status, ?array $result, ?string $operation = null, ?array $error = null, bool $wrapResponse = true): array
     {
+        $body = $wrapResponse
+            ? ['success' => $error === null, 'operation_id' => $operation,
+                'current_version' => $result['current_version'] ?? null, 'result' => $result, 'error' => $error]
+            : (object) ($result ?? []);
+
         return ['status' => $status, 'headers' => ['Content-Type' => 'application/json; charset=utf-8', 'Cache-Control' => 'no-store'],
-            'body' => json_encode(['success' => $error === null, 'operation_id' => $operation,
-                'current_version' => $result['current_version'] ?? null, 'result' => $result, 'error' => $error], JSON_THROW_ON_ERROR)];
+            'body' => json_encode($body, JSON_THROW_ON_ERROR)];
     }
 }

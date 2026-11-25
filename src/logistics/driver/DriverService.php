@@ -83,7 +83,7 @@ class DriverService
         );
     }
 
-    // POST /logistics/drivers/{id}
+    // POST /logistics/drivers/{id}/update
     public function updateDriver(Actor $actor, int $id, array $input): array
     {   
         $authorization = new Authorization($this->connection);
