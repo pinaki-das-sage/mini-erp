@@ -31,6 +31,10 @@ test('all local references resolve and operation IDs remain unique', () => {
 test('Customer contract matches the updated backend without changing login company support', () => {
   assert.equal(schemas.CustomerRecordId.maximum, 999999999999999);
   assert(!schemas.CustomerCreateRequest.required.includes('action_reference'));
+  assert(!schemas.CustomerCreateRequest.required.includes('customer_code'));
+  assert.equal(schemas.CustomerCreateRequest.allOf[1].properties.customer_code, undefined);
+  assert.equal(operation('/sales/customers').requestBody.content['application/json'].example.customer_code, undefined);
+  assert.equal(schemas.Customer.allOf[1].properties.customer_code.readOnly, true);
   assert(!(schemas.CustomerUpdateRequest.required || []).includes('action_reference'));
   assert.match(schemas.Customer.allOf[1].properties.amount_customer_owes_us.description, /stored/);
   assert.equal(operation('/auth/login').requestBody.content['application/json'].schema.properties.company.enum, undefined);

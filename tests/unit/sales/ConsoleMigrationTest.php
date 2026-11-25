@@ -33,6 +33,10 @@ final class ConsoleMigrationTest extends TestCase
         self::assertLessThan($upgrade, $lifecycle);
         self::assertLessThan($documents, $upgrade);
         self::assertLessThan($lines, $documents);
+        $sequence = strpos($writes, 'CREATE SEQUENCE ME_OE_CUST_CODE_SEQ');
+        self::assertNotFalse($sequence);
+        self::assertLessThan($sequence, $lines);
+        self::assertStringContainsString('011_oe_customer_code_sequence.php', $output);
         self::assertSame(1, substr_count($writes, 'CREATE TABLE ME_MIGRATIONS'));
     }
 

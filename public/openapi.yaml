@@ -26,7 +26,7 @@ paths:
               type: object
               required: [ company, username, password ]
               properties:
-                company: { type: string }
+                company: { type: string, enum: [ SIA-MINI-ERP ] }
                 username: { type: string }
                 password: { type: string, format: password }
       responses:
@@ -54,8 +54,9 @@ paths:
       tags: [ Customers ]
       summary: Create a Customer
       operationId: createCustomer
-      description: Generate a numeric id for Customer URLs. Customer Code is unique within the signed-in company and
-        immutable. action_reference is optional; omit it for a normal request. Without a supplied reference,
+      description: Generate a numeric id for Customer URLs and a read-only Customer Code such as CUST-0001.
+        Codes use a shared sequence across companies, grow beyond four digits and may have gaps. Do not supply
+        customer_code. Existing codes remain unchanged. action_reference is optional; omit it for a normal request. Without a supplied reference,
         repeated requests are processed independently.
       requestBody:
         required: true
@@ -63,7 +64,6 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/CustomerCreateRequest" }
             example:
-              customer_code: CUST-001
               customer_name: Example Traders
               billing_address_line_1: 12 Market Road
               city: Bengaluru
@@ -93,19 +93,6 @@ paths:
       operationId: getCustomer
       description: Read an active or inactive Customer by numeric id within the signed-in company.
       responses: { "200": { $ref: "#/components/responses/Customer" }, default: { $ref: "#/components/responses/Error" } }
-    patch:
-      tags: [ Customers ]
-      summary: Update or activate/deactivate a Customer
-      operationId: updateCustomer
-      description: Update supplied fields by numeric id. Set is_active to T or F; omitted fields retain their saved
-        values. action_reference is optional; omit it for a normal request.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/CustomerUpdateRequest" }
-            example: { is_active: "F" }
-      responses: { "200": { $ref: "#/components/responses/Customer" }, default: { $ref: "#/components/responses/Error" } }
 
   /sales/customers/{id}/update:
     parameters:
@@ -113,10 +100,9 @@ paths:
     post:
       tags: [ Customers ]
       summary: Update or activate/deactivate a Customer using POST
-      operationId: updateCustomerViaPost
-      description: Alternative to PATCH for hosts that restrict HTTP methods. Uses the same service, authorization
-        and validation as PATCH. action_reference is optional; when supplied, the same reference and input can
-        be retried across either update route. Omitted fields retain their saved values.
+      operationId: updateCustomer
+      description: Update supplied fields by numeric id using POST. action_reference is optional; when supplied,
+        the same reference and input can be retried. Omitted fields retain their saved values.
       requestBody:
         required: true
         content:
@@ -132,11 +118,16 @@ paths:
       tags: [ Sales Quotes ]
       summary: Create a Draft Quote
       operationId: createQuote
+      description: |
+        Create a Draft using customer_code and whole-number quantity strings. action_reference is optional,
+        matching Customers. Draft saves validate local fields without calling Inventory; no stock check
+        or reservation. Active Item/Warehouse validation is deferred to Submit. Its adapter is not connected
+        yet, so Submit returns INVENTORY_UNAVAILABLE (HTTP 503) and preserves the Draft.
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/QuoteCreateRequest" } } }
       responses: { "201": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
-      x-implementation-status: planned
+      x-implementation-status: implemented
     get:
       tags: [ Sales Quotes ]
       summary: List Sales Quotes
@@ -152,7 +143,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/QuoteList" }
         default: { $ref: "#/components/responses/Error" }
-      x-implementation-status: planned
+      x-implementation-status: implemented
 
   /sales/quotes/{quote_number}:
     parameters:
@@ -162,16 +153,22 @@ paths:
       summary: Get a Quote
       operationId: getQuote
       responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
-      x-implementation-status: planned
-    patch:
+      x-implementation-status: implemented
+
+  /sales/quotes/{quote_number}/update:
+    parameters:
+      - { $ref: "#/components/parameters/QuoteNumber" }
+    post:
       tags: [ Sales Quotes ]
-      summary: Update a Draft Quote
+      summary: Update a Draft Quote using POST
       operationId: updateQuote
+      description: Save the complete Draft lines and local header fields using Update permission. Inventory reference
+        validation is deferred to Submit. action_reference is optional for safe retries.
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/QuoteUpdateRequest" } } }
       responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
-      x-implementation-status: planned
+      x-implementation-status: implemented
 
   /sales/quotes/{quote_number}/submit:
     parameters:
@@ -180,11 +177,13 @@ paths:
       tags: [ Sales Quotes ]
       summary: Submit a saved Draft Quote
       operationId: submitQuote
-      requestBody: { $ref: "#/components/requestBodies/SalesDocumentAction" }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
       responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
-      description: Requires the sales.quotes:submit permission. Validate the saved Draft header and all lines; no
+      description: Requires the sales.quotes:update permission. Validate the saved Draft header and all lines; no
         Inventory availability or reservation check.
-      x-implementation-status: planned
+      x-implementation-status: integration-pending
 
   /sales/quotes/{quote_number}/move-to-draft:
     parameters:
@@ -193,9 +192,12 @@ paths:
       tags: [ Sales Quotes ]
       summary: Return an eligible Submitted Quote to Draft
       operationId: moveQuoteToDraft
-      requestBody: { $ref: "#/components/requestBodies/SalesDocumentAction" }
+      description: Requires sales.quotes:update and no downstream document link, including a Draft Order.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
       responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
-      x-implementation-status: planned
+      x-implementation-status: implemented
 
   /sales/quotes/{quote_number}/delete:
     parameters:
@@ -204,11 +206,14 @@ paths:
       tags: [ Sales Quotes ]
       summary: Delete an eligible Draft Quote
       operationId: deleteQuote
-      requestBody: { $ref: "#/components/requestBodies/SalesDocumentAction" }
+      description: Requires sales.quotes:delete and an unreferenced Draft. Consumed Quote numbers are never reused.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
       responses:
         "200": { $ref: "#/components/responses/QuoteDeleted" }
         default: { $ref: "#/components/responses/Error" }
-      x-implementation-status: planned
+      x-implementation-status: implemented
 
   /sales/orders:
     post:
@@ -269,7 +274,11 @@ paths:
         progress: all lines assigned to Delivered Trips means Closed; otherwise any valid assignment means In
         Progress; no valid assignments means Submitted."
       x-implementation-status: planned
-    patch:
+
+  /sales/orders/{order_number}/update:
+    parameters:
+      - { $ref: "#/components/parameters/OrderNumber" }
+    post:
       tags: [ Sales Orders ]
       summary: Update a Draft Order
       operationId: updateOrder
@@ -343,12 +352,23 @@ paths:
       operationId: createInvoice
       requestBody:
         required: true
-        content: { application/json: { schema: { $ref: "#/components/schemas/InvoiceCreateRequest" } } }
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InvoiceCreateRequest" }
+            example:
+              action_reference: invoice-test-create-001
+              customer_code: CUST-001
+              warehouse_id: W01
+              lines:
+                - item_code: RF-001
+                  description: Test invoice item
+                  quantity: "2"
+                  unit_price: "10.25"
       responses: { "201": { $ref: "#/components/responses/Invoice" }, default: { $ref: "#/components/responses/Error" } }
       description: Create standalone or copy an eligible Submitted / In Progress / Closed Order in full. Revalidate
         source on save and submit; reserve it atomically. Draft has no payment status, payment entry or
         Customer balance effect.
-      x-implementation-status: planned
+      x-implementation-status: integration-pending
     get:
       tags: [ Sales Invoices ]
       summary: List Sales Invoices
@@ -365,7 +385,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/InvoiceList" }
         default: { $ref: "#/components/responses/Error" }
-      x-implementation-status: planned
+      x-implementation-status: integration-pending
 
   /sales/invoices/{invoice_number}:
     parameters:
@@ -375,16 +395,63 @@ paths:
       summary: Get a Invoice
       operationId: getInvoice
       responses: { "200": { $ref: "#/components/responses/Invoice" }, default: { $ref: "#/components/responses/Error" } }
-      x-implementation-status: planned
-    patch:
+      x-implementation-status: integration-pending
+
+  /sales/invoices/{invoice_number}/update:
+    parameters:
+      - { $ref: "#/components/parameters/InvoiceNumber" }
+    post:
       tags: [ Sales Invoices ]
       summary: Update a Draft Invoice
       operationId: updateInvoice
+      description: |-
+        Enter the saved Invoice Number in the invoice_number path parameter above.
+        The URL is /sales/invoices/{invoice_number}/update, not /sales/invoices/update.
+        Choose Editable template for placeholders or Filled example for an illustrative request.
+        Replace all placeholder strings and use the current_version and line_id values from GET Invoice.
+        Use a new action_reference for each new update; reuse the original body/reference only for a retry.
+        Omitted header fields keep their saved values. Supply the complete intended lines collection;
+        an existing line omitted from the collection is removed. Omit line_id only for a new line.
+        These examples update a standalone Invoice, so source_line_id is omitted. For an Order-linked
+        Invoice, retain each source_line_id and the complete inherited line contents in source order.
       requestBody:
         required: true
-        content: { application/json: { schema: { $ref: "#/components/schemas/InvoiceUpdateRequest" } } }
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InvoiceUpdateRequest" }
+            examples:
+              template:
+                summary: Editable template
+                description: Replace string values with your retry reference, saved line ID, Item SKU and text.
+                  Set expected_version from GET Invoice and enter the intended quantity and price.
+                  Numeric fields retain their required JSON types; this template is not ready to execute unchanged.
+                value:
+                  action_reference: string
+                  expected_version: 1
+                  notes: string
+                  lines:
+                    - line_id: string
+                      item_code: string
+                      description: string
+                      quantity: "1"
+                      unit_price: "0.00"
+              filledExample:
+                summary: Filled example
+                description: Illustrative update for SI-000000000000003 at version 1 with line ID 45.
+                  Use these identifiers only if they match your saved Invoice. Otherwise replace them
+                  with its current values. In this example, quantity 3 at 10.25 produces a total of 30.75.
+                value:
+                  action_reference: invoice-test-update-001
+                  expected_version: 1
+                  notes: Updated test invoice
+                  lines:
+                    - line_id: "45"
+                      item_code: RF-001
+                      description: Updated test invoice item
+                      quantity: "3"
+                      unit_price: "10.25"
       responses: { "200": { $ref: "#/components/responses/Invoice" }, default: { $ref: "#/components/responses/Error" } }
-      x-implementation-status: planned
+      x-implementation-status: integration-pending
 
   /sales/invoices/{invoice_number}/submit:
     parameters:
@@ -399,7 +466,7 @@ paths:
         source; Invoice Date must be on/after Order Date. Require Invoice Total greater than 0. Set Submitted
         and Unpaid; add debt to the stored Customer balance once in the same transaction. The source Order
         need not be delivered. Repeated requests cannot duplicate debt.
-      x-implementation-status: planned
+      x-implementation-status: integration-pending
 
   /sales/invoices/{invoice_number}/move-to-draft:
     parameters:
@@ -413,7 +480,7 @@ paths:
       description: Requires the sales.invoices:return_to_draft permission, Submitted and Unpaid, no recorded Payment
         and no downstream reference. Remove unpaid Customer debt once and clear payment status atomically.
         Keep its Order source link; resubmission contributes once again.
-      x-implementation-status: planned
+      x-implementation-status: integration-pending
 
   /sales/invoices/{invoice_number}/delete:
     parameters:
@@ -429,7 +496,7 @@ paths:
       description: Requires Delete permission. Only an authorized unreferenced Draft can be deleted, from All
         Documents. Every Submitted Invoice is protected, whether Unpaid, Partially Paid or Paid. Release its
         source claim atomically; never reuse its number.
-      x-implementation-status: planned
+      x-implementation-status: integration-pending
 
   /sales/invoices/{invoice_number}/payments:
     parameters:
@@ -440,14 +507,41 @@ paths:
       operationId: recordInvoicePayment
       requestBody:
         required: true
-        content: { application/json: { schema: { $ref: "#/components/schemas/PaymentCreateRequest" } } }
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PaymentCreateRequest" }
+            examples:
+              template:
+                summary: Editable template
+                description: Replace the reference strings, date and amount. Use the latest Submitted Invoice
+                  current_version as expected_version and its actual number in the path. Payment Date must
+                  be on/after Invoice Date and not after the business date. This template is not ready to execute unchanged.
+                value:
+                  action_reference: string
+                  expected_version: 1
+                  payment_amount: "0.01"
+                  payment_date: YYYY-MM-DD
+                  payment_reference: string
+              partialPayment:
+                summary: Filled partial-payment example
+                description: For an illustrative Submitted Invoice at version 2 with 20.50 due, this payment
+                  produces version 3, total paid 7.25 and amount due 13.25. Replace the date with a valid
+                  date for your Invoice, use its actual current version, and use a new reference for each new payment.
+                value:
+                  action_reference: invoice-payment-example-001
+                  expected_version: 2
+                  payment_amount: "7.25"
+                  payment_date: "2026-11-25"
+                  payment_reference: TEST-BANK-001
       responses: { "201": { $ref: "#/components/responses/Payment" }, default: { $ref: "#/components/responses/Error" } }
       description: Requires payment action permission. Recheck locked current Amount Due on a same-company Submitted
         Invoice; 0 < Payment Amount <= Amount Due. Date is on/after Invoice Date and not future. Record once
         with request identity, totals and Customer balance in one transaction; replay identical committed
         requests before stale/state checks. Reject reused keys with different input, overpayment and new
-        payments once Paid. No edit, delete or reversal; Logistics changes do not alter money.
-      x-implementation-status: planned
+        payments once Paid. Identical retries retain the original expected_version and return the original
+        201 result, even after later payments. Customer inactivity does not block a receipt against an existing
+        Submitted Invoice. No edit, delete or reversal; Logistics changes do not alter money.
+      x-implementation-status: integration-pending
     get:
       tags: [ Customer Payments ]
       summary: List payment history
@@ -458,7 +552,10 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/PaymentHistory" }
         default: { $ref: "#/components/responses/Error" }
-      x-implementation-status: planned
+      description: Immutable payment history for the same-company Invoice, ordered by action recording time
+        then Payment Number. Recording actor/time come from the shared action; timestamps are UTC. Existing
+        Draft or unpaid Invoices with no receipts return an empty list. Unknown query fields are rejected.
+      x-implementation-status: integration-pending
 
   /sales/references/customers:
     get:
@@ -569,6 +666,8 @@ components:
       name: invoice_number
       in: path
       required: true
+      description: Saved Invoice Number returned by create/list/get Invoice, for example SI-000000000000003.
+        Enter your actual Invoice Number here; it is part of the URL, not a request-body field.
       schema: { $ref: "#/components/schemas/SalesDocumentNumber" }
     DraftSubmittedStatus: { name: status, in: query, schema: { type: string, enum: [ Draft, Submitted ] } }
     Search:
@@ -617,7 +716,7 @@ components:
         - Missing required field: Enter {Field label}.
         - Overlength: {Field label} must be {limit} characters or fewer.
         - Customer Code cannot be changed after creation.
-        - Customer Code may contain only letters, numbers and hyphens.
+        - Customer Code is generated by the system and cannot be supplied.
         - Enter a valid Email Address.
         - Enter a valid Phone Number.
         - Enter Country.
@@ -625,7 +724,8 @@ components:
         - Select a valid Is Active value (T or F).
         - Select valid Payment Terms.
         - Amount Customer Owes Us is calculated and cannot be edited.
-        - Customer Code already exists. Enter a unique code.
+        - Generated Customer Code already exists. Contact the lab maintainer.
+        - Customer Code could not be generated.
         - This document has changed. Refresh and try again.
         - This action reference belongs to a different request.
         - Enter {Field label}. / {Field label} must be {limit} characters or fewer.
@@ -680,7 +780,7 @@ components:
       headers: { WWW-Authenticate: { description: Present for HTTP 401., schema: { type: string } } }
       content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
     Customer:
-      description: Saved Customer with generated numeric id, immutable customer_code and calculated balance. No
+      description: Saved Customer with generated numeric id, system-generated immutable customer_code and calculated balance. No
         Customer revision is currently defined.
       content: { application/json: { schema: { $ref: "#/components/schemas/CustomerResponse" } } }
     CustomerList:
@@ -797,8 +897,9 @@ components:
       maxLength: 20
       minLength: 1
       pattern: "^[A-Za-z0-9-]+$"
-      example: CUST-001
-      description: Entered business code, unique within company and immutable after creation.
+      example: CUST-0001
+      description: Immutable business code. New Customers receive a system-generated CUST- code with at least four
+        digits from a sequence shared across companies; gaps are normal. Existing codes remain valid.
     CustomerDetails:
       type: object
       properties:
@@ -836,10 +937,9 @@ components:
                   same input. Without a supplied key, requests execute independently and operation_id is
                   null."
               }
-            customer_code: { $ref: "#/components/schemas/CustomerCode" }
             is_active: { $ref: "#/components/schemas/CustomerDetails/properties/is_active", default: "T" }
             payment_terms: { $ref: "#/components/schemas/CustomerDetails/properties/payment_terms", default: NET_30 }
-      required: [ customer_code, customer_name, billing_address_line_1, city, country ]
+      required: [ customer_name, billing_address_line_1, city, country ]
       unevaluatedProperties: false
     CustomerUpdateRequest:
       type: object
@@ -868,7 +968,7 @@ components:
         - type: object
           properties:
             id: { $ref: "#/components/schemas/CustomerRecordId", readOnly: true }
-            customer_code: { $ref: "#/components/schemas/CustomerCode" }
+            customer_code: { $ref: "#/components/schemas/CustomerCode", readOnly: true }
             amount_customer_owes_us:
               type: string
               readOnly: true
@@ -965,7 +1065,7 @@ components:
                 $ref: "#/components/schemas/SalesLineInput"
                 not: { required: [ line_id ] }
                 unevaluatedProperties: false
-      required: [ action_reference, customer_code, warehouse_id, lines ]
+      required: [ customer_code, warehouse_id, lines ]
       unevaluatedProperties: false
     QuoteUpdateRequest:
       type: object
@@ -979,8 +1079,15 @@ components:
               type: array
               minItems: 1
               items: { $ref: "#/components/schemas/SalesLineInput", unevaluatedProperties: false }
-      required: [ action_reference, expected_version, lines ]
+      required: [ expected_version, lines ]
       unevaluatedProperties: false
+    QuoteActionRequest:
+      type: object
+      required: [ expected_version ]
+      properties:
+        action_reference: { $ref: "#/components/schemas/ActionReference" }
+        expected_version: { type: integer, minimum: 1, maximum: 9999999999 }
+      additionalProperties: false
     SalesDocumentActionRequest:
       type: object
       required: [ action_reference, expected_version ]
@@ -993,8 +1100,9 @@ components:
       allOf:
         - { $ref: "#/components/schemas/QuoteFields" }
         - type: object
-          required: [ quote_number, status, document_total, current_version, available_actions ]
+          required: [ quote_number, customer_name, status, document_total, current_version, available_actions ]
           properties:
+            customer_name: { type: string, minLength: 1, maxLength: 100, readOnly: true }
             quote_number: { $ref: "#/components/schemas/SalesDocumentNumber", readOnly: true }
             status: { type: string, enum: [ Draft, Submitted ], readOnly: true }
             document_total: { $ref: "#/components/schemas/SalesAmount" }
@@ -1037,7 +1145,7 @@ components:
       allOf:
         - { $ref: "#/components/schemas/ApiSuccess" }
         - properties:
-            operation_id: { type: string }
+            operation_id: { type: [ string, "null" ] }
             current_version: { type: "null" }
             result:
               type: object

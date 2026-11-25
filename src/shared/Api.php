@@ -231,6 +231,7 @@ final class Api
     {
         return ['status' => $status, 'headers' => ['Content-Type' => 'application/json; charset=utf-8', 'Cache-Control' => 'no-store'],
             'body' => json_encode(['success' => $error === null, 'operation_id' => $operation,
-                'current_version' => $result['current_version'] ?? null, 'result' => $result, 'error' => $error], JSON_THROW_ON_ERROR)];
+                'current_version' => $result['current_version'] ?? $result['invoice']['current_version'] ?? null,
+                'result' => $result, 'error' => $error], JSON_THROW_ON_ERROR)];
     }
 }
