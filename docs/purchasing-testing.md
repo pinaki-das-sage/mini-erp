@@ -1,5 +1,14 @@
 # Purchasing API and database verification
 
+Document entry `product_id` is now a positive JSON integer, from 1 through
+9999999999 (for example, `"product_id": 1001`). Apply the forward purchasing
+migration with `php bin/console.php migrate purchasing` before deploying this
+API change. Migration `005_numeric_product_id.php` converts the column to
+`NUMBER(10)` and rejects existing nonnumeric, zero, negative, or oversized values
+before changing the table. Stop purchasing writes and back up the table first;
+Oracle DDL commits each step, so restore the backup if conversion is interrupted.
+Existing applied migration files remain unchanged.
+
 The successful migration output verifies that the migration runner applied the
 purchasing statements. It does not verify API behavior or business rules.
 

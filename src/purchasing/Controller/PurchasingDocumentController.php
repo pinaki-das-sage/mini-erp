@@ -234,7 +234,7 @@ final readonly class PurchasingDocumentController
         }
         $result = [
             'lineno' => $line,
-            'product_id' => self::requiredString($entry, 'product_id', 20),
+            'product_id' => self::productId($entry),
             'description' => self::requiredString($entry, 'description', 200),
             'quantity' => $quantity,
             'unitcost' => $unitCost,
@@ -269,6 +269,15 @@ final readonly class PurchasingDocumentController
             return $result;
         }
         return self::createEntry($entry, $lineNumbers);
+    }
+
+    private static function productId(array $input): int
+    {
+        $value = self::positiveInteger($input, 'product_id');
+        if ($value > 9999999999) {
+            throw new AppError('VALIDATION_ERROR', 'product_id must be at most 9999999999.');
+        }
+        return $value;
     }
 
     private static function positiveInteger(array $input, string $field): int
