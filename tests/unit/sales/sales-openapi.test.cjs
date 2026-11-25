@@ -45,7 +45,6 @@ test('Customer contract matches the updated backend without changing login compa
   assert.equal(schemas.CustomerCreateRequest.allOf[1].properties.customer_code, undefined);
   assert.equal(schemas.Customer.allOf[1].properties.customer_code.readOnly, true);
   assert.equal(operation('/sales/customers').requestBody.content['application/json'].example.customer_code, undefined);
-  assert.match(operation('/sales/customers').description, /CUST-001/);
   assert(!(schemas.CustomerUpdateRequest.required || []).includes('action_reference'));
   assert.match(schemas.Customer.allOf[1].properties.amount_customer_owes_us.description, /stored/);
   assert.equal(operation('/auth/login').requestBody.content['application/json'].schema.properties.company.enum, undefined);
@@ -57,12 +56,14 @@ test('Quote contract matches optional retry keys, workflow grants and joined Cus
     assert(!schemas[name].required.includes('action_reference'));
   }
   assert(schemas.QuoteUpdateRequest.required.includes('expected_version'));
+  assert(!schemas.QuoteUpdateRequest.required.includes('lines'));
+  assert(schemas.QuoteCreateRequest.required.includes('lines'));
+  const quoteUpdateLines = schemas.QuoteUpdateRequest.allOf[1].properties.lines;
+  assert.equal(quoteUpdateLines.type, 'array');
+  assert.equal(quoteUpdateLines.minItems, 1);
   assert(schemas.QuoteActionRequest.required.includes('expected_version'));
   assert(spec.paths['/sales/quotes/{quote_number}/update'].post);
   assert(schemas.QuoteSummary.allOf[1].required.includes('customer_name'));
-  assert.match(operation('/sales/quotes/{quote_number}/move-to-draft').description, /sales.quotes:update/);
-  assert.match(operation('/sales/quotes').description, /Draft saves validate local fields without calling Inventory/);
-  assert.match(operation('/sales/quotes').description, /INVENTORY_UNAVAILABLE \(HTTP 503\)/);
 });
 
 test('login and component schemas use valid JSON Schema types', () => {
@@ -101,7 +102,6 @@ test('Invoice sources are Orders and removed Shipper definitions leave no refere
   assert.equal(schemas.InvoiceFields.properties.source_order_number.$ref, '#/components/schemas/SalesDocumentNumber');
   assert.match(schemas.InvoiceUpdateRequest.description, /immutable Order source/);
   assert.deepEqual(schemas.EligibleOrderSummary.properties.status.enum, ['Submitted']);
-  assert.match(operation('/sales/invoices/eligible-orders', 'get').description, /without an existing source claim/);
   assert.equal(operation('/sales/invoices/eligible-orders', 'get')['x-implementation-status'], 'integration-pending');
   assert.deepEqual(spec.components.parameters.DocumentType.schema.enum, ['Quote', 'Order', 'Invoice']);
 });
@@ -116,7 +116,6 @@ test('Invoice creation accepts only its Submitted Order number and optional retr
   assert(example.source_order_number);
   assert.equal(example.lines, undefined);
   assert.equal(example.action_reference, undefined);
-  assert.match(operation('/sales/invoices').description, /Submitted Sales Order number/);
   assert(schemas.InvoiceLineInput.required.includes('product_id'));
   assert.equal(schemas.InvoiceLineInput.properties.item_code, undefined);
 });
@@ -201,10 +200,6 @@ test('Order progress and Trip responses match the three-document model', () => {
   assert.equal(orderRules[4].if.properties.status.const, 'Submitted');
   assert.deepEqual(orderRules[4].then.properties.lines.items.properties.trip_status.enum, ['Draft', 'Cancelled', null]);
   assert.deepEqual(orderRules[5].then.properties.lines.contains.properties.trip_status.enum, ['Dispatched', 'Delivered']);
-  const progress = operation('/sales/orders/{order_number}', 'get').description;
-  assert.match(progress, /Draft Trip assignment keeps the Order Submitted/);
-  assert.match(progress, /Dispatch of all lines means In Progress/);
-  assert.match(progress, /One whole Order belongs to one current Trip/);
   assert.deepEqual(orderRules[4].then.properties.lines.anyOf[0].items.properties.trip_assigned, { const: false });
   assert.equal(orderRules[5].then.properties.lines.items.properties.trip_status.const, 'Dispatched');
 });
@@ -231,18 +226,8 @@ test('Order flow requires a Quote and creates its Draft Invoice with reservation
   assert.equal(schemas.OrderSubmitResponse, undefined);
   assert(!schemas.OrderCreateRequest.required.includes('action_reference'));
   assert(!schemas.OrderUpdateRequest.required.includes('action_reference'));
-  assert.match(submit.description, /Create exactly one linked Draft Invoice on Submit/);
-  assert.match(submit.description, /any failure rolls everything back/);
-  assert.match(submit.description, /without duplicate reservations/);
-  const progress = operation('/sales/orders/{order_number}', 'get').description;
-  assert.match(progress, /Reads never change status or create Invoices/);
-  assert.match(progress, /On final delivery/);
-  assert.match(progress, /exactly one source-linked Draft Invoice/);
-  assert.match(progress, /same shared transaction/);
-  assert.match(progress, /different action reference/);
   const move = operation('/sales/orders/{order_number}/move-to-draft');
   assert.equal(move['x-implementation-status'], 'implemented');
-  assert.match(move.description, /release Inventory reservations/);
   assert(schemas.OrderSummary.allOf[1].properties.available_actions.items.enum.includes('move_to_draft'));
 });
 
@@ -256,9 +241,6 @@ test('Order Submit and saved-field return checks are connected', () => {
   assert.equal(operation('/sales/orders/{order_number}/submit')['x-implementation-status'], 'implemented');
   assert.equal(operation('/sales/orders/{order_number}/move-to-draft')['x-implementation-status'], 'implemented');
   assert.deepEqual(schemas.OrderActionRequest.required, ['expected_version']);
-  assert.match(operation('/sales/orders/{order_number}/submit').description, /inventory.reservations:reserve/);
-  assert.match(operation('/sales/orders/{order_number}/move-to-draft').description, /SalesTripAssignmentGuard/);
-  assert.match(operation('/sales/orders/{order_number}/move-to-draft').description, /both references have been cleared/);
   const product = new RegExp(schemas.OrderLineInput.properties.product_id.pattern);
   assert(product.test('163'));
   assert(!product.test('ITEM-001'));
@@ -278,18 +260,15 @@ test('Draft Order updates permit editable lines and header-only changes with man
   assert.equal(schemas.OrderUpdateRequest.example.lines[0].description, 'Sagar Testing order update');
 });
 
-test('lifecycle permissions and reservation rollback remain explicit', () => {
+test('lifecycle endpoints retain success and reservation error responses', () => {
   for (const type of ['quotes', 'orders', 'invoices']) {
     const singular = { quotes: 'quote', orders: 'order', invoices: 'invoice' }[type];
     const route = `/sales/${type}/{${singular}_number}`;
-    assert.match(operation(route + '/submit').description, new RegExp(`sales\\.${type}:${type === 'quotes' ? 'update' : 'submit'}`));
-    if (type !== 'quotes') assert.match(operation(route + '/move-to-draft').description, new RegExp(`sales\\.${type}:return_to_draft`));
+    assert(operation(route + '/submit').responses['200']);
+    assert(operation(route + '/move-to-draft').responses['200']);
   }
   const submit = operation('/sales/orders/{order_number}/submit');
   assert(submit.responses['409']);
   assert(submit.responses['503']);
-  assert.match(submit.description, /shared transaction/);
-  assert.match(operation('/sales/orders/{order_number}/move-to-draft').description, /no current valid Trip assignment and an eligible linked Draft Invoice/);
   assert.match(operation('/sales/orders/{order_number}/delete').summary, /Draft/);
-  assert.match(operation('/sales/orders/{order_number}/delete').description, /Submitted, In Progress and Closed Orders cannot be deleted/);
 });

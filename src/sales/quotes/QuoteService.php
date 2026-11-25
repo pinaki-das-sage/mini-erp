@@ -106,12 +106,18 @@ final readonly class QuoteService
             $row = $this->row($tx, $actor, $number);
             $this->guard($row, $input, 'edit');
             $saved = $this->present($tx, $actor, $row);
-            [$header, $lines] = $this->validate($tx, $actor, [...array_intersect_key($saved, array_flip(self::FIELDS)), ...$input], $saved['lines']);
+            $replaceLines = array_key_exists('lines', $input);
+            $savedLines = array_map(static fn (array $line): array => array_intersect_key($line,
+                array_flip(['line_id', 'product_id', 'description', 'quantity', 'unit_price'])), $saved['lines']);
+            // Omitted lines retain the saved collection; explicit null/empty values still fail validation.
+            [$header, $lines] = $this->validate($tx, $actor, [
+                ...array_intersect_key($saved, array_flip(self::FIELDS)), 'lines' => $savedLines, ...$input,
+            ], $saved['lines']);
             $tx->execute("UPDATE ME_OE_DOCUMENTS SET CUSTOMER_RECORD# = :customer_record, WAREHOUSE_ID = :warehouse_id, DOCUMENT_DATE = TO_DATE(:quote_date, 'YYYY-MM-DD'),
                 VALID_UNTIL = TO_DATE(:valid_until, 'YYYY-MM-DD'), REQUESTED_DELIVERY_DATE = TO_DATE(:requested_delivery_date, 'YYYY-MM-DD'), SHIPPING_ADDRESS = :shipping_address,
                 PAYMENT_TERMS = :payment_terms, NOTES = :notes, VERSION = VERSION + 1, WHENMODIFIED = CURRENT_TIMESTAMP
                 WHERE CNY# = :company_id AND RECORD# = :id", ['company_id' => $actor->companyId, 'id' => $row['RECORD#'], ...$header]);
-            $this->saveLines($tx, $actor, $row, $lines);
+            if ($replaceLines) { $this->saveLines($tx, $actor, $row, $lines); }
             return $this->present($tx, $actor, $this->row($tx, $actor, $number));
         });
     }

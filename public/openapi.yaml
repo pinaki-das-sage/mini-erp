@@ -54,9 +54,6 @@ paths:
       tags: [ Customers ]
       summary: Create a Customer
       operationId: createCustomer
-      description: Generate a numeric id for Customer URLs and an immutable Customer Code such as CUST-001.
-        Omit customer_code from the create request; the server generates it. Codes are unique within the
-        signed-in company. Optional action_reference supports safe retries.
       requestBody:
         required: true
         content:
@@ -72,8 +69,6 @@ paths:
       tags: [ Customers ]
       summary: List Customers
       operationId: listCustomers
-      description: Search Customer Code or name. Filter by is_active; omit it to include both active and inactive
-        Customers.
       parameters:
         - { $ref: "#/components/parameters/Search" }
         - { $ref: "#/components/parameters/CustomerActive" }
@@ -90,7 +85,6 @@ paths:
       tags: [ Customers ]
       summary: Get a Customer
       operationId: getCustomer
-      description: Read an active or inactive Customer by numeric id within the signed-in company.
       responses: { "200": { $ref: "#/components/responses/Customer" }, default: { $ref: "#/components/responses/CustomerQuoteError" } }
 
   /sales/customers/{id}/update:
@@ -100,7 +94,6 @@ paths:
       tags: [ Customers ]
       summary: Update or activate/deactivate a Customer using POST
       operationId: updateCustomer
-      description: Update supplied fields by numeric id using POST. Omitted fields retain their saved values.
       requestBody:
         required: true
         content:
@@ -116,11 +109,6 @@ paths:
       tags: [ Sales Quotes ]
       summary: Create a Draft Quote
       operationId: createQuote
-      description: |
-        Create a Draft using customer_code and whole-number quantity strings.
-        Draft saves validate local fields without calling Inventory; no stock check
-        or reservation. Active Product/W01 validation runs through the connected Inventory adapter on Submit.
-        Inventory query failures return INVENTORY_UNAVAILABLE (HTTP 503) and preserve the Draft.
       requestBody:
         required: true
         content:
@@ -176,9 +164,6 @@ paths:
       tags: [ Sales Quotes ]
       summary: Update a Draft Quote using POST
       operationId: updateQuote
-      description: Save the complete Draft lines and local header fields using Update permission. Use the current
-        expected_version and saved line_id from GET Quote; the example values are illustrative. Inventory
-        reference validation is deferred to Submit.
       requestBody:
         required: true
         content:
@@ -206,8 +191,6 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
       responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/CustomerQuoteError" } }
-      description: Requires the sales.quotes:update permission. Validate the saved Draft header, all lines
-        and active same-company Products/W01 through Inventory. No stock availability check or reservation.
       x-implementation-status: implemented
 
   /sales/quotes/{quote_number}/move-to-draft:
@@ -217,7 +200,6 @@ paths:
       tags: [ Sales Quotes ]
       summary: Return an eligible Submitted Quote to Draft
       operationId: moveQuoteToDraft
-      description: Requires sales.quotes:update and no downstream document link, including a Draft Order.
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
@@ -231,7 +213,6 @@ paths:
       tags: [ Sales Quotes ]
       summary: Delete an eligible Draft Quote
       operationId: deleteQuote
-      description: Requires sales.quotes:delete and an unreferenced Draft. Consumed Quote numbers are never reused.
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
@@ -249,21 +230,11 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/OrderCreateRequest" } } }
       responses: { "201": { $ref: "#/components/responses/Order" }, default: { $ref: "#/components/responses/Error" } }
-      description: Create only from an eligible same-company readable Submitted Quote not already claimed by
-        another Order. Copy its complete lines and inherited business values atomically with its source link.
-        Save Draft without Inventory availability or reservation checks. Standalone Orders are not supported.
-        Send only the Quote number and optional Order-specific fields; Customer, Warehouse, shipping address,
-        payment terms and the entire line set are copied by the server and must not be supplied in this request.
-        Requires sales.orders:create and sales.quotes:read. action_reference is optional; retain an explicit
-        reference and identical payload for safe retries. Order numbering requires the existing sales sequence.
       x-implementation-status: implemented
     get:
       tags: [ Sales Orders ]
       summary: List Sales Orders
       operationId: listOrders
-      description: List only same-company Orders linked to a same-company Quote, filtering before pagination.
-        Legacy standalone Orders and records without a valid Quote source are outside this list's scope;
-        they are not deleted, repaired or assigned a guessed source. Direct detail/actions retain source validation.
       parameters:
         - { $ref: "#/components/parameters/CustomerCode" }
         - { $ref: "#/components/parameters/WarehouseId" }
@@ -282,8 +253,6 @@ paths:
       tags: [ Sales Orders ]
       summary: List eligible Quote sources
       operationId: listOrderQuoteSources
-      description: Requires sales.orders:create and sales.quotes:read. This lookup does not claim a Quote;
-        creation revalidates Submitted state and exclusive source usage under the Quote parent lock.
       parameters:
         - { $ref: "#/components/parameters/CustomerCode" }
         - { $ref: "#/components/parameters/WarehouseId" }
@@ -304,20 +273,6 @@ paths:
       summary: Get an Order
       operationId: getOrder
       responses: { "200": { $ref: "#/components/responses/Order" }, default: { $ref: "#/components/responses/Error" } }
-      description: >-
-        Return header and complete ordered lines, source information, totals, current status, revision,
-        permitted actions and each line's current Trip reference/assignment/status. Reads never change status
-        or create Invoices. Logistics calls internal Sales fulfillment services using the shared transaction;
-        Sales validates events and owns Order status/version updates. Draft stays Draft until explicit Submit.
-        One whole Order belongs to one current Trip, including every saved line and full quantity.
-        Partial line selections and mixed Trip IDs/statuses are rejected. Draft Trip assignment keeps the Order Submitted.
-        Dispatch of all lines means In Progress; all lines delivered means Closed. Cancellation clears the whole Draft assignment and cannot undo dispatch
-        or delivery. On final delivery, record the delivery and close the Order in the same shared transaction,
-        including audit and replay results. Order submission creates exactly one source-linked Draft Invoice.
-        Delivery never creates another Invoice, including when sent with a different action reference. Draft Invoice creation
-        has no Customer balance effect. Invoice submission is separate and never gates Logistics progress.
-        Logistics selects whole Submitted Orders whose lines are all unassigned, using full Order detail.
-        A Submitted Order can already have a Draft Trip assignment; status alone does not establish availability.
       x-implementation-status: implemented
       x-integration-status: Submit-time Invoice creation is connected; Logistics event writers require team integration.
 
@@ -352,23 +307,6 @@ paths:
         "409": { $ref: "#/components/responses/InventoryConflict" }
         "503": { $ref: "#/components/responses/InventoryUnavailable" }
         default: { $ref: "#/components/responses/Error" }
-      description: Requires sales.orders:submit, sales.quotes:read, sales.invoices:create and inventory.reservations:reserve permissions.
-        Validate saved Draft and source. Repeated Item demand within the header Warehouse is checked cumulatively
-        under Inventory balance locks; available = On Hand - Reserved, supplied by Inventory.
-        Equality is sufficient. Submit only after every Item passes and Inventory confirms reservation.
-        Coordinate concurrent requests; on insufficiency, service failure or partial reservation keep the
-        whole Order Draft and roll back all reservations and Sales changes in the shared transaction.
-        After reservation, mark Submitted and save audit/action results in the same transaction; any failure
-        rolls everything back. An exact retry returns the original result without duplicate reservations.
-        Create exactly one linked Draft Invoice on Submit, copying the final saved Order header and lines.
-        Return its invoice_number with the Order result. Invoice Date uses Order Date; Due Date follows payment terms.
-        Invoice creation, stock reservation and status posting share one transaction; Invoice failure also rolls
-        back reservations and leaves the Order Draft. Draft Invoice creation does not change Customer debt or stock.
-        Logistics delivery only closes the Order and never creates another Invoice.
-        InventoryOrderAdapter connects the supplied ReservationService using the same transaction. It locks saved
-        Sales lines by ID, validates active same-company Products/W01 through QuoteInventoryValidator and calls
-        reserveStock ordered by Product ID then Sales line ID. Missing Inventory schema returns
-        INVENTORY_UNAVAILABLE (503), preserving the Draft. There is no simulated stock success.
       x-implementation-status: implemented
       x-integration-status: Real provider wired; live Oracle concurrency/rollback and permission acceptance remain pending.
 
@@ -389,21 +327,6 @@ paths:
         "200": { $ref: "#/components/responses/Order" }
         "503": { $ref: "#/components/responses/InventoryUnavailable" }
         default: { $ref: "#/components/responses/Error" }
-      description: Requires the sales.orders:return_to_draft permission and Submitted state. Require no current
-        valid Trip assignment and an eligible linked Draft Invoice without payments or downstream references.
-        Deleting that Draft Invoice requires sales.invoices:delete. Older Orders with no Invoice can also return.
-        Lock and recheck through the agreed Sales Trip fields and linked Invoice; delete the Draft Invoice and its source link,
-        release Inventory reservations and return the Order to Draft in the same shared
-        transaction. Assignment, Invoice creation and return must not race successfully. If dependency checks
-        or release fail, preserve the Submitted Order and reservations. Retain its Quote source link and
-        inherited header locks. Draft line editing is allowed after release. In Progress and Closed Orders cannot return to Draft.
-        SalesTripAssignmentGuard blocks if any line has TRIP_ID, LOGISTICS_TRIP_LINE_ID or an active Trip status.
-        trip_status is a string such as Draft, Dispatched or Delivered, not a boolean. Cancelled status is
-        eligible only when both references have been cleared. The same guard supplies Inventory's real saved
-        Draft-claim quantities; zero follows successful verification, never a missing lookup. Release requires
-        inventory.reservations:read and release permissions. Logistics must mirror assignment/cancellation
-        fields through Sales callbacks in its own transaction using the same parent/line locks. Independent
-        Logistics-only claims are outside this simplified protocol. Query/release failures roll everything back.
       x-implementation-status: implemented
       x-integration-status: Saved-field return guard connected; real Logistics synchronization/races still require verification.
 
@@ -430,9 +353,6 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/OrderDeleted" }
         default: { $ref: "#/components/responses/Error" }
-      description: Requires the sales.orders:delete permission. Delete only an unreferenced Draft without valid Trip
-        assignments. Release its Quote source claim atomically. Submitted, In Progress and Closed
-        Orders cannot be deleted. Never reuse its number.
       x-implementation-status: implemented
 
   /sales/invoices:
@@ -448,11 +368,6 @@ paths:
             example:
               source_order_number: SO-000000000000001
       responses: { "201": { $ref: "#/components/responses/Invoice" }, default: { $ref: "#/components/responses/Error" } }
-      description: Supply only the Submitted Sales Order number. The server copies its Customer, Warehouse,
-        shipping address, payment terms, notes, Order Date and every saved line, preserving source links.
-        Due Date is derived from the copied date and terms. Optional action_reference enables replay.
-        An Order already linked to an Invoice is rejected; Order submission already creates its Draft Invoice
-        automatically and returns invoice_number. Draft creation has no Customer balance effect.
       x-implementation-status: integration-pending
     get:
       tags: [ Sales Invoices ]
@@ -489,14 +404,6 @@ paths:
       tags: [ Sales Invoices ]
       summary: Update a Draft Invoice
       operationId: updateInvoice
-      description: |-
-        Enter the saved Invoice Number in the invoice_number path parameter above.
-        Only Invoice Date, Due Date and Notes can be updated on a Draft Invoice.
-        Use current_version from GET Invoice as expected_version. Invoice Date must be on or after
-        Order Date; Due Date must be on or after Invoice Date. Omitted fields retain their saved values,
-        except an omitted Due Date is recalculated from payment terms if Invoice Date changes.
-        Items, quantities, prices, Customer, Warehouse, terms, shipping address and source links are locked.
-        Do not send lines. action_reference is optional; supply one only when explicit retry replay is needed.
       requestBody:
         required: true
         content:
@@ -519,10 +426,6 @@ paths:
       operationId: submitInvoice
       requestBody: { $ref: "#/components/requestBodies/InvoiceAction" }
       responses: { "200": { $ref: "#/components/responses/Invoice" }, default: { $ref: "#/components/responses/Error" } }
-      description: Requires the sales.invoices:submit permission. Revalidate saved fields, lines and optional Order
-        source; Invoice Date must be on/after Order Date. Require Invoice Total greater than 0. Set Submitted
-        and Unpaid; add debt to the stored Customer balance once in the same transaction. The source Order
-        need not be delivered. Repeated requests cannot duplicate debt.
       x-implementation-status: integration-pending
 
   /sales/invoices/{invoice_number}/move-to-draft:
@@ -534,9 +437,6 @@ paths:
       operationId: moveInvoiceToDraft
       requestBody: { $ref: "#/components/requestBodies/InvoiceAction" }
       responses: { "200": { $ref: "#/components/responses/Invoice" }, default: { $ref: "#/components/responses/Error" } }
-      description: Requires the sales.invoices:return_to_draft permission, Submitted and Unpaid, no recorded Payment
-        and no downstream reference. Remove unpaid Customer debt once and clear payment status atomically.
-        Keep its Order source link; resubmission contributes once again.
       x-implementation-status: integration-pending
 
   /sales/invoices/{invoice_number}/delete:
@@ -550,9 +450,6 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/InvoiceDeleted" }
         default: { $ref: "#/components/responses/Error" }
-      description: Requires Delete permission. Only an authorized unreferenced Draft can be deleted, from All
-        Documents. Every Submitted Invoice is protected, whether Unpaid, Partially Paid or Paid. Release its
-        source claim atomically; never reuse its number.
       x-implementation-status: integration-pending
 
   /sales/invoices/{invoice_number}/payments:
@@ -591,13 +488,6 @@ paths:
                   payment_date: "2026-11-25"
                   payment_reference: TEST-BANK-001
       responses: { "201": { $ref: "#/components/responses/Payment" }, default: { $ref: "#/components/responses/Error" } }
-      description: Requires payment action permission. Recheck locked current Amount Due on a same-company Submitted
-        Invoice; 0 < Payment Amount <= Amount Due. Date is on/after Invoice Date and not future. Record once
-        with request identity, totals and Customer balance in one transaction; replay identical committed
-        requests before stale/state checks. Reject reused keys with different input, overpayment and new
-        payments once Paid. Identical retries retain the original expected_version and return the original
-        201 result, even after later payments. Customer inactivity does not block a receipt against an existing
-        Submitted Invoice. No edit, delete or reversal; Logistics changes do not alter money.
       x-implementation-status: integration-pending
     get:
       tags: [ Customer Payments ]
@@ -609,9 +499,6 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/PaymentHistory" }
         default: { $ref: "#/components/responses/Error" }
-      description: Immutable payment history for the same-company Invoice, ordered by action recording time
-        then Payment Number. Recording actor/time come from the shared action; timestamps are UTC. Existing
-        Draft or unpaid Invoices with no receipts return an empty list. Unknown query fields are rejected.
       x-implementation-status: integration-pending
 
   /sales/references/customers:
@@ -640,7 +527,6 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/ItemChoices" }
         default: { $ref: "#/components/responses/Error" }
-      description: Read existing active company-scoped Inventory Item choices; no stock check or stock write.
       x-implementation-status: planned
 
   /sales/references/warehouses:
@@ -655,8 +541,6 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/WarehouseChoices" }
         default: { $ref: "#/components/responses/Error" }
-      description: Read existing active company-scoped Inventory Warehouse choices. Inventory owns all stock and
-        reservations.
       x-implementation-status: planned
 
   /sales/documents:
@@ -677,10 +561,6 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Documents" }
         default: { $ref: "#/components/responses/Error" }
-      description: Combine type, Customer Code, date range, Warehouse, document status and Invoice payment-status
-        filters. In Progress / Closed apply only to Orders. Payment-status filters return Submitted Invoices
-        only. Reject From Date after To Date. Return only permitted, eligible actions; document Delete belongs
-        in this list, never in record forms.
       x-implementation-status: planned
   /sales/invoices/eligible-orders:
     get:
@@ -697,10 +577,6 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/EligibleOrders" }
         default: { $ref: "#/components/responses/Error" }
-      description: Requires sales.invoices:create and sales.orders:read. Return only same-company Submitted
-        Sales Orders without an existing source claim. Draft, In Progress, Closed and already-invoiced Orders
-        are excluded before pagination. Lookup is read-only; Invoice creation rechecks eligibility under lock.
-        Order submission automatically creates an Invoice, so those Orders do not appear in this lookup.
       x-implementation-status: integration-pending
 
 components:
@@ -1305,8 +1181,9 @@ components:
             lines:
               type: array
               minItems: 1
+              description: Optional complete intended line collection. Omit to preserve saved lines; null and an empty array are invalid.
               items: { $ref: "#/components/schemas/QuoteLineInput", unevaluatedProperties: false }
-      required: [ expected_version, lines ]
+      required: [ expected_version ]
       unevaluatedProperties: false
     QuoteActionRequest:
       type: object
