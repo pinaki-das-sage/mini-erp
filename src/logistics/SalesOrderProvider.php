@@ -19,7 +19,7 @@ final readonly class SalesOrderProvider
 
     /** Verify persisted event evidence, not a client assertion. Sales owns event-reference replay.
      * Cancellation must retain the Trip and its lines until the Sales callback succeeds.
-     * @param list<array{line_id: string, trip_line_id: string}> $lines
+     * @param list<array{line_id: string, trip_line_id: string}> $lines All Order lines on this same Trip.
      */
     public function assertEvent(TransactionContext $tx, Actor $actor, string $event, string $orderId,
         string $tripId, array $lines, string $eventReference): void
@@ -100,6 +100,10 @@ final readonly class SalesOrderProvider
                 throw new AppError('INVALID_STATE', 'An Order line has multiple current Trip assignments.', 409);
             }
             $seen[$fact['line_id']] = true; $result[] = $fact;
+        }
+        if (count(array_unique(array_column($result, 'trip_id'))) > 1 ||
+            count(array_unique(array_column($result, 'trip_status'))) > 1) {
+            throw new AppError('INVALID_STATE', 'The whole Order must belong to one Trip with the same status on every line.', 409);
         }
         return $result;
     }

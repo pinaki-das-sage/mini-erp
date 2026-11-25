@@ -18,7 +18,8 @@ use MiniErp\shared\security\Authorization;
 
 /** Reviewable implementation for the proposed Logistics handoff; no public HTTP endpoints.
  * Logistics owns the outer transaction and Trip locks. Propagate all errors to its TransactionManager.
- * Whole-Order assignment/cancellation/delivery only. No stock mutation occurs in these Sales methods.
+ * Every event contains the entire Order, assigned to one Trip with one shared fulfillment status.
+ * No stock mutation occurs in these Sales methods. Order status is derived across all saved lines.
  */
 final readonly class SalesFulfillment
 {
@@ -48,22 +49,29 @@ final readonly class SalesFulfillment
             'status' => $order['STATUS'] === 'DRAFT' ? 'Draft' : (self::STATUSES[$order['STATUS']] ?? $order['STATUS']),
             'current_version' => (int) $order['VERSION'], 'lines' => array_map(static fn (array $line): array => [
                 'line_id' => (string) $line['RECORD#'], 'product_id' => (string) $line['PRODUCT_ID'],
-                'quantity' => (string) $line['QUANTITY_TEXT']], $lines)];
+                'quantity' => (string) $line['QUANTITY_TEXT'],
+                'trip_id' => $line['TRIP_ID'] === null ? null : (string) $line['TRIP_ID'],
+                'trip_line_id' => ($line['LOGISTICS_TRIP_LINE_ID'] ?? null) === null ? null : (string) $line['LOGISTICS_TRIP_LINE_ID'],
+                'trip_status' => $line['TRIP_STATUS']], $lines)];
     }
 
-    /** Also call after dispatch to refresh the same assignment to Dispatched, with a new stable event reference. */
+    /** All Order lines on one Trip. Draft assignment leaves Submitted; dispatch starts In Progress.
+     * Logistics consumes all reservations before the dispatch callback in the same transaction.
+     */
     public function recordTripAssignment(TransactionContext $tx, Actor $actor, string $orderNumber, array $input): array
     {
         return $this->event($tx, $actor, 'assignment', $orderNumber, $input);
     }
 
-    /** Before dispatch only. Cancellation leaves reservations ACTIVE; a later return-to-Draft releases them. */
+    /** Clear the whole Order's Draft Trip assignment. Reservations remain ACTIVE until Order return. */
     public function recordTripCancellation(TransactionContext $tx, Actor $actor, string $orderNumber, array $input): array
     {
         return $this->event($tx, $actor, 'cancellation', $orderNumber, $input);
     }
 
-    /** Call when every Order line has successful full delivery. Invoice creation belongs to Order Submit. */
+    /** All dispatched Order lines delivered in full on the same Trip; close the Order.
+     * Invoice creation belongs to Order Submit and has no dependency on this callback.
+     */
     public function recordDelivery(TransactionContext $tx, Actor $actor, string $orderNumber, array $input): array
     {
         return $this->event($tx, $actor, 'delivery', $orderNumber, $input);
@@ -107,40 +115,37 @@ final readonly class SalesFulfillment
         $lines = $tx->query("SELECT L.*, TO_CHAR(QUANTITY, 'FM999999999') AS QUANTITY_TEXT FROM ME_OE_DOCUMENT_LINES L
             WHERE CNY# = :company_id AND DOCUMENT_RECORD# = :id ORDER BY RECORD# FOR UPDATE",
             ['company_id' => $actor->companyId, 'id' => $order['RECORD#']]);
-        if ($lines === [] || count($lines) !== count($input['lines'])) {
-            throw new AppError('VALIDATION_ERROR', 'Provide every saved Order line exactly once; partial/split fulfillment is outside this handoff.');
+        if ($lines === []) { throw new AppError('INVALID_STATE', 'Order has no saved lines.', 409); }
+        if (count($lines) !== count($input['lines'])) {
+            throw new AppError('VALIDATION_ERROR', 'Provide every saved Order line exactly once; the whole Order must use one Trip.');
         }
         $mapping = array_column($input['lines'], 'trip_line_id', 'line_id');
-        foreach ($lines as $line) { if (!isset($mapping[(string) $line['RECORD#']])) { throw new AppError('VALIDATION_ERROR', 'A line does not belong to this Order.'); } }
+        $nextLines = array_column($lines, null, 'RECORD#');
+        foreach ($mapping as $lineId => $_) {
+            if (!isset($nextLines[$lineId])) { throw new AppError('VALIDATION_ERROR', 'A line does not belong to this Order.'); }
+        }
         $orderId = (string) $order['RECORD#'];
         try {
             $this->logistics->assertEvent($tx, $actor, $event, $orderId, $tripId, $input['lines'], $reference);
             $facts = $this->facts($this->logistics->getAssignments($tx, $actor, $orderId));
         } catch (DatabaseError) { throw new AppError('LOGISTICS_UNAVAILABLE', 'Logistics event facts could not be verified.', 503); }
-        if ($event === 'cancellation' && $facts !== []) {
-            throw new AppError('INVALID_STATE', 'Logistics still reports valid Trip assignments for this Order.', 409);
+        if ($event === 'cancellation') {
+            if ($facts !== []) { throw new AppError('INVALID_STATE', 'Remove the whole Order\'s Draft Trip claims before cancellation.', 409); }
+        } elseif (count($facts) !== count($lines) || array_values(array_unique(array_column($facts, 'trip_id'))) !== [$tripId] ||
+            count(array_unique(array_column($facts, 'trip_status'))) !== 1) {
+            throw new AppError('INVALID_STATE', 'Logistics must confirm every Order line on one Trip with the same status.', 409);
         }
-        if ($event !== 'cancellation' && count($facts) !== count($lines)) {
-            throw new AppError('INVALID_STATE', 'Logistics must confirm the complete whole-Order assignment.', 409);
-        }
-        if ($event !== 'cancellation' && count(array_unique(array_column($facts, 'trip_status'))) !== 1) {
-            throw new AppError('INVALID_STATE', 'Whole-Order Trip progress must be consistent across every line.', 409);
-        }
-        $changed = false;
-        foreach ($lines as $line) {
-            $lineId = (string) $line['RECORD#'];
+        $updates = [];
+        foreach ($mapping as $mappedId => $tripLineId) {
+            $lineId = (string) $mappedId;
+            $line = $nextLines[$mappedId];
             $previous = $line['TRIP_STATUS'];
-            if ($event === 'cancellation' || $event === 'delivery' || $order['STATUS'] === 'IN_PROGRESS') {
-                if ((string) ($line['TRIP_ID'] ?? '') !== $tripId || (string) ($line['LOGISTICS_TRIP_LINE_ID'] ?? '') !== $mapping[$lineId]) {
-                    throw new AppError('INVALID_STATE', 'Trip and Trip line must match the saved Order assignment.', 409);
-                }
-            } elseif ($line['TRIP_ID'] !== null || in_array($previous, ['Draft', 'Dispatched', 'Delivered'], true)) {
-                throw new AppError('INVALID_STATE', 'The Order already has an assignment.', 409);
-            }
+            $sameAssignment = (string) ($line['TRIP_ID'] ?? '') === $tripId &&
+                (string) ($line['LOGISTICS_TRIP_LINE_ID'] ?? '') === $tripLineId;
             $status = 'Cancelled';
             if ($event !== 'cancellation') {
                 $fact = $facts[$lineId] ?? null;
-                if ($fact === null || $fact['trip_id'] !== $tripId || $fact['trip_line_id'] !== $mapping[$lineId] ||
+                if ($fact === null || $fact['trip_id'] !== $tripId || $fact['trip_line_id'] !== $tripLineId ||
                     $fact['product_id'] !== (string) $line['PRODUCT_ID'] || $fact['quantity'] !== (string) $line['QUANTITY_TEXT']) {
                     throw new AppError('INVALID_STATE', 'Logistics assignment does not match the saved Order demand.', 409);
                 }
@@ -148,11 +153,17 @@ final readonly class SalesFulfillment
                 if ($event === 'delivery' && $status !== 'Delivered' || $event === 'assignment' && !in_array($status, ['Draft', 'Dispatched'], true)) {
                     throw new AppError('INVALID_STATE', 'Logistics status does not match this event.', 409);
                 }
-                if ($order['STATUS'] === 'SUBMITTED' && $status !== 'Draft' || $previous === 'Dispatched' && $status === 'Draft' || $previous === 'Delivered') {
-                    throw new AppError('INVALID_STATE', 'Trip progress cannot skip initial assignment or move backwards.', 409);
+                $allowed = match ($status) {
+                    'Draft' => !SalesTripAssignmentGuard::hasTrip($line) || ($sameAssignment && $previous === 'Draft'),
+                    'Dispatched' => $sameAssignment && in_array($previous, ['Draft', 'Dispatched'], true),
+                    'Delivered' => $sameAssignment && $previous === 'Dispatched',
+                    default => false,
+                };
+                if (!$allowed) {
+                    throw new AppError('INVALID_STATE', 'Line is already assigned, belongs to another Trip, or would skip/reverse progress.', 409);
                 }
-            } elseif ($previous !== 'Draft') {
-                throw new AppError('INVALID_STATE', 'Only undispatched Draft-trip assignments can be cancelled.', 409);
+            } elseif (!$sameAssignment || $previous !== 'Draft' || isset($facts[$lineId])) {
+                throw new AppError('INVALID_STATE', 'Cancel only the whole Order\'s saved Draft Trip assignment after Logistics removes its claims.', 409);
             }
             try { $reservation = $this->reservations->getReservationDetail($actor, $tx, (int) $orderId, (int) $lineId); }
             catch (DatabaseError) { throw new AppError('INVENTORY_UNAVAILABLE', 'Inventory fulfillment facts could not be verified.', 503); }
@@ -161,24 +172,31 @@ final readonly class SalesFulfillment
                 $reservation['reserved_quantity'] !== (int) $line['QUANTITY_TEXT']) {
                 throw new AppError('INVALID_STATE', 'Inventory must confirm the matching active/consumed reservation for this Trip event.', 409);
             }
-            if ($expectedReservation === 'DISPATCHED' && ((string) $reservation['trip_id'] !== $tripId || (string) $reservation['trip_line_id'] !== $mapping[$lineId])) {
+            if ($expectedReservation === 'DISPATCHED' && ((string) $reservation['trip_id'] !== $tripId || (string) $reservation['trip_line_id'] !== $tripLineId)) {
                 throw new AppError('INVALID_STATE', 'Inventory consumption belongs to a different Trip assignment.', 409);
             }
             $nextTrip = $event === 'cancellation' ? null : $tripId;
-            $nextTripLine = $event === 'cancellation' ? null : $mapping[$lineId];
+            $nextTripLine = $event === 'cancellation' ? null : $tripLineId;
+            $nextLines[$mappedId] = [...$line, 'TRIP_ID' => $nextTrip, 'LOGISTICS_TRIP_LINE_ID' => $nextTripLine, 'TRIP_STATUS' => $status];
             if ($previous !== $status || (string) ($line['TRIP_ID'] ?? '') !== (string) ($nextTrip ?? '') ||
                 (string) ($line['LOGISTICS_TRIP_LINE_ID'] ?? '') !== (string) ($nextTripLine ?? '')) {
-                $written = $tx->execute('UPDATE ME_OE_DOCUMENT_LINES SET TRIP_ID = :trip_id, LOGISTICS_TRIP_LINE_ID = :trip_line_id,
-                    TRIP_STATUS = :trip_status, WHENMODIFIED = CURRENT_TIMESTAMP
-                    WHERE CNY# = :company_id AND DOCUMENT_RECORD# = :id AND RECORD# = :line_id',
-                    ['company_id' => $actor->companyId, 'id' => $order['RECORD#'], 'line_id' => $line['RECORD#'],
-                        'trip_id' => $nextTrip, 'trip_line_id' => $nextTripLine, 'trip_status' => $status]);
-                if ($written !== 1) { throw new AppError('INVALID_STATE', 'Order line could not be updated.', 409); }
-                $changed = true;
+                $updates[] = ['company_id' => $actor->companyId, 'id' => $order['RECORD#'], 'line_id' => $line['RECORD#'],
+                    'trip_id' => $nextTrip, 'trip_line_id' => $nextTripLine, 'trip_status' => $status];
             }
         }
-        $status = match ($event) { 'cancellation' => 'SUBMITTED', 'delivery' => 'CLOSED', default => 'IN_PROGRESS' };
-        $changed = $changed || $order['STATUS'] !== $status;
+        // Reconcile every line before writing: missing claims, foreign lines and wrong demand must fail.
+        $this->assertAssignmentSnapshot($nextLines, $facts);
+        foreach ($updates as $update) {
+            $written = $tx->execute('UPDATE ME_OE_DOCUMENT_LINES SET TRIP_ID = :trip_id, LOGISTICS_TRIP_LINE_ID = :trip_line_id,
+                    TRIP_STATUS = :trip_status, WHENMODIFIED = CURRENT_TIMESTAMP
+                    WHERE CNY# = :company_id AND DOCUMENT_RECORD# = :id AND RECORD# = :line_id',
+                $update);
+            if ($written !== 1) { throw new AppError('INVALID_STATE', 'Order line could not be updated.', 409); }
+        }
+        $statuses = array_column($nextLines, 'TRIP_STATUS');
+        $status = count(array_filter($statuses, static fn ($value): bool => $value === 'Delivered')) === count($nextLines)
+            ? 'CLOSED' : (array_intersect($statuses, ['Dispatched', 'Delivered']) !== [] ? 'IN_PROGRESS' : 'SUBMITTED');
+        $changed = $updates !== [] || $order['STATUS'] !== $status;
         if ($changed) {
             if ((int) $order['VERSION'] >= 9999999999) { throw new AppError('INVALID_STATE', 'Order version capacity exhausted.', 409); }
             $written = $tx->execute("UPDATE ME_OE_DOCUMENTS SET STATUS = :status, VERSION = VERSION + 1, WHENMODIFIED = CURRENT_TIMESTAMP
@@ -194,8 +212,27 @@ final readonly class SalesFulfillment
         $tx->execute('INSERT INTO ME_AUDIT (ID, COMPANY_ID, ACTION_REFERENCE, ACTOR_ID, EVENT_TYPE, DETAILS_JSON)
             VALUES (:id, :company_id, :reference, :actor, :event, :details)', [...$identity, 'id' => bin2hex(random_bytes(16)),
                 'actor' => $actor->id, 'event' => 'OE_LOGISTICS_' . strtoupper($event),
-                'details' => json_encode(['order_number' => $number, 'trip_id' => $tripId, 'event_reference' => $reference], JSON_THROW_ON_ERROR)]);
+                'details' => json_encode(['order_number' => $number, 'trip_id' => $tripId, 'event_reference' => $reference,
+                    'lines' => $input['lines']], JSON_THROW_ON_ERROR)]);
         return $result;
+    }
+
+    private function assertAssignmentSnapshot(array $lines, array $facts): void
+    {
+        foreach ($facts as $id => $fact) {
+            $line = $lines[$id] ?? null;
+            if ($line === null || $fact['trip_id'] !== (string) ($line['TRIP_ID'] ?? '') ||
+                $fact['trip_line_id'] !== (string) ($line['LOGISTICS_TRIP_LINE_ID'] ?? '') ||
+                $fact['trip_status'] !== $line['TRIP_STATUS'] || $fact['product_id'] !== (string) $line['PRODUCT_ID'] ||
+                $fact['quantity'] !== (string) $line['QUANTITY_TEXT']) {
+                throw new AppError('INVALID_STATE', 'Logistics assignments do not match the complete saved Order line state.', 409);
+            }
+        }
+        foreach ($lines as $id => $line) {
+            if (SalesTripAssignmentGuard::hasTrip($line) && !isset($facts[$id])) {
+                throw new AppError('INVALID_STATE', 'Logistics did not confirm an existing Order line assignment.', 409);
+            }
+        }
     }
 
     private function id(mixed $value, string $label): string
@@ -206,7 +243,7 @@ final readonly class SalesFulfillment
 
     private function mapping(mixed $lines): array
     {
-        if (!is_array($lines) || !array_is_list($lines) || $lines === []) { throw new AppError('VALIDATION_ERROR', 'Provide the complete Order-to-Trip line mapping.'); }
+        if (!is_array($lines) || !array_is_list($lines) || $lines === []) { throw new AppError('VALIDATION_ERROR', 'Provide all Order lines and their mapping to the same Trip.'); }
         $result = []; $seen = []; $tripLines = [];
         foreach ($lines as $line) {
             if ($line instanceof \stdClass) { $line = get_object_vars($line); }
