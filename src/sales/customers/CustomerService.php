@@ -1,7 +1,10 @@
 <?php
 declare(strict_types=1);
 
-namespace MiniErp\sales;
+namespace MiniErp\sales\customers;
+
+use MiniErp\sales\SalesPermissions;
+use MiniErp\sales\Validation;
 
 use MiniErp\shared\Api;
 use MiniErp\shared\AppError;
@@ -37,11 +40,18 @@ final readonly class CustomerService
         $reference = $this->actionReference($input);
         return $this->actions()->run($actor, $reference, 'OE_CUSTOMER_CREATE', $input, function (TransactionContext $tx) use ($actor, $input): array {
             $values = $this->values($input, true);
-            $number = $tx->query("SELECT TO_CHAR(ME_OE_CUST_CODE_SEQ.NEXTVAL, 'FM999999999999999') AS CODE_NUMBER FROM DUAL")[0]['CODE_NUMBER'] ?? null;
+            try {
+                $number = $tx->query("SELECT TO_CHAR(ME_OE_CUST_CODE_SEQ.NEXTVAL, 'FM999999999999999') AS CODE_NUMBER FROM DUAL")[0]['CODE_NUMBER'] ?? null;
+            } catch (DatabaseError $error) {
+                if (in_array($error->oracleCode, [2289, 8004], true)) {
+                    throw new AppError('NUMBERING_UNAVAILABLE', 'Customer Code could not be generated.', 503);
+                }
+                throw $error;
+            }
             if (!is_string($number) || !preg_match('/\A[1-9][0-9]{0,14}\z/D', $number)) {
                 throw new AppError('NUMBERING_UNAVAILABLE', 'Customer Code could not be generated.', 503);
             }
-            $code = 'CUST-' . str_pad($number, 4, '0', STR_PAD_LEFT);
+            $code = 'CUST-' . str_pad($number, 3, '0', STR_PAD_LEFT);
             $values = ['customer_code' => $code, ...$values];
             $columns = implode(', ', array_map('strtoupper', array_keys($values)));
             $binds = ':' . implode(', :', array_keys($values));

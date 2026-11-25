@@ -51,6 +51,14 @@ final class ConsoleMigrationTest extends TestCase
         self::assertStringContainsString('ALTER TABLE ME_OE_CUSTOMERS RENAME COLUMN ID TO RECORD#', $writes);
         self::assertStringContainsString('CREATE TABLE ME_OE_DOCUMENTS', $writes);
         self::assertStringContainsString('CREATE TABLE ME_OE_DOCUMENT_LINES', $writes);
+        self::assertStringContainsString('CREATE SEQUENCE ME_OE_QUOTE_NO_SEQ', $writes);
+        self::assertStringContainsString('CREATE TABLE ME_OE_SOURCE_LINKS', $writes);
+        self::assertStringContainsString('CREATE TABLE ME_OE_PAYMENTS', $writes);
+        self::assertStringContainsString('CREATE SEQUENCE ME_OE_ORDER_NO_SEQ', $writes);
+        self::assertStringContainsString('CREATE SEQUENCE ME_OE_INVOICE_NO_SEQ', $writes);
+        self::assertStringContainsString('CREATE SEQUENCE ME_OE_PAYMENT_NO_SEQ', $writes);
+        self::assertStringContainsString('011_oe_customer_code_sequence.php', $output);
+        self::assertStringContainsString('CREATE SEQUENCE ME_OE_CUST_CODE_SEQ START WITH ', $writes);
     }
 
     public function testCustomerUpgradeFailureStopsDependentTables(): void

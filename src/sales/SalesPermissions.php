@@ -53,6 +53,7 @@ final readonly class SalesPermissions
         if (!in_array($action, ['create', 'read', 'delete', 'edit', 'submit', 'return_to_draft'], true)) {
             throw new AppError('FORBIDDEN', 'This document action is not supported.', 403);
         }
-        $this->authorization->requirePermission($actor, self::DOCUMENTS[$type], $action === 'edit' ? 'update' : $action);
+        $operation = $action === 'edit' || ($type === 'quote' && in_array($action, ['submit', 'return_to_draft'], true)) ? 'update' : $action;
+        $this->authorization->requirePermission($actor, self::DOCUMENTS[$type], $operation);
     }
 }

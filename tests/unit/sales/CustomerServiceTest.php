@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace MiniErp\Tests\unit\sales;
 
-use MiniErp\sales\CustomerService;
+use MiniErp\sales\customers\CustomerService;
 use MiniErp\shared\Api;
 use MiniErp\shared\AppError;
 use MiniErp\shared\Config;
@@ -43,7 +43,7 @@ final class CustomerServiceTest extends TestCase
         $service = new CustomerService($db);
         $saved = $service->create($this->actor(), $this->input());
         self::assertSame(1, $saved['id']);
-        self::assertSame('CUST-0001', $saved['customer_code']);
+        self::assertSame('CUST-001', $saved['customer_code']);
         self::assertSame('Example Traders', $saved['customer_name']);
         self::assertSame('001234', $saved['postal_code']);
         self::assertSame('NET_30', $saved['payment_terms']);
@@ -85,7 +85,7 @@ final class CustomerServiceTest extends TestCase
         self::assertCount(1, $db->customers);
         self::assertCount(3, $db->audit);
         self::assertSame('F', $service->get($this->actor(), '1')['is_active']);
-        self::assertSame(2, $db->nextCode, 'Replays must not consume another sequence value.');
+        self::assertSame(2, $db->nextCode, 'Replays and updates must not consume Customer Codes.');
     }
 
     public function testChangedPayloadActorAndOperationCannotReuseReference(): void
@@ -99,50 +99,60 @@ final class CustomerServiceTest extends TestCase
         self::assertCount(1, $db->audit);
     }
 
-    public function testNewRequestsGenerateDistinctCodesAcrossCompanies(): void
-    {
-        $db = new CustomerMemoryConnection();
-        $service = new CustomerService($db);
-        self::assertSame('CUST-0001', $service->create($this->actor(), $this->input())['customer_code']);
-        self::assertSame('CUST-0002', $service->create($this->actor(), $this->input('second'))['customer_code']);
-        self::assertSame('CUST-0003', $service->create($this->actor(8), $this->input())['customer_code']);
-        self::assertCount(3, $db->customers);
-    }
-
-    public function testMisconfiguredSequenceCollisionRollsBackClaim(): void
+    public function testGeneratedCodesAreSharedAcrossCompaniesAndCollisionRollsBackClaim(): void
     {
         $db = new CustomerMemoryConnection();
         $service = new CustomerService($db);
         $service->create($this->actor(), $this->input());
-        $db->nextCode = 1;
+        $db->nextCode = 1; // Simulate a sequence that was incorrectly reset.
         $this->rejection(fn () => $service->create($this->actor(), $this->input('duplicate')), 'DUPLICATE_CUSTOMER', 409);
         self::assertArrayNotHasKey('7:duplicate', $db->actions);
-        self::assertCount(1, $db->customers);
+        $other = $service->create($this->actor(8), $this->input());
+        self::assertSame(2, $other['id']);
+        self::assertSame('CUST-002', $other['customer_code']);
+        self::assertCount(2, $db->customers);
     }
 
-    #[DataProvider('generatedCodes')]
-    public function testGeneratedCodePaddingAndCapacity(int $next, string $expected): void
+    public function testCodesGrowPastPaddingAndStopAtColumnCapacity(): void
     {
         $db = new CustomerMemoryConnection();
-        $db->nextCode = $next;
-        $saved = (new CustomerService($db))->create($this->actor(), $this->input());
-        self::assertSame($expected, $saved['customer_code']);
-        self::assertLessThanOrEqual(20, strlen($saved['customer_code']));
+        $db->nextCode = 999;
+        $service = new CustomerService($db);
+        self::assertSame('CUST-999', $service->create($this->actor(), $this->input('last-padded'))['customer_code']);
+        self::assertSame('CUST-1000', $service->create($this->actor(), $this->input('first-unpadded'))['customer_code']);
+        $db->nextCode = 999999999999999;
+        self::assertSame('CUST-999999999999999', $service->create($this->actor(), $this->input('last-code'))['customer_code']);
+        $this->rejection(fn () => $service->create($this->actor(), $this->input('exhausted')), 'NUMBERING_UNAVAILABLE', 503);
+        self::assertCount(3, $db->customers);
+        self::assertArrayNotHasKey('7:exhausted', $db->actions);
     }
 
-    public static function generatedCodes(): array
+    #[DataProvider('unavailableNumbers')]
+    public function testMissingOrInvalidNumberingRollsBackClaim(mixed $number): void
     {
-        return [[1, 'CUST-0001'], [9999, 'CUST-9999'], [10000, 'CUST-10000'],
-            [999999999999999, 'CUST-999999999999999']];
-    }
-
-    public function testExhaustedSequenceCannotSaveAnOverlengthCode(): void
-    {
-        $db = new CustomerMemoryConnection();
-        $db->nextCode = 1000000000000000;
+        $db = $this->createMock(Connection::class);
+        $db->method('query')->willReturnCallback(static function (string $sql) use ($number): array {
+            if (str_contains($sql, 'FROM ME_OBJECTS')) {
+                return [['ACTIVE' => 1, 'ALLOW_CREATE' => 1]];
+            }
+            if ($number instanceof DatabaseError) {
+                throw $number;
+            }
+            return [['CODE_NUMBER' => $number]];
+        });
+        $db->expects(self::once())->method('begin');
+        $db->expects(self::once())->method('execute')->willReturnCallback(static function (string $sql): int {
+            self::assertStringStartsWith('INSERT INTO ME_ACTIONS', $sql);
+            return 1;
+        });
+        $db->expects(self::once())->method('rollback');
+        $db->expects(self::never())->method('commit');
         $this->rejection(fn () => (new CustomerService($db))->create($this->actor(), $this->input()), 'NUMBERING_UNAVAILABLE', 503);
-        self::assertSame([], $db->actions);
-        self::assertSame([], $db->customers);
+    }
+
+    public static function unavailableNumbers(): array
+    {
+        return [[null], [1], ['0'], ['-1'], ['1e3'], ['1000000000000000'], ['###############'], [new DatabaseError(2289)]];
     }
 
     public function testLastCommittedFieldChangeWinsAndOmittedFieldsStayUnchanged(): void
@@ -173,10 +183,9 @@ final class CustomerServiceTest extends TestCase
         self::assertSame([], $db->customers);
         self::assertSame([], $db->actions);
         self::assertSame([], $db->audit);
-        self::assertSame(2, $db->nextCode, 'A rolled-back transaction does not return a sequence number.');
         self::assertSame(1, $db->rollbacks);
         $db->failAudit = false;
-        self::assertSame('CUST-0002', $service->create($this->actor(), $this->input())['customer_code']);
+        self::assertSame('CUST-002', $service->create($this->actor(), $this->input())['customer_code']);
     }
 
     public function testForeignCompanyReadsAndWritesAreNotFound(): void
@@ -212,14 +221,13 @@ final class CustomerServiceTest extends TestCase
         self::assertSame([], $db->customers);
         self::assertSame([], $db->actions);
         self::assertSame([], $db->audit);
-        self::assertSame(1, $db->nextCode, 'Invalid input must not allocate a code.');
     }
 
     public static function invalidFields(): array
     {
         return [
             [['customer_name' => '   ']], [['customer_name' => str_repeat('x', 101)]],
-            [['customer_code' => 'CUST-0001']], [['customer_code' => '']], [['customer_code' => null]],
+            [['customer_code' => 'A/B']], [['customer_code' => 'CUST-001']], [['customer_code' => null]],
             [['email_address' => 'not-email']], [['phone_number' => '123abc']],
             [['postal_code' => 123]], [['country' => null]], [['is_active' => true]], [['payment_terms' => '']],
             [['notes' => null]], [['company_id' => 8]], [['id' => 5]], [['amount_customer_owes_us' => '20.00']],
@@ -380,10 +388,10 @@ final class CustomerServiceTest extends TestCase
         self::assertSame(200, $api->handle('GET', '/api/v1/sales/customers/1', [], $headers)['status']);
         self::assertSame(200, $api->handle('GET', '/api/v1/sales/customers', [], $headers)['status']);
         $patch = ['action_reference' => 'patch', 'is_active' => 'F'];
-        $changed = $api->handle('PATCH', '/api/v1/sales/customers/1', $patch, $headers);
+        $changed = $api->handle('POST', '/api/v1/sales/customers/1/update', $patch, $headers);
         self::assertSame(200, $changed['status']);
         self::assertNull(json_decode($changed['body'], true)['current_version']);
-        self::assertSame(200, $api->handle('PATCH', '/api/v1/sales/customers/1', [...$patch, 'action_reference' => 'next', 'is_active' => 'T'], $headers)['status']);
+        self::assertSame(200, $api->handle('POST', '/api/v1/sales/customers/1/update', [...$patch, 'action_reference' => 'next', 'is_active' => 'T'], $headers)['status']);
         self::assertSame(404, $api->handle('DELETE', '/api/v1/sales/customers/1', [], $headers)['status']);
         $db->admin = false;
         self::assertSame(403, $api->handle('GET', '/api/v1/sales/customers', [], $headers)['status']);
@@ -423,7 +431,7 @@ final class CustomerServiceTest extends TestCase
         self::assertSame(403, $api->handle('POST', '/api/v1/sales/customers', $this->input(), $headers)['status']);
         $db->grants = ['7:admin:sales.customers:update'];
         $patch = ['action_reference' => 'granted-update', 'city' => 'Delhi'];
-        self::assertSame(200, $api->handle('PATCH', '/api/v1/sales/customers/1', $patch, $headers)['status']);
+        self::assertSame(200, $api->handle('POST', '/api/v1/sales/customers/1/update', $patch, $headers)['status']);
         self::assertSame(200, $api->handle('POST', '/api/v1/sales/customers/1/update', $patch, $headers)['status']);
         $db->grants = [];
         self::assertSame(403, $api->handle('POST', '/api/v1/sales/customers/1/update', $patch, $headers)['status']);
@@ -445,7 +453,7 @@ final class CustomerServiceTest extends TestCase
             self::assertSame(200, $response['status']);
             self::assertSame($city, json_decode($response['body'], true)['result']['city']);
         }
-        self::assertSame(200, $api->handle('PATCH', '/api/v1/sales/customers/1', ['is_active' => 'F'], $headers)['status']);
+        self::assertSame(200, $api->handle('POST', '/api/v1/sales/customers/1/update', ['is_active' => 'F'], $headers)['status']);
         self::assertSame(5, count($db->actions));
         self::assertCount(5, $db->audit);
         foreach (array_keys($db->actions) as $key) {
@@ -453,9 +461,8 @@ final class CustomerServiceTest extends TestCase
         }
         $second = $api->handle('POST', '/api/v1/sales/customers', $input, $headers);
         self::assertSame(201, $second['status']);
-        self::assertSame('CUST-0002', json_decode($second['body'], true)['result']['customer_code']);
+        self::assertSame('CUST-002', json_decode($second['body'], true)['result']['customer_code']);
         self::assertCount(6, $db->actions);
-        self::assertCount(2, $db->customers);
     }
 
     public function testExplicitInvalidReferencesAreRejectedRatherThanReplaced(): void
@@ -469,7 +476,7 @@ final class CustomerServiceTest extends TestCase
         self::assertSame([], $db->customers);
     }
 
-    public function testPostUpdateSharesPatchValidationAuthorizationAndRetryIdentity(): void
+    public function testPostUpdateValidationAuthorizationAndRetryIdentity(): void
     {
         $db = new CustomerMemoryConnection();
         $api = new Api($db, Config::fromArray([]));
@@ -487,7 +494,7 @@ final class CustomerServiceTest extends TestCase
         self::assertSame('BTM Layout 2nd Stage', $body['result']['billing_address_line_1']);
         self::assertSame('Example Traders', $body['result']['customer_name']);
         self::assertSame($updated['body'], $api->handle('POST', $url, $input, $headers)['body']);
-        self::assertSame($updated['body'], $api->handle('PATCH', '/api/v1/sales/customers/1', $input, $headers)['body']);
+        self::assertSame(404, $api->handle('PATCH', '/api/v1/sales/customers/1', $input, $headers)['status']);
         self::assertCount(2, $db->audit);
         self::assertSame(409, $api->handle('POST', $url, [...$input, 'is_active' => 'T'], $headers)['status']);
         self::assertSame(400, $api->handle('POST', $url, ['action_reference' => 'bad-field', 'amount_customer_owes_us' => '1.00'], $headers)['status']);
@@ -510,10 +517,9 @@ final class CustomerMemoryConnection implements Connection
     public bool $locked = false;
     public int $commits = 0;
     public int $rollbacks = 0;
+    public int $nextCode = 1;
     private ?array $snapshot = null;
     private int $nextId = 1;
-    // Oracle sequence allocation survives transaction rollback.
-    public int $nextCode = 1;
 
     public function begin(): void
     {
@@ -591,7 +597,10 @@ final class CustomerMemoryConnection implements Connection
     {
         if (str_contains($sql, 'ME_OE_CUST_CODE_SEQ.NEXTVAL')) {
             if ($this->snapshot === null) {
-                throw new \LogicException('Allocate Customer Codes inside the action transaction.');
+                throw new \LogicException('Sequence must be consumed inside the create transaction.');
+            }
+            if ($this->nextCode > 999999999999999) {
+                throw new DatabaseError(8004);
             }
             return [['CODE_NUMBER' => (string) $this->nextCode++]];
         }

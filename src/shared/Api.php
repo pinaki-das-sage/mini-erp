@@ -41,7 +41,7 @@ final class Api
                 $actor, self::string($input, 'username'), self::string($input, 'display_name'),
                 self::string($input, 'password'), self::boolean($input, 'is_admin'),
             )], 201);
-        $this->register('PATCH', '/users/{id}', 'shared.user', 'update',
+        $this->register('POST', '/users/{id}/update', 'shared.user', 'update',
             static function (Actor $actor, array $input, array $params) use ($users): array {
                 $version = self::integer($input, 'expected_version');
                 $users->update($actor, $params['id'], self::string($input, 'display_name'),
@@ -78,7 +78,7 @@ final class Api
     /** Handler receives Actor, JSON input, path parameters and query parameters; returns its service result. */
     public function register(string $method, string $path, string $object, string $operation, callable $handler, int $status = 200): void
     {
-        if (!in_array($method, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], true)
+        if (!in_array($method, ['GET', 'POST', 'PUT', 'DELETE'], true)
             || !preg_match('#\A/(?:[a-z][a-z0-9-]*|\{[a-z][a-z0-9_]*\})(?:/(?:[a-z][a-z0-9-]*|\{[a-z][a-z0-9_]*\}))*\z#', $path)
             || $path === '/auth' || str_starts_with($path, '/auth/')
             || $object === '' || $operation === '' || !in_array($status, [200, 201], true)) {

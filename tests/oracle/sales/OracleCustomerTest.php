@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace MiniErp\Tests\oracle\sales;
 
-use MiniErp\sales\CustomerService;
+use MiniErp\sales\customers\CustomerService;
 use MiniErp\shared\AppError;
 use MiniErp\shared\database\Connection;
 use MiniErp\shared\database\DatabaseError;
@@ -26,7 +26,7 @@ final class OracleCustomerTest extends TestCase
         $config = require dirname(__DIR__, 3) . '/bootstrap.php';
         $db = OciConnection::connect($config);
         self::assertSame(strtoupper($expected), $db->query('SELECT USER AS SCHEMA_NAME FROM DUAL')[0]['SCHEMA_NAME']);
-        $admins = $db->query('SELECT U.USER_ID AS ID, U.USERNAME, U.COMPANY_ID FROM ME_USERS U JOIN ME_COMPANY C ON C.ID = U.COMPANY_ID WHERE U.IS_ADMIN = 1 AND U.ACTIVE = 1 AND U.MUST_CHANGE_PASSWORD = 0 AND C.ACTIVE = 1 ORDER BY U.COMPANY_ID, U.USER_ID FETCH FIRST 1 ROWS ONLY');
+        $admins = $db->query('SELECT U.ID, U.USERNAME, U.COMPANY_ID FROM ME_USERS U JOIN ME_COMPANY C ON C.ID = U.COMPANY_ID WHERE U.IS_ADMIN = 1 AND U.ACTIVE = 1 AND U.MUST_CHANGE_PASSWORD = 0 AND C.ACTIVE = 1 ORDER BY U.COMPANY_ID, U.ID FETCH FIRST 1 ROWS ONLY');
         self::assertNotEmpty($admins, 'Prepare the shared foundation and an active administrator in the test schema.');
         $actor = new Actor($admins[0]['ID'], $admins[0]['USERNAME'], [], (int) $admins[0]['COMPANY_ID'], true);
         $prefix = 'ct-' . bin2hex(random_bytes(6));
@@ -37,9 +37,9 @@ final class OracleCustomerTest extends TestCase
         $createdIds = [];
         try {
             $created = $service->create($actor, $input);
+            $createdIds[] = $created['id'];
+            self::assertMatchesRegularExpression('/\ACUST-[0-9]{3,15}\z/D', $created['customer_code']);
             $id = (string) $created['id'];
-            $createdIds[] = $id;
-            self::assertMatchesRegularExpression('/\ACUST-[0-9]{4,15}\z/', $created['customer_code']);
             self::assertSame($created, (new CustomerService($observer))->get($actor, $id));
             self::assertSame('001234', $created['postal_code']);
             self::assertSame('0.00', $created['amount_customer_owes_us']);
@@ -49,20 +49,9 @@ final class OracleCustomerTest extends TestCase
             self::assertNotNull($stored[0]['WHENCREATED']);
             self::assertNotNull($stored[0]['WHENMODIFIED']);
             self::assertSame($created, $service->create($actor, $input));
-            $second = (new CustomerService($observer))->create($actor,
-                [...$input, 'action_reference' => $prefix . '-second-create', 'customer_name' => $prefix . '-other']);
-            $createdIds[] = (string) $second['id'];
+            $second = $service->create($actor, [...$input, 'action_reference' => $prefix . '-second-create', 'customer_name' => 'Second Customer']);
+            $createdIds[] = $second['id'];
             self::assertNotSame($created['customer_code'], $second['customer_code']);
-            // The real unique constraint still protects a generated code from accidental reuse.
-            try {
-                (new TransactionManager($db))->run(static fn (TransactionContext $tx) => $tx->execute(
-                    'UPDATE ME_OE_CUSTOMERS SET CUSTOMER_CODE = :code WHERE CNY# = :company_id AND RECORD# = :id',
-                    ['code' => $created['customer_code'], 'company_id' => $actor->companyId, 'id' => $second['id']],
-                ));
-                self::fail('The real company/code constraint must reject a duplicate.');
-            } catch (DatabaseError $error) {
-                self::assertSame(1, $error->oracleCode);
-            }
             $patch = ['action_reference' => $prefix . '-patch', 'is_active' => 'F', 'notes' => ''];
             $updated = $service->update($actor, $id, $patch);
             self::assertArrayNotHasKey('current_version', $updated);

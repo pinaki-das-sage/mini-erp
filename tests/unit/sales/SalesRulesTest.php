@@ -185,6 +185,9 @@ final class SalesRulesTest extends TestCase
             'edit', 'deactivate', 'reactivate' => 'update', 'record_payment' => 'record',
             default => $resource === 'payment' && $action === 'create' ? 'record' : $action,
         };
+        if ($resource === 'quote' && in_array($action, ['submit', 'return_to_draft'], true)) {
+            $operation = 'update';
+        }
         if ($action === 'record_payment') {
             $object = 'sales.payments';
         }
