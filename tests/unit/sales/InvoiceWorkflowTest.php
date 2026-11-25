@@ -276,4 +276,15 @@ final class InvoiceWorkflowTest extends TestCase
         self::assertCount(4, $db->audit, 'Only successful create/submit/return/delete are audited.');
         self::assertSame('0.00', $db->customers[1]['BALANCE']);
     }
+
+    public function testEligibleOrdersRouteTakesPriorityOverInvoiceNumberLookup(): void
+    {
+        $api = new Api(new InvoiceMemoryConnection(), Config::fromArray([]));
+        $headers = ['authorization' => 'Bearer ' . str_repeat('a', 64)];
+        $response = $api->handle('GET', '/api/v1/sales/invoices/eligible-orders', [], $headers);
+        self::assertSame(200, $response['status']);
+        $body = json_decode($response['body'], true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame([], $body['result']['items']);
+        self::assertNull($body['current_version']);
+    }
 }

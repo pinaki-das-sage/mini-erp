@@ -97,6 +97,9 @@ final class InvoiceMemoryConnection implements Connection
             $row = $this->actions[$company . ':' . $p['reference']] ?? null;
             return $row === null ? [] : [$row];
         }
+        if (str_contains($sql, 'AS ORDER_NUMBER') && str_contains($sql, 'NOT EXISTS')) {
+            return [];
+        }
         if (str_contains($sql, 'FROM ME_OE_DOCUMENTS D WHERE')) {
             self::requireLock($sql);
             $rows = array_values(array_filter($this->documents, static fn ($r) => $r['CNY#'] === $company

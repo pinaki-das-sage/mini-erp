@@ -66,6 +66,9 @@ return static function (Api $api, Connection $connection): void {
         static fn (Actor $actor, array $input, array $params, array $query): array => $invoices->list($actor, $query));
     $api->register('POST', '/sales/invoices', SalesPermissions::DOCUMENTS['invoice'], 'create',
         static fn (Actor $actor, array $input): array => $invoices->create($actor, $input), 201);
+    // Register the literal source lookup before the invoice-number route.
+    $api->register('GET', '/sales/invoices/eligible-orders', SalesPermissions::DOCUMENTS['invoice'], 'create',
+        static fn (Actor $actor, array $input, array $params, array $query): array => $invoices->eligibleOrders($actor, $query));
     $api->register('GET', '/sales/invoices/{invoice_number}', SalesPermissions::DOCUMENTS['invoice'], 'read',
         static fn (Actor $actor, array $input, array $params): array => $invoices->get($actor, $params['invoice_number']));
     $api->register('POST', '/sales/invoices/{invoice_number}/update', SalesPermissions::DOCUMENTS['invoice'], 'update',

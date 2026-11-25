@@ -697,10 +697,11 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/EligibleOrders" }
         default: { $ref: "#/components/responses/Error" }
-      description: Readable same-company Orders in Submitted, In Progress or Closed, unused by another Invoice.
-        Draft Orders are excluded. Lookup does not reserve; revalidate on Invoice save and submit. Standalone
-        Invoices remain valid regardless of Order progress.
-      x-implementation-status: planned
+      description: Requires sales.invoices:create and sales.orders:read. Return only same-company Submitted
+        Sales Orders without an existing source claim. Draft, In Progress, Closed and already-invoiced Orders
+        are excluded before pagination. Lookup is read-only; Invoice creation rechecks eligibility under lock.
+        Order submission automatically creates an Invoice, so those Orders do not appear in this lookup.
+      x-implementation-status: integration-pending
 
 components:
   securitySchemes:
@@ -898,7 +899,7 @@ components:
       description: Active same-company choices.
       content: { application/json: { schema: { $ref: "#/components/schemas/WarehouseChoiceListResponse" } } }
     EligibleOrders:
-      description: Eligible Submitted / In Progress / Closed Sales Orders only.
+      description: Submitted Sales Orders without an existing Invoice, scoped to the current company.
       content: { application/json: { schema: { $ref: "#/components/schemas/EligibleOrderListResponse" } } }
     InventoryConflict:
       description: |-
@@ -2069,9 +2070,21 @@ components:
           minItems: 1
           items: { $ref: "#/components/schemas/SalesSourceLineInput", unevaluatedProperties: false }
     EligibleOrderSummary:
-      allOf:
-        - { $ref: "#/components/schemas/OrderSummary" }
-        - { properties: { status: { enum: [ Submitted, In Progress, Closed ] } } }
+      type: object
+      properties:
+        order_number: { $ref: "#/components/schemas/SalesDocumentNumber" }
+        customer_code: { $ref: "#/components/schemas/CustomerCode" }
+        customer_name: { type: string }
+        warehouse_id: { $ref: "#/components/schemas/OrderFields/properties/warehouse_id" }
+        order_date: { type: string, format: date }
+        shipping_address: { type: [ string, "null" ] }
+        payment_terms: { $ref: "#/components/schemas/CustomerDetails/properties/payment_terms" }
+        notes: { type: string }
+        status: { type: string, enum: [ Submitted ] }
+        current_version: { type: integer, minimum: 1, maximum: 9999999999 }
+        document_total: { $ref: "#/components/schemas/SalesAmount" }
+      required: [ order_number, customer_code, customer_name, warehouse_id, order_date, shipping_address,
+        payment_terms, notes, status, current_version, document_total ]
     EligibleOrderListResponse:
       allOf:
         - { $ref: "#/components/schemas/PagedSuccess" }

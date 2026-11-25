@@ -45,6 +45,14 @@ reference is generated and stale/state checks prevent repeated debt changes.
 Payment recording retains its required retry reference. Use the latest version for
 each Invoice action; a retry without an explicit reference does not replay success.
 
+`GET /api/v1/sales/invoices/eligible-orders` is implemented as a read-only paginated
+lookup requiring Invoice create and Order read permissions. It returns only the
+current company's Submitted Sales Orders without a source claim. Customer Code,
+Warehouse and inclusive Order-date filters are supported. Draft/In Progress/Closed
+Orders and Orders already linked to an Invoice are excluded before pagination.
+Creation still rechecks status and claim under lock. Since Order Submit already
+creates an Invoice, normally submitted Orders will not appear here.
+
 Seven Sales Invoice operations have local PHP implementations. Deployment and real
 Oracle/Swagger acceptance remain pending for the complete lifecycle. Payment
 recording/history are now registered by the follow-up [API-07 implementation](api-07.md).

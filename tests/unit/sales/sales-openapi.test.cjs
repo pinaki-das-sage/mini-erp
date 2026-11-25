@@ -100,7 +100,9 @@ test('Invoice sources are Orders and removed Shipper definitions leave no refere
   assert(schemas.InvoiceCreateRequest.required.includes('source_order_number'));
   assert.equal(schemas.InvoiceFields.properties.source_order_number.$ref, '#/components/schemas/SalesDocumentNumber');
   assert.match(schemas.InvoiceUpdateRequest.description, /immutable Order source/);
-  assert.deepEqual(schemas.EligibleOrderSummary.allOf[1].properties.status.enum, ['Submitted', 'In Progress', 'Closed']);
+  assert.deepEqual(schemas.EligibleOrderSummary.properties.status.enum, ['Submitted']);
+  assert.match(operation('/sales/invoices/eligible-orders', 'get').description, /without an existing source claim/);
+  assert.equal(operation('/sales/invoices/eligible-orders', 'get')['x-implementation-status'], 'integration-pending');
   assert.deepEqual(spec.components.parameters.DocumentType.schema.enum, ['Quote', 'Order', 'Invoice']);
 });
 
