@@ -14,6 +14,7 @@ final readonly class ReservationService
 {
     /**
      * The optional server-side adapter returns Draft-trip claimed base quantity.
+     * Release defaults to the deployed Logistics table adapter when none is injected.
      * It receives (Actor, TransactionContext, salesOrderId, salesLineId).
      * The caller must already hold the agreed Sales-line lock before any write service.
      * @param (\Closure(Actor, TransactionContext, int, int): int)|null $plannedQuantity
@@ -48,14 +49,41 @@ final readonly class ReservationService
         if ($rows === []) {
             throw new AppError('NOT_FOUND', 'Reservation not found for this Sales order and line.', 404);
         }
-        $row = $rows[0];
+        return $this->presentReservation($actor, $tx, $rows[0]);
+    }
+
+    /** Fetch the selected historical cycle rather than the latest reservation for its Sales line. */
+    public function getReservationById(Actor $actor, TransactionContext $tx, int $reservationId): array
+    {
+        (new Authorization($this->connection))->requirePermission($actor, 'inventory.reservations', 'read');
+        if ($reservationId < 1 || $reservationId > 9999999999) {
+            throw new AppError('VALIDATION_ERROR', 'Reservation ID must be a positive integer of at most 10 digits.');
+        }
+        $rows = $tx->query(
+            'SELECT RESERVATION_ID, SALES_ORDER_ID, SALES_LINE_ID, PRODUCT_ID,
+                    RESERVED_QUANTITY, RESERVATION_STATUS, TRIP_ID, TRIP_LINE_ID
+             FROM ME_INV_RESERVATION WHERE COMPANY_ID = :company_id AND RESERVATION_ID = :reservation_id',
+            ['company_id' => $actor->companyId, 'reservation_id' => $reservationId],
+        );
+        if ($rows === []) {
+            throw new AppError('NOT_FOUND', 'Reservation not found for this company.', 404);
+        }
+        return $this->presentReservation($actor, $tx, $rows[0]);
+    }
+
+    private function presentReservation(Actor $actor, TransactionContext $tx, array $row): array
+    {
+        $salesOrderId = (int) $row['SALES_ORDER_ID'];
+        $salesLineId = (int) $row['SALES_LINE_ID'];
         $status = $row['RESERVATION_STATUS'];
         $quantity = (int) $row['RESERVED_QUANTITY'];
         if ($quantity < 1 || !in_array($status, ['ACTIVE', 'RELEASED', 'DISPATCHED'], true)) {
             throw new AppError('INVALID_STATE', 'The reservation has an invalid status or quantity.', 409);
         }
         $active = $status === 'ACTIVE' ? $quantity : 0;
-        $claimed = $this->plannedQuantity === null ? null : $this->claimedQuantity($actor, $tx, $salesOrderId, $salesLineId, $active);
+        // Draft claims on the same Sales line belong to its current ACTIVE cycle, not released history.
+        $claimed = $this->plannedQuantity === null ? null
+            : ($status === 'ACTIVE' ? $this->claimedQuantity($actor, $tx, $salesOrderId, $salesLineId, $active) : 0);
         return [
             'reservation_id' => (int) $row['RESERVATION_ID'],
             'sales_order_id' => (int) $row['SALES_ORDER_ID'],
@@ -213,6 +241,18 @@ final readonly class ReservationService
     ): array {
         (new Authorization($this->connection))->requirePermission($actor, 'inventory.reservations', 'release');
         $this->validateTransition($reservationId, $salesOrderId, $salesLineId, $productId, $quantity);
+        $claimLookup = $this->plannedQuantity;
+        if ($claimLookup === null) {
+            // Acquire the shared source lock BEFORE balance/reservation locks. Logistics
+            // planning must take this same Sales-line lock before creating/removing claims.
+            $source = $tx->query('SELECT RECORD# FROM ME_OE_DOCUMENT_LINES
+                WHERE CNY# = :company_id AND DOCUMENT_RECORD# = :sales_order_id AND RECORD# = :sales_line_id FOR UPDATE',
+                ['company_id' => $actor->companyId, 'sales_order_id' => $salesOrderId, 'sales_line_id' => $salesLineId]);
+            if ($source === []) {
+                throw new AppError('NOT_FOUND', 'Original Sales line not found for this company and order.', 404);
+            }
+            $claimLookup = \Closure::fromCallable([(new LogisticsClaimLookup()), 'getPlannedQuantity']);
+        }
         [$row, $onHand, $reserved] = $this->lockReservation($actor, $tx, $reservationId, $salesOrderId, $salesLineId, $productId, $quantity);
         if ($row['RESERVATION_STATUS'] === 'RELEASED') {
             return [...$this->transitionResult($row, $onHand, $reserved), 'released_quantity' => $quantity];
@@ -220,7 +260,7 @@ final readonly class ReservationService
         if ($row['RESERVATION_STATUS'] !== 'ACTIVE') {
             throw new AppError('INVALID_STATE', 'Only an ACTIVE reservation can be released.', 409);
         }
-        if ($this->claimedQuantity($actor, $tx, $salesOrderId, $salesLineId, $quantity) > 0) {
+        if ($this->claimedQuantity($actor, $tx, $salesOrderId, $salesLineId, $quantity, $claimLookup) > 0) {
             throw new AppError('QUANTITY_CONFLICT', 'Remove all Draft-trip claims before releasing this full-line reservation.', 409);
         }
         if ($reserved < $quantity) {
@@ -373,12 +413,13 @@ final readonly class ReservationService
         return [$row, $onHand, $reserved];
     }
 
-    private function claimedQuantity(Actor $actor, TransactionContext $tx, int $orderId, int $lineId, int $active): int
+    private function claimedQuantity(Actor $actor, TransactionContext $tx, int $orderId, int $lineId, int $active, ?\Closure $lookup = null): int
     {
-        if ($this->plannedQuantity === null) {
+        $lookup ??= $this->plannedQuantity;
+        if ($lookup === null) {
             throw new AppError('DEPENDENCY_UNAVAILABLE', 'Logistics claim lookup is not connected; release eligibility is unknown.', 503);
         }
-        $claimed = ($this->plannedQuantity)($actor, $tx, $orderId, $lineId);
+        $claimed = $lookup($actor, $tx, $orderId, $lineId);
         if (!is_int($claimed) || $claimed < 0 || $claimed > $active) {
             throw new AppError('QUANTITY_CONFLICT', 'Logistics returned an invalid or inconsistent claimed base quantity.', 409);
         }

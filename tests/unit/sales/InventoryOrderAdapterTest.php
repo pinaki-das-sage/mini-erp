@@ -112,15 +112,12 @@ final class InventoryOrderAdapterTest extends TestCase
         self::assertSame('Submitted', $service->action($this->actor(false), $order['order_number'], 'submit', ['expected_version' => 1])['status']);
     }
 
-    public function testReleaseRequiresRealClaimLookupAndResubmissionRetainsHistory(): void
+    public function testReleaseRejectsClaimsAndResubmissionRetainsHistory(): void
     {
-        $db = new ReservationMemoryConnection(); $service = $this->service($db, false, 0, true);
+        $db = new ReservationMemoryConnection(); $service = $this->service($db, true, 1, true);
         $order = $this->create($service);
         $service->action($this->actor(), $order['order_number'], 'submit', ['expected_version' => 1]);
-        $this->reject(fn () => $service->action($this->actor(), $order['order_number'], 'return_to_draft', ['expected_version' => 2]), 'DEPENDENCY_UNAVAILABLE');
-        self::assertSame(4, $db->balances[163]['RESERVED']);
-        $claimed = $this->service($db, true, 1, true);
-        $this->reject(fn () => $claimed->action($this->actor(), $order['order_number'], 'return_to_draft', ['expected_version' => 2]), 'QUANTITY_CONFLICT');
+        $this->reject(fn () => $service->action($this->actor(), $order['order_number'], 'return_to_draft', ['expected_version' => 2]), 'QUANTITY_CONFLICT');
         self::assertSame(4, $db->balances[163]['RESERVED']);
         $ready = $this->service($db, true, 0, true);
         $draft = $ready->action($this->actor(), $order['order_number'], 'return_to_draft', ['expected_version' => 2]);
@@ -129,6 +126,51 @@ final class InventoryOrderAdapterTest extends TestCase
         $submitted = $ready->action($this->actor(), $order['order_number'], 'submit', ['expected_version' => 3]);
         self::assertSame('Submitted', $submitted['status']); self::assertCount(4, $db->reservations);
         self::assertSame(4, $db->balances[163]['RESERVED']); self::assertCount(2, $db->sales->links);
+    }
+
+    public function testReservationByIdKeepsReleasedHistorySeparateFromCurrentDraftClaims(): void
+    {
+        $db = new ReservationMemoryConnection(); $service = $this->service($db, true, 0, true);
+        $order = $this->create($service);
+        $service->action($this->actor(), $order['order_number'], 'submit', ['expected_version' => 1]);
+        $oldId = $db->reservations[0]['RESERVATION_ID'];
+        $service->action($this->actor(), $order['order_number'], 'return_to_draft', ['expected_version' => 2]);
+        $service->action($this->actor(), $order['order_number'], 'submit', ['expected_version' => 3]);
+        $currentId = $db->reservations[2]['RESERVATION_ID'];
+        $calls = 0;
+        $provider = new ReservationService($db, static function () use (&$calls): int { $calls++; return 1; });
+        $tx = new TransactionContext($db);
+        $history = $provider->getReservationById($this->actor(), $tx, $oldId);
+        self::assertSame('RELEASED', $history['status']); self::assertSame($oldId, $history['reservation_id']);
+        self::assertSame(0, $history['claimed_quantity']); self::assertSame(0, $history['releasable_quantity']);
+        self::assertSame(0, $calls); // Current-cycle claims must not be applied to released history.
+        $current = $provider->getReservationById($this->actor(), $tx, $currentId);
+        self::assertSame('ACTIVE', $current['status']); self::assertSame(1, $current['claimed_quantity']);
+        self::assertSame(2, $current['releasable_quantity']); self::assertSame(1, $calls);
+        $latest = $provider->getReservationDetail($this->actor(), $tx, 11, (int) $order['lines'][0]['line_id']);
+        self::assertSame($currentId, $latest['reservation_id']); self::assertSame(2, $calls);
+        $this->reject(fn () => $provider->getReservationById(new Actor('admin', 'admin', [], 8, true), $tx, $oldId), 'NOT_FOUND');
+        $this->reject(fn () => $provider->getReservationById($this->actor(false), $tx, $oldId), 'FORBIDDEN');
+        foreach ([0, 10000000000] as $invalid) {
+            $this->reject(fn () => $provider->getReservationById($this->actor(), $tx, $invalid), 'VALIDATION_ERROR');
+        }
+        $this->reject(fn () => $provider->getReservationById($this->actor(), $tx, 999), 'NOT_FOUND');
+        self::assertSame(4, $db->balances[163]['RESERVED']);
+    }
+
+    public function testDispatchedDetailsDoNotRunDraftClaimLookup(): void
+    {
+        $db = new ReservationMemoryConnection(); $service = $this->service($db, true, 0, true);
+        $order = $this->create($service);
+        $service->action($this->actor(), $order['order_number'], 'submit', ['expected_version' => 1]);
+        $db->reservations[0]['RESERVATION_STATUS'] = 'DISPATCHED';
+        $db->reservations[0]['TRIP_ID'] = 7; $db->reservations[0]['TRIP_LINE_ID'] = 501;
+        $provider = new ReservationService($db, static function (): int { throw new \LogicException('No Draft claim lookup for consumed stock.'); });
+        $tx = new TransactionContext($db);
+        $detail = $provider->getReservationDetail($this->actor(), $tx, 11, (int) $order['lines'][0]['line_id']);
+        self::assertSame('DISPATCHED', $detail['status']); self::assertSame(3, $detail['consumed_quantity']);
+        self::assertSame(0, $detail['claimed_quantity']); self::assertSame(0, $detail['active_quantity']);
+        self::assertSame($detail, $provider->getReservationById($this->actor(), $tx, $detail['reservation_id']));
     }
 
     public function testSalesAuditFailureRollsBackInventoryProviderWrites(): void
