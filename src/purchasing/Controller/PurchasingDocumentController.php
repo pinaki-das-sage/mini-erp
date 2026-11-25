@@ -273,9 +273,9 @@ final readonly class PurchasingDocumentController
 
     private static function productId(array $input): int
     {
-        $value = self::positiveInteger($input, 'product_id');
-        if ($value > 9999999999) {
-            throw new AppError('VALIDATION_ERROR', 'product_id must be at most 9999999999.');
+        $value = $input['product_id'] ?? null;
+        if (!is_int($value) || $value < 1 || $value > 9999999999) {
+            throw new AppError('VALIDATION_ERROR', 'product_id must be a JSON integer between 1 and 9999999999.');
         }
         return $value;
     }
