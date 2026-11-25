@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
 
-namespace MiniErp\sales;
+namespace MiniErp\sales\customers;
+
+use MiniErp\sales\SalesPermissions;
 
 use MiniErp\shared\ActionExecutor;
 use MiniErp\shared\AppError;

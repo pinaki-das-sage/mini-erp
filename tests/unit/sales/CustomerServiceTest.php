@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace MiniErp\Tests\unit\sales;
 
-use MiniErp\sales\CustomerService;
+use MiniErp\sales\customers\CustomerService;
 use MiniErp\shared\Api;
 use MiniErp\shared\AppError;
 use MiniErp\shared\Config;

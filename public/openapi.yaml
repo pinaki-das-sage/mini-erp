@@ -121,8 +121,8 @@ paths:
       description: |
         Create a Draft using customer_code and whole-number quantity strings. action_reference is optional,
         matching Customers. Draft saves validate local fields without calling Inventory; no stock check
-        or reservation. Active Item/Warehouse validation is deferred to Submit. Its adapter is not connected
-        yet, so Submit returns INVENTORY_UNAVAILABLE (HTTP 503) and preserves the Draft.
+        or reservation. Active Product/Warehouse validation is deferred to Submit. Submit uses Inventory's
+        validator. If Inventory is unavailable, Submit returns INVENTORY_UNAVAILABLE (HTTP 503) and preserves the Draft.
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/QuoteCreateRequest" } } }
@@ -181,9 +181,9 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
       responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
-      description: Requires the sales.quotes:submit permission. Validate the saved Draft header and all lines; no
+      description: Requires the sales.quotes:update permission. Validate the saved Draft header and all lines; no
         Inventory availability or reservation check.
-      x-implementation-status: integration-pending
+      x-implementation-status: implemented
 
   /sales/quotes/{quote_number}/move-to-draft:
     parameters:
@@ -192,7 +192,7 @@ paths:
       tags: [ Sales Quotes ]
       summary: Return an eligible Submitted Quote to Draft
       operationId: moveQuoteToDraft
-      description: Requires sales.quotes:return_to_draft and no downstream document link, including a Draft Order.
+      description: Requires sales.quotes:update and no downstream document link, including a Draft Order.
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }

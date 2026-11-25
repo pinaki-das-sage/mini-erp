@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace MiniErp\Tests\oracle\sales;
 
-use MiniErp\sales\CustomerService;
+use MiniErp\sales\customers\CustomerService;
 use MiniErp\shared\AppError;
 use MiniErp\shared\database\Connection;
 use MiniErp\shared\database\DatabaseError;

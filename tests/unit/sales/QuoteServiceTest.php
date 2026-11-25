@@ -3,9 +3,9 @@ declare(strict_types=1);
 
 namespace MiniErp\Tests\unit\sales;
 
-use MiniErp\sales\QuoteInventory;
-use MiniErp\sales\QuoteMoney;
-use MiniErp\sales\QuoteService;
+use MiniErp\sales\quotes\QuoteInventory;
+use MiniErp\sales\quotes\QuoteMoney;
+use MiniErp\sales\quotes\QuoteService;
 use MiniErp\shared\AppError;
 use MiniErp\shared\Api;
 use MiniErp\shared\Config;
@@ -145,6 +145,7 @@ final class QuoteServiceTest extends TestCase
     public function testDraftSavesWithoutInventoryAndFailedSubmissionPreservesDraft(): void
     {
         $db = new QuoteMemoryConnection();
+        $db->inventoryUnavailable = true;
         $service = new QuoteService($db);
         $saved = $service->create($this->actor(), $this->input());
         $saved = $service->update($this->actor(), $saved['quote_number'], ['expected_version' => 1, 'lines' => $this->input()['lines'], 'notes' => 'Draft edit']);
@@ -181,6 +182,7 @@ final class QuoteServiceTest extends TestCase
         self::assertSame(409, $api->handle('POST', $url . '/update', ['expected_version' => 99, 'lines' => $this->input()['lines']], $headers)['status']);
         self::assertSame(404, $api->handle('PATCH', $url, ['expected_version' => 1, 'lines' => $this->input()['lines']], $headers)['status']);
         self::assertSame(201, $api->handle('POST', '/api/v1/sales/quotes', $this->input(), $headers)['status']);
+        $db->inventoryUnavailable = true;
         self::assertSame(503, $api->handle('POST', $url . '/submit', ['expected_version' => 1], $headers)['status']);
         $deleted = $api->handle('POST', $url . '/delete', ['expected_version' => 1], $headers);
         self::assertSame(200, $deleted['status']);
@@ -248,8 +250,10 @@ final class QuoteServiceTest extends TestCase
         $db->apiAdmin = false;
         $db->grants = ['sales.quotes:read', 'sales.quotes:update'];
         $headers = ['authorization' => 'Bearer ' . str_repeat('a', 64), 'content-type' => 'application/json'];
-        // The real adapter is absent, but reaching it proves Update authorized the route.
+        // A provider query failure proves Update authorized the route without changing the Draft.
+        $db->inventoryUnavailable = true;
         self::assertSame(503, $api->handle('POST', '/api/v1/sales/quotes/' . $number . '/submit', ['expected_version' => 1], $headers)['status']);
+        $db->inventoryUnavailable = false;
         foreach ([1, 2] as $version) {
             self::assertSame(200, $api->handle('POST', '/api/v1/sales/quotes/' . $number . '/update', ['expected_version' => $version, 'lines' => $this->input()['lines']], $headers)['status']);
         }
@@ -276,6 +280,50 @@ final class QuoteServiceTest extends TestCase
             self::assertSame([], $db->documents); self::assertSame([], $db->actions);
         }
     }
+
+    public function testRealInventoryValidatorThroughSubmitReturnAndFailureRollback(): void
+    {
+        $db = new QuoteMemoryConnection();
+        $api = new Api($db, Config::fromArray([]));
+        $headers = ['authorization' => 'Bearer ' . str_repeat('a', 64), 'content-type' => 'application/json'];
+        $created = $api->handle('POST', '/api/v1/sales/quotes', $this->input(), $headers);
+        self::assertSame(201, $created['status']);
+        self::assertSame(0, $db->inventoryQueries);
+        $number = json_decode($created['body'], true)['result']['quote_number'];
+        $url = '/api/v1/sales/quotes/' . $number;
+        $input = ['expected_version' => 1, 'action_reference' => 'real-submit'];
+        $submitted = $api->handle('POST', $url . '/submit', $input, $headers);
+        self::assertSame(200, $submitted['status'], $submitted['body']);
+        self::assertSame('Submitted', json_decode($submitted['body'], true)['result']['status']);
+        self::assertSame(2, json_decode($submitted['body'], true)['current_version']);
+        self::assertSame($submitted['body'], $api->handle('POST', $url . '/submit', $input, $headers)['body']);
+        self::assertSame(1, $db->inventoryQueries);
+        $returned = $api->handle('POST', $url . '/move-to-draft', ['expected_version' => 2], $headers);
+        self::assertSame(200, $returned['status']);
+        self::assertSame('Draft', json_decode($returned['body'], true)['result']['status']);
+        $draft = json_decode($returned['body'], true)['result'];
+        foreach ([
+            [[], 400, 'VALIDATION_ERROR'],
+            [[['COMPANY_ID' => 7, 'PRODUCT_ID' => '163', 'WAREHOUSE_ID' => 'W01', 'IS_ACTIVE' => 'N']], 409, 'INVALID_STATE'],
+            [[['COMPANY_ID' => 8, 'PRODUCT_ID' => '163', 'WAREHOUSE_ID' => 'W01', 'IS_ACTIVE' => 'Y']], 400, 'VALIDATION_ERROR'],
+            [[['COMPANY_ID' => 7, 'PRODUCT_ID' => '163', 'WAREHOUSE_ID' => 'W02', 'IS_ACTIVE' => 'Y']], 400, 'VALIDATION_ERROR'],
+        ] as [$products, $status, $code]) {
+            $db->inventoryProducts = $products;
+            $failed = $api->handle('POST', $url . '/submit', ['expected_version' => 3], $headers);
+            self::assertSame($status, $failed['status']);
+            self::assertSame($code, json_decode($failed['body'], true)['error']['code']);
+            self::assertSame($draft, json_decode($api->handle('GET', $url, [], $headers)['body'], true)['result']);
+            self::assertCount(3, $db->audit);
+            self::assertCount(3, $db->actions);
+        }
+        $db->inventoryUnavailable = true;
+        $failed = $api->handle('POST', $url . '/submit', ['expected_version' => 3], $headers);
+        self::assertSame(503, $failed['status']);
+        self::assertSame('INVENTORY_UNAVAILABLE', json_decode($failed['body'], true)['error']['code']);
+        self::assertSame($draft, json_decode($api->handle('GET', $url, [], $headers)['body'], true)['result']);
+        self::assertCount(3, $db->audit);
+    }
+
 
     public function testProductReferenceRejectsSkuAndInvalidNumericIdsWithoutSaving(): void
     {
@@ -313,6 +361,9 @@ final class QuoteMemoryConnection implements Connection
     public array $grants = [];
     public bool $apiAdmin = true;
     public bool $used = false, $failAudit = false;
+    public array $inventoryProducts = [['COMPANY_ID' => 7, 'PRODUCT_ID' => '163', 'WAREHOUSE_ID' => 'W01', 'IS_ACTIVE' => 'Y']];
+    public bool $inventoryUnavailable = false;
+    public int $inventoryQueries = 0;
     private int $sequence = 0, $lineSequence = 0;
     private ?array $snapshot = null;
     public function begin(): void { if ($this->snapshot !== null) { throw new \LogicException('Nested transaction'); } $this->snapshot = [$this->documents, $this->lines, $this->actions, $this->audit]; }
@@ -321,6 +372,14 @@ final class QuoteMemoryConnection implements Connection
     public function executeSchema(string $sql): void { throw new \LogicException('No DDL'); }
     public function query(string $sql, array $p = []): array
     {
+        if (str_contains($sql, 'FROM ME_INV_PRODUCTS')) {
+            $this->inventoryQueries++;
+            if ($this->inventoryUnavailable) { throw new DatabaseError(942); }
+            $company = $p['company_id'];
+            unset($p['company_id']);
+            return array_values(array_filter($this->inventoryProducts, static fn (array $row): bool =>
+                $row['COMPANY_ID'] === $company && in_array((int) $row['PRODUCT_ID'], array_values($p), true)));
+        }
         if (str_contains($sql, 'FROM ME_API_TOKENS')) { return [['USER_ID' => 'admin', 'COMPANY_ID' => 7, 'SECURITY_VERSION' => 1, 'EXPIRES_AT' => time() + 3600, 'REVOKED_AT' => null]]; }
         if (str_contains($sql, 'JOIN ME_COMPANY')) { return [['ID' => 'admin', 'USERNAME' => 'admin', 'IS_ADMIN' => $this->apiAdmin ? 1 : 0, 'COMPANY_ID' => 7, 'SECURITY_VERSION' => 1, 'MUST_CHANGE_PASSWORD' => 0, 'COMPANY_NAME' => 'Test']]; }
         if (str_contains($sql, 'FROM ME_USER_ROLES')) { return []; }

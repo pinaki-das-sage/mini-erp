@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-namespace MiniErp\sales;
+namespace MiniErp\sales\quotes;
 
 use MiniErp\shared\AppError;
 

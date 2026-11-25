@@ -1,8 +1,9 @@
 <?php
 declare(strict_types=1);
 
-use MiniErp\sales\CustomerService;
-use MiniErp\sales\QuoteService;
+use MiniErp\sales\customers\CustomerService;
+use MiniErp\inventory\QuoteInventoryValidator;
+use MiniErp\sales\quotes\QuoteService;
 use MiniErp\sales\SalesPermissions;
 use MiniErp\shared\Api;
 use MiniErp\shared\database\Connection;
@@ -10,7 +11,7 @@ use MiniErp\shared\security\Actor;
 
 return static function (Api $api, Connection $connection): void {
     $customers = new CustomerService($connection);
-    $quotes = new QuoteService($connection);
+    $quotes = new QuoteService($connection, new QuoteInventoryValidator());
     $api->register('POST', '/sales/quotes', SalesPermissions::DOCUMENTS['quote'], 'create',
         static fn (Actor $actor, array $input): array => $quotes->create($actor, $input), 201);
     $api->register('GET', '/sales/quotes', SalesPermissions::DOCUMENTS['quote'], 'read',

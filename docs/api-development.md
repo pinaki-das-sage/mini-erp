@@ -2,6 +2,12 @@
 
 The shared framework implements bearer authentication, permission-checked route registration, JSON responses and input/pagination helpers. The note and user-administration APIs are working examples. Customer routes and the Quote backend are implemented; Quote Inventory validation is pending. Other domain endpoints remain team work.
 
+## Sales backend folders
+
+Customer-only classes live in `src/sales/customers/` (`MiniErp\sales\customers`), and Quote-only classes live in `src/sales/quotes/` (`MiniErp\sales\quotes`). Shared `Validation.php`, `DocumentRules.php`, `SalesPermissions.php`, and the module route entry point `api.php` remain directly in `src/sales/`. Migrations and fixtures remain under `database/`; API URLs and JSON fields are unchanged.
+
+Deploy both new directories and the matching `src/sales/api.php` together when upgrading the old flat layout. Retire the superseded root-level Customer/Quote class files after deployment. Composer's existing PSR-4 mapping supports the new folders; regenerate autoload files with `composer dump-autoload` if the server uses an optimized or authoritative class map. There are no database changes for this reorganization.
+
 ## Customer Code generation
 
 Customer creation generates an immutable code such as `CUST-001`, `CUST-002`, and `CUST-1000`. Omit `customer_code` from the create body; supplying it is rejected. A single Oracle sequence serves all companies, and rollbacks or cached sequence values can leave gaps. Numeric Customer URL IDs remain separate. Existing codes remain unchanged.
@@ -47,7 +53,15 @@ Inventory integration follows [the shared contract boundary](./shared-contracts.
 | Future Order submission | Use `getAvailability` for the company/Warehouse and combined Item quantities; the result is a snapshot. Inventory must confirm all reservations through `reserveStock` before the Order becomes Submitted. |
 | Eligible Order return/deletion | Coordinate `releaseReservation` and confirm release before the action completes. |
 
-`QuoteInventory::validate` is the local integration interface. Wire Inventory's real master-data adapter into the `QuoteService` constructed in `src/sales/api.php`. Inventory owns the lookup implementation; there is no real provider in this repository yet. Per the updated requested behavior, Drafts can be created and edited while Inventory is unavailable. The default `UnavailableQuoteInventory` returns `INVENTORY_UNAVAILABLE` (503) on Submit, preserving the saved Draft and its version. Test adapters validate caller behavior only; they never establish real stock availability.
+`QuoteInventory::validate` is the integration interface. The `QuoteService` in `src/sales/api.php` receives Inventory's supplied implementation directly: `new MiniErp\inventory\QuoteInventoryValidator()`. Direct service construction also defaults to this real validator. Drafts can be created and edited without Inventory service validation; Submit always validates against Inventory through the existing transaction. There is no runtime test adapter, fixture loader or mode switch.
+
+### Real Inventory validation
+
+Deploy `src/inventory/QuoteInventoryValidator.php`, `src/sales/quotes/QuoteService.php` and the matching `src/sales/api.php` together. No Inventory mode configuration, additional transaction, endpoint or database migration is needed. Keep application settings and credentials unchanged. Inventory's `ME_INV_PRODUCTS` table must be accessible through Sales' existing database connection. Inventory's implementation selects `PRODUCT_ID`, `WAREHOUSE_ID` and `IS_ACTIVE` using the trusted `COMPANY_ID`, checks numeric Product ID strings and deduplicates/chunks lookups. It does not query stock, write data, open a connection, commit or roll back.
+
+Provider limitations: Warehouse validation currently accepts the fixed `W01` identifier. Inventory has no Warehouse master or Warehouse active flag, so separate Warehouse existence/active checks are not implemented. Products must match the Warehouse and have `IS_ACTIVE = 'Y'`. The provider SELECT does not lock Product rows; teams must still agree behavior for concurrent Product deactivation. Merely sharing a transaction is not evidence that such races have been tested.
+
+Inventory returns `VALIDATION_ERROR` (400) for malformed/missing/wrong-company/wrong-Warehouse Product references, `INVALID_STATE` (409) for inactive Products, and `INVENTORY_UNAVAILABLE` (503) for query failures. These pass through Sales' existing handling; submission rolls back and the saved Draft/version remain unchanged. After successful Submit, use the returned version for Move to Draft. The provider and POST lifecycle are covered locally with database doubles; live Oracle Submit/rollback verification must be run after deployment.
 
 Before the Inventory handoff can be completed, agree active Item/Warehouse lookup, identifier mapping, exact signatures, company checks, error codes and lock order. For Order stock integration, also agree reservation source identity, replay/version behavior and all-or-nothing rollback on a later-line failure. Real concurrent-order and rollback acceptance tests require Inventory's implementation on the shared connection. This section specifies the integration requirement; it does not claim availability or reservations are connected.
 

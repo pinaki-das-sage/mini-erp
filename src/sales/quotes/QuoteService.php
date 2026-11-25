@@ -1,7 +1,12 @@
 <?php
 declare(strict_types=1);
 
-namespace MiniErp\sales;
+namespace MiniErp\sales\quotes;
+
+use MiniErp\inventory\QuoteInventoryValidator;
+use MiniErp\sales\DocumentRules;
+use MiniErp\sales\SalesPermissions;
+use MiniErp\sales\Validation;
 
 use MiniErp\shared\Api;
 use MiniErp\shared\AppError;
@@ -19,7 +24,7 @@ final readonly class QuoteService
 
     public function __construct(private Connection $connection, ?QuoteInventory $inventory = null, ?callable $businessDate = null)
     {
-        $this->inventory = $inventory ?? new UnavailableQuoteInventory();
+        $this->inventory = $inventory ?? new QuoteInventoryValidator();
         $this->businessDate = $businessDate === null
             ? static fn (): string => date('Y-m-d') : \Closure::fromCallable($businessDate);
     }
