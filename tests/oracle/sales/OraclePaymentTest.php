@@ -3,8 +3,8 @@ declare(strict_types=1);
 
 namespace MiniErp\Tests\oracle\sales;
 
-use MiniErp\sales\InvoiceService;
-use MiniErp\sales\PaymentService;
+use MiniErp\sales\invoices\InvoiceService;
+use MiniErp\sales\payments\PaymentService;
 use MiniErp\shared\AppError;
 use MiniErp\shared\database\Connection;
 use MiniErp\shared\database\DatabaseError;
@@ -33,8 +33,8 @@ final class OraclePaymentTest extends TestCase
             ORDER BY U.COMPANY_ID, U.USER_ID FETCH FIRST 1 ROWS ONLY');
         self::assertNotEmpty($admins, 'Prepare the shared foundation and an active administrator.');
         $actor = new Actor($admins[0]['ID'], $admins[0]['USERNAME'], [], (int) $admins[0]['COMPANY_ID'], true);
-        $products = $db->query("SELECT SKU, WAREHOUSE_ID FROM ME_INV_PRODUCTS WHERE COMPANY_ID = :company_id
-            AND IS_ACTIVE = 'Y' AND LENGTH(SKU) <= 30 AND LENGTH(WAREHOUSE_ID) <= 20 ORDER BY PRODUCT_ID FETCH FIRST 1 ROWS ONLY",
+        $products = $db->query("SELECT PRODUCT_ID, WAREHOUSE_ID FROM ME_INV_PRODUCTS WHERE COMPANY_ID = :company_id
+            AND IS_ACTIVE = 'Y' AND LENGTH(WAREHOUSE_ID) <= 20 ORDER BY PRODUCT_ID FETCH FIRST 1 ROWS ONLY",
             ['company_id' => $actor->companyId]);
         self::assertNotEmpty($products, 'Prepare an active Product/Warehouse in the disposable schema.');
         $observer = OciConnection::connect($config);
@@ -49,7 +49,7 @@ final class OraclePaymentTest extends TestCase
             $invoices = new InvoiceService($db, $clock);
             $created = $invoices->create($actor, ['action_reference' => $prefix . '-create', 'customer_code' => $prefix,
                 'warehouse_id' => $products[0]['WAREHOUSE_ID'], 'lines' => [[
-                    'item_code' => $products[0]['SKU'], 'description' => 'Payment test', 'quantity' => '2', 'unit_price' => '10.25',
+                    'product_id' => (string) $products[0]['PRODUCT_ID'], 'description' => 'Payment test', 'quantity' => '2', 'unit_price' => '10.25',
                 ]]]);
             $invoiceNumber = $created['invoice_number'];
             $invoices->action($actor, $invoiceNumber, 'submit', ['action_reference' => $prefix . '-submit', 'expected_version' => 1]);

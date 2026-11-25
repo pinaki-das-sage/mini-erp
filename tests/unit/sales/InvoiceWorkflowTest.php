@@ -4,7 +4,7 @@ declare(strict_types=1);
 namespace MiniErp\Tests\unit\sales;
 
 use MiniErp\Tests\unit\sales\fixtures\InvoiceMemoryConnection;
-use MiniErp\sales\InvoiceService;
+use MiniErp\sales\invoices\InvoiceService;
 use MiniErp\shared\Api;
 use MiniErp\shared\AppError;
 use MiniErp\shared\Config;
@@ -29,7 +29,7 @@ final class InvoiceWorkflowTest extends TestCase
     private function input(string $reference = 'create'): array
     {
         return ['action_reference' => $reference, 'customer_code' => 'CUST-0001', 'warehouse_id' => 'W01',
-            'lines' => [['item_code' => 'SKU-A', 'description' => 'Item A', 'quantity' => '2', 'unit_price' => '10']]];
+            'lines' => [['product_id' => '163', 'description' => 'Item A', 'quantity' => '2', 'unit_price' => '10']]];
     }
 
     private function reject(callable $operation, string $code, int $status = 400): void
@@ -58,6 +58,8 @@ final class InvoiceWorkflowTest extends TestCase
         self::assertSame('0.00', $saved['total_paid']);
         self::assertNull($saved['payment_status']);
         self::assertSame('10.00', $saved['lines'][0]['unit_price']);
+        self::assertSame('163', $saved['lines'][0]['product_id']);
+        self::assertArrayNotHasKey('item_code', $saved['lines'][0]);
         self::assertSame('163', (string) array_values($db->lines)[0]['PRODUCT_ID']);
         self::assertSame($saved, $service->get($this->actor(), $saved['invoice_number']));
         self::assertSame('0.00', $db->customers[1]['BALANCE']);
@@ -78,10 +80,21 @@ final class InvoiceWorkflowTest extends TestCase
         self::assertCount(1, $db->documents);
     }
 
+    public function testProductMustBelongToCompanyAndWarehouseAndBeActive(): void
+    {
+        foreach (['COMPANY_ID' => 8, 'WAREHOUSE_ID' => 'W02', 'IS_ACTIVE' => 'N'] as $field => $value) {
+            $db = new InvoiceMemoryConnection();
+            $db->products[163][$field] = $value;
+            $this->reject(fn () => $this->service($db)->create($this->actor(), $this->input()), 'VALIDATION_ERROR');
+            self::assertSame([], $db->documents);
+            self::assertSame([], $db->actions);
+        }
+    }
+
     private function editable(array $invoice): array
     {
         return array_map(static fn (array $line): array => array_intersect_key($line,
-            array_flip(['line_id', 'item_code', 'description', 'quantity', 'unit_price', ...($line['source_line_id'] === null ? [] : ['source_line_id'])])), $invoice['lines']);
+            array_flip(['line_id', 'product_id', 'description', 'quantity', 'unit_price', ...($line['source_line_id'] === null ? [] : ['source_line_id'])])), $invoice['lines']);
     }
 
     public function testUpdateReordersStableLinesAndRecalculatesDueDate(): void
@@ -89,7 +102,7 @@ final class InvoiceWorkflowTest extends TestCase
         $db = new InvoiceMemoryConnection();
         $service = $this->service($db);
         $input = $this->input();
-        $input['lines'][] = ['item_code' => 'SKU-B', 'description' => 'Item B', 'quantity' => '1', 'unit_price' => '0.25'];
+        $input['lines'][] = ['product_id' => '164', 'description' => 'Item B', 'quantity' => '1', 'unit_price' => '0.25'];
         $saved = $service->create($this->actor(), $input);
         $lines = array_reverse($this->editable($saved));
         $updated = $service->update($this->actor(), $saved['invoice_number'], ['action_reference' => 'edit',
@@ -111,7 +124,7 @@ final class InvoiceWorkflowTest extends TestCase
         $saved = $service->create($this->actor(), $this->input());
         $updated = $service->update($this->actor(), $saved['invoice_number'], ['action_reference' => 'replace',
             'expected_version' => 1, 'due_date' => '2027-01-01', 'lines' => [[
-                'item_code' => 'SKU-B', 'description' => 'Replacement', 'quantity' => '1', 'unit_price' => '0.10',
+                'product_id' => '164', 'description' => 'Replacement', 'quantity' => '1', 'unit_price' => '0.10',
             ]]]);
         self::assertNotSame($saved['lines'][0]['line_id'], $updated['lines'][0]['line_id']);
         self::assertSame('0.10', $updated['document_total']);
@@ -193,7 +206,7 @@ final class InvoiceWorkflowTest extends TestCase
         $db = new InvoiceMemoryConnection();
         $service = $this->service($db);
         $input = $this->input();
-        $input['lines'][] = ['item_code' => 'SKU-B', 'description' => 'B', 'quantity' => '1', 'unit_price' => '1'];
+        $input['lines'][] = ['product_id' => '164', 'description' => 'B', 'quantity' => '1', 'unit_price' => '1'];
         $db->failLine = 2;
         try {
             $service->create($this->actor(), $input);
@@ -222,7 +235,7 @@ final class InvoiceWorkflowTest extends TestCase
         $db->documents[$id] = $db->document($id, $number, 'SALES_ORDER', 'IN_PROGRESS');
         $db->lines[$id] = $db->line($id, $id, 1, 163, 'Item A', '2', '10.00');
         return ['action_reference' => 'linked-' . $id, 'source_order_number' => $number,
-            'lines' => [['source_line_id' => (string) $id, 'item_code' => 'SKU-A', 'description' => 'Item A',
+            'lines' => [['source_line_id' => (string) $id, 'product_id' => '163', 'description' => 'Item A',
                 'quantity' => '2', 'unit_price' => '10.00']]];
     }
 
@@ -319,10 +332,17 @@ final class InvoiceWorkflowTest extends TestCase
 
     public static function invalidCreates(): array
     {
-        $line = ['item_code' => 'SKU-A', 'description' => 'A', 'quantity' => '1', 'unit_price' => '1'];
+        $line = ['product_id' => '163', 'description' => 'A', 'quantity' => '1', 'unit_price' => '1'];
         return [[['lines' => []]], [['invoice_date' => '2026-02-30']], [['due_date' => '2026-11-23']],
             [['notes' => null]], [['payment_terms' => 'INVALID']], [['document_total' => '1.00']],
             [['warehouse_id' => 'OTHER']], [['lines' => [[...$line, 'quantity' => '0']]]],
+            [['lines' => [[...$line, 'product_id' => 163]]]],
+            [['lines' => [[...$line, 'product_id' => '0']]]],
+            [['lines' => [[...$line, 'product_id' => '0163']]]],
+            [['lines' => [[...$line, 'product_id' => '163.0']]]],
+            [['lines' => [[...$line, 'product_id' => '10000000000']]]],
+            [['lines' => [[...$line, 'product_id' => '999']]]],
+            [['lines' => [[...$line, 'item_code' => 'SKU-A']]]],
             [['lines' => [[...$line, 'quantity' => '1.5']]]], [['lines' => [[...$line, 'unit_price' => '1.001']]]],
             [['lines' => [[...$line, 'unit_price' => '9999999999.99', 'quantity' => '999999999']]]],
             [['lines' => [[...$line, 'source_line_id' => '100']]]], [['lines' => [[...$line, 'line_id' => '1']]]]];

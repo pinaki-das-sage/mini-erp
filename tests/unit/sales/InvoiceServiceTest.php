@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace MiniErp\Tests\unit\sales;
 
-use MiniErp\sales\InvoiceService;
+use MiniErp\sales\invoices\InvoiceService;
 use MiniErp\shared\AppError;
 use MiniErp\shared\database\Connection;
 use MiniErp\shared\security\Actor;

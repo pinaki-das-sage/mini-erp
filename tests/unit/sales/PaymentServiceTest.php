@@ -3,8 +3,8 @@ declare(strict_types=1);
 
 namespace MiniErp\Tests\unit\sales;
 
-use MiniErp\sales\InvoiceService;
-use MiniErp\sales\PaymentService;
+use MiniErp\sales\invoices\InvoiceService;
+use MiniErp\sales\payments\PaymentService;
 use MiniErp\shared\Api;
 use MiniErp\shared\AppError;
 use MiniErp\shared\Config;
@@ -26,7 +26,7 @@ final class PaymentServiceTest extends TestCase
         return (new InvoiceService($db))->create($this->actor(), [
             'action_reference' => $reference, 'customer_code' => 'CUST-0001', 'warehouse_id' => 'W01',
             'invoice_date' => '2026-11-24', 'lines' => [$line ?? [
-                'item_code' => 'SKU-A', 'description' => 'A', 'quantity' => '2', 'unit_price' => '10.25',
+                'product_id' => '163', 'description' => 'A', 'quantity' => '2', 'unit_price' => '10.25',
             ]],
         ]);
     }
@@ -138,7 +138,7 @@ final class PaymentServiceTest extends TestCase
         $db->lines[100] = $db->line(100, 100, 1, 163, 'A', '2', '10.25');
         $invoice = (new InvoiceService($db))->create($this->actor(), ['action_reference' => 'linked',
             'source_order_number' => 'SO-1', 'invoice_date' => '2026-11-24', 'lines' => [[
-                'source_line_id' => '100', 'item_code' => 'SKU-A', 'description' => 'A', 'quantity' => '2', 'unit_price' => '10.25',
+                'source_line_id' => '100', 'product_id' => '163', 'description' => 'A', 'quantity' => '2', 'unit_price' => '10.25',
             ]]]);
         (new InvoiceService($db))->action($this->actor(), $invoice['invoice_number'], 'submit', ['action_reference' => 'submit', 'expected_version' => 1]);
         $db->forbidInventoryReads = true;
@@ -289,7 +289,7 @@ final class PaymentServiceTest extends TestCase
     public function testLargeAmountsAreExactWithoutFloatConversion(): void
     {
         $db = new InvoiceMemoryConnection();
-        $invoice = $this->draft($db, 'large', ['item_code' => 'SKU-A', 'description' => 'A', 'quantity' => '1000000', 'unit_price' => '9999999999.99']);
+        $invoice = $this->draft($db, 'large', ['product_id' => '163', 'description' => 'A', 'quantity' => '1000000', 'unit_price' => '9999999999.99']);
         (new InvoiceService($db))->action($this->actor(), $invoice['invoice_number'], 'submit', ['action_reference' => 'submit', 'expected_version' => 1]);
         $saved = $this->service($db)->record($this->actor(), $invoice['invoice_number'], $this->input('full', '9999999999990000.00'));
         self::assertSame('9999999999990000.00', $saved['payment']['payment_amount']);

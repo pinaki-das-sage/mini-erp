@@ -1,7 +1,14 @@
 <?php
 declare(strict_types=1);
 
-namespace MiniErp\sales;
+namespace MiniErp\sales\payments;
+
+use MiniErp\sales\SalesPermissions;
+use MiniErp\sales\Validation;
+use MiniErp\sales\BusinessDate;
+use MiniErp\sales\invoices\InvoiceStore;
+use MiniErp\sales\invoices\InvoiceMoney;
+use MiniErp\sales\invoices\InvoiceActions;
 
 use MiniErp\shared\Api;
 use MiniErp\shared\AppError;

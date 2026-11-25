@@ -1,7 +1,10 @@
 <?php
 declare(strict_types=1);
 
-namespace MiniErp\sales;
+namespace MiniErp\sales\invoices;
+
+use MiniErp\sales\SalesPermissions;
+use MiniErp\sales\Validation;
 
 use MiniErp\shared\AppError;
 use MiniErp\shared\database\TransactionContext;
@@ -110,10 +113,13 @@ final readonly class InvoiceDraft
             if (!is_array($line)) {
                 throw new AppError('VALIDATION_ERROR', 'Each Invoice line must be an object.');
             }
-            Validation::allowedFields($line, ['item_code', 'description', 'quantity', 'unit_price',
+            Validation::allowedFields($line, ['product_id', 'description', 'quantity', 'unit_price',
                 ...($saved === null ? [] : ['line_id']), ...($source === null ? [] : ['source_line_id'])]);
             $money = InvoiceMoney::line($line['quantity'] ?? null, $line['unit_price'] ?? null);
-            $item = Validation::text($line['item_code'] ?? '', 'Item Code', 30);
+            $productId = $line['product_id'] ?? null;
+            if (!is_string($productId) || preg_match('/\A[1-9][0-9]{0,9}\z/D', $productId) !== 1) {
+                throw new AppError('VALIDATION_ERROR', 'Product ID must be a positive numeric string such as "163".');
+            }
             $description = Validation::text($line['description'] ?? '', 'Description', 200);
             $id = $line['line_id'] ?? null;
             if (array_key_exists('line_id', $line) && (!is_string($id) || !isset($existing[$id]) || isset($ids[$id]))) {
@@ -126,33 +132,27 @@ final readonly class InvoiceDraft
             if ($source !== null) {
                 $origin = $sourceLines[$index];
                 $sourceId = $origin['LINE_ID'];
-                if (($line['source_line_id'] ?? null) !== $sourceId || $item !== $origin['ITEM_CODE']
+                if (($line['source_line_id'] ?? null) !== $sourceId || $productId !== (string) $origin['PRODUCT_ID']
                     || $description !== ($origin['DESCRIPTION'] ?? '') || $money['quantity'] !== $origin['SAVED_QUANTITY']
                     || $money['unit_price'] !== $origin['SAVED_PRICE']) {
                     throw new AppError('VALIDATION_ERROR', 'Linked Invoice lines must match the complete Order in source order.');
                 }
             }
             $total = InvoiceMoney::add($total, $money['cents']);
-            $lines[] = ['id' => $id, 'source_id' => $sourceId, 'item_code' => $item,
+            $lines[] = ['id' => $id, 'source_id' => $sourceId, 'product_id' => $productId,
                 'description' => $description, ...$money];
         }
-        // Inventory owns products and warehouses. Lock distinct SKU references in a stable order.
-        $items = array_values(array_unique(array_column($lines, 'item_code')));
-        sort($items, SORT_STRING);
-        $products = [];
-        foreach ($items as $item) {
+        // Inventory owns products and warehouses. Lock distinct product IDs in a stable order.
+        $products = array_values(array_unique(array_column($lines, 'product_id')));
+        sort($products, SORT_NUMERIC);
+        foreach ($products as $productId) {
             $rows = $tx->query('SELECT PRODUCT_ID, SKU, WAREHOUSE_ID, IS_ACTIVE FROM ME_INV_PRODUCTS
-                WHERE COMPANY_ID = :company_id AND SKU = :sku AND WAREHOUSE_ID = :warehouse FOR UPDATE',
-                ['company_id' => $actor->companyId, 'sku' => $item, 'warehouse' => $warehouse]);
+                WHERE COMPANY_ID = :company_id AND PRODUCT_ID = :product_id AND WAREHOUSE_ID = :warehouse FOR UPDATE',
+                ['company_id' => $actor->companyId, 'product_id' => $productId, 'warehouse' => $warehouse]);
             if (count($rows) !== 1 || $rows[0]['IS_ACTIVE'] !== 'Y') {
                 throw new AppError('VALIDATION_ERROR', 'Select a valid active Item in the selected Warehouse available to your company.');
             }
-            $products[$item] = $rows[0]['PRODUCT_ID'];
         }
-        foreach ($lines as &$line) {
-            $line['product_id'] = $products[$line['item_code']];
-        }
-        unset($line);
         return ['customer_id' => $customerId, 'warehouse' => $warehouse, 'date' => $date, 'due' => $due,
             'terms' => $terms, 'notes' => $notes, 'shipping' => $source['SHIPPING_ADDRESS'] ?? null,
             'source_id' => $source['RECORD#'] ?? null, 'lines' => $lines, 'total' => $total, 'existing' => $existing];

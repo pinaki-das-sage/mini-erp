@@ -6,8 +6,8 @@ use MiniErp\sales\SalesPermissions;
 use MiniErp\shared\Api;
 use MiniErp\shared\database\Connection;
 use MiniErp\shared\security\Actor;
-use MiniErp\sales\InvoiceService;
-use MiniErp\sales\PaymentService;
+use MiniErp\sales\invoices\InvoiceService;
+use MiniErp\sales\payments\PaymentService;
 
 return static function (Api $api, Connection $connection): void {
     $customers = new CustomerService($connection);

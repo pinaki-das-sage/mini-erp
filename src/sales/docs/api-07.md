@@ -3,7 +3,7 @@
 ## Status
 
 Updated 25 November 2026: payment recording and history are implemented locally in
-[PaymentService](../PaymentService.php) and registered in [api.php](../api.php).
+[PaymentService](../payments/PaymentService.php) and registered in [api.php](../api.php).
 The requester reports remote deployment and API startup verification; live payment
 POST/GET acceptance and coordinated concurrency verification remain pending. The
 Swagger operations remain `integration-pending`. No new migration was required.
@@ -75,8 +75,8 @@ An identical POST retry returns its original 201 result and snapshot, which may 
 
 ## Deployment and remote test checklist
 
-Deploy src/sales/BusinessDate.php, PaymentService.php, InvoiceActions.php,
-InvoiceWorkflow.php, the route additions in src/sales/api.php, the nested response
+Deploy src/sales/BusinessDate.php, src/sales/payments/PaymentService.php,
+the classes under src/sales/invoices/, the route additions in src/sales/api.php, the nested response
 version fallback in src/shared/Api.php, and public/openapi.yaml. Preserve teammates'
 routes and other shared changes when merging. No migration rerun is required.
 

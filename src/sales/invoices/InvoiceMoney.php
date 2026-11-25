@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
 
-namespace MiniErp\sales;
+namespace MiniErp\sales\invoices;
+
+use MiniErp\sales\Validation;
 
 use MiniErp\shared\AppError;
 

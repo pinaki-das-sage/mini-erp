@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace MiniErp\Tests\unit\sales\fixtures;
 
-use MiniErp\sales\InvoiceMoney;
+use MiniErp\sales\invoices\InvoiceMoney;
 use MiniErp\shared\database\Connection;
 use MiniErp\shared\database\DatabaseError;
 
@@ -112,12 +112,12 @@ final class InvoiceMemoryConnection implements Connection
                 && (!isset($p['customer_code']) || $r['CUSTOMER_CODE'] === $p['customer_code'])));
         }
         if (str_contains($sql, 'FROM ME_INV_PRODUCTS')) {
-            return array_values(array_filter($this->products, static fn ($r) => $r['COMPANY_ID'] === $company && $r['SKU'] === $p['sku'] && $r['WAREHOUSE_ID'] === $p['warehouse']));
+            return array_values(array_filter($this->products, static fn ($r) => $r['COMPANY_ID'] === $company && (string) $r['PRODUCT_ID'] === (string) $p['product_id'] && $r['WAREHOUSE_ID'] === $p['warehouse']));
         }
-        if (str_contains($sql, 'FROM ME_OE_DOCUMENT_LINES L LEFT JOIN')) {
+        if (str_contains($sql, 'FROM ME_OE_DOCUMENT_LINES L') && str_contains($sql, 'ORDER BY L.LINE_NUMBER')) {
             $rows = array_values(array_filter($this->lines, static fn ($r) => $r['CNY#'] === $company && (string) $r['DOCUMENT_RECORD#'] === (string) $p['id']));
             usort($rows, static fn ($a, $b) => $a['LINE_NUMBER'] <=> $b['LINE_NUMBER']);
-            return array_map(fn ($r) => [...$r, 'ITEM_CODE' => $this->products[$r['PRODUCT_ID']]['SKU']], $rows);
+            return $rows;
         }
         if (str_contains($sql, 'AS LINE_COUNT')) {
             if (!in_array((int) $p['invoice_id'], $this->lockedInvoices, true)) {

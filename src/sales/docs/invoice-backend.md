@@ -19,6 +19,11 @@ pending. No database migrations were changed for the Invoice/Payment backend wor
 
 ## Files and dependencies
 
+Invoice classes live in `src/sales/invoices/`; PaymentService lives in
+`src/sales/payments/`. Shared helpers remain directly under `src/sales/`.
+Public API URLs are unchanged. Existing SKU-based Invoice requests must use
+`product_id` instead; this change does not require a database migration.
+
 - `InvoiceService.php`: public service and existing list query.
 - `InvoiceWorkflow.php`: orchestrates header locks, writes, balance changes and action results.
 - `InvoiceDraft.php`: validates complete contents, Customer/Inventory references and source claims.
@@ -30,9 +35,9 @@ pending. No database migrations were changed for the Invoice/Payment backend wor
 Requires the finalized Customer/document/line/link/payment tables and document numbering
 from migration `009_oe_document_numbering.php`. Invoice numbers use
 `ME_OE_INVOICE_NO_SEQ` and `SI-` plus 15 digits. Inventory migration `010` replaces
-line ITEM_CODE with PRODUCT_ID. The API still uses `item_code`, resolved as Inventory
-SKU in the requested company and Warehouse. Products must have `IS_ACTIVE = 'Y'`.
-Products are locked in sorted SKU order while validating; no stock/reservation or
+line ITEM_CODE with PRODUCT_ID. The API accepts `product_id` as a positive numeric string (for example `"163"`)
+in the requested company and Warehouse. Products must have `IS_ACTIVE = 'Y'`.
+Products are locked in sorted Product ID order while validating; no stock/reservation or
 Logistics mutation occurs. Warehouse validity is checked through that Product's
 Inventory-owned WAREHOUSE_ID; there is no separate Warehouse provider in this checkout.
 
@@ -97,7 +102,7 @@ enabled disposable schema ending in `_TEST`, a seeded admin and active Inventory
 Product. It creates and cleans only its own fixtures. It has not run against Oracle.
 It is not a concurrency test; real coordinated races remain a separate acceptance gate.
 
-Swagger sequence (use actual same-company Customer Code, Warehouse and Item SKU):
+Swagger sequence (use actual same-company Customer Code, Warehouse and Product ID):
 
 1. Login/Authorize. POST Invoice with one line (2 at 10.25), a new action_reference,
    and no source for the first test. Expect Draft/version 1/total 20.50, no debt.

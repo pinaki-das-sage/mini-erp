@@ -1,7 +1,12 @@
 <?php
 declare(strict_types=1);
 
-namespace MiniErp\sales;
+namespace MiniErp\sales\invoices;
+
+use MiniErp\sales\SalesPermissions;
+use MiniErp\sales\Validation;
+use MiniErp\sales\BusinessDate;
+use MiniErp\sales\DocumentRules;
 
 use MiniErp\shared\Api;
 use MiniErp\shared\AppError;
@@ -117,7 +122,7 @@ final readonly class InvoiceWorkflow
                 }
                 // Validate the authoritative saved Draft, not caller-supplied replacement contents.
                 $this->draft->prepare($tx, $actor, ['lines' => array_map(static fn (array $line): array => [
-                    'line_id' => $line['LINE_ID'], 'item_code' => $line['ITEM_CODE'],
+                    'line_id' => $line['LINE_ID'], 'product_id' => (string) $line['PRODUCT_ID'],
                     'description' => $line['DESCRIPTION'] ?? '', 'quantity' => $line['SAVED_QUANTITY'], 'unit_price' => $line['SAVED_PRICE'],
                     ...($line['SOURCE_LINE_ID'] === null ? [] : ['source_line_id' => $line['SOURCE_LINE_ID']]),
                 ], $lines)], $header);

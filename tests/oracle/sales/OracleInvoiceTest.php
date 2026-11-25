@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace MiniErp\Tests\oracle\sales;
 
-use MiniErp\sales\InvoiceService;
+use MiniErp\sales\invoices\InvoiceService;
 use MiniErp\shared\database\OciConnection;
 use MiniErp\shared\database\TransactionContext;
 use MiniErp\shared\database\TransactionManager;
@@ -29,8 +29,8 @@ final class OracleInvoiceTest extends TestCase
             AND U.MUST_CHANGE_PASSWORD = 0 AND C.ACTIVE = 1 ORDER BY U.COMPANY_ID, U.USER_ID FETCH FIRST 1 ROWS ONLY');
         self::assertNotEmpty($admins, 'Prepare an active administrator and the shared/Sales/Inventory migrations.');
         $actor = new Actor($admins[0]['ID'], $admins[0]['USERNAME'], [], (int) $admins[0]['COMPANY_ID'], true);
-        $products = $db->query("SELECT SKU, WAREHOUSE_ID FROM ME_INV_PRODUCTS
-            WHERE COMPANY_ID = :company_id AND IS_ACTIVE = 'Y' AND LENGTH(SKU) <= 30
+        $products = $db->query("SELECT PRODUCT_ID, WAREHOUSE_ID FROM ME_INV_PRODUCTS
+            WHERE COMPANY_ID = :company_id AND IS_ACTIVE = 'Y'
             AND LENGTH(WAREHOUSE_ID) <= 20 ORDER BY PRODUCT_ID FETCH FIRST 1 ROWS ONLY", ['company_id' => $actor->companyId]);
         self::assertNotEmpty($products, 'Prepare an active Inventory product/warehouse in the disposable schema.');
         $prefix = 'it-' . bin2hex(random_bytes(6));
@@ -44,7 +44,7 @@ final class OracleInvoiceTest extends TestCase
             $service = new InvoiceService($db, static fn (): string => '2026-11-24');
             $input = ['action_reference' => $prefix . '-create', 'customer_code' => $prefix,
                 'warehouse_id' => $products[0]['WAREHOUSE_ID'], 'lines' => [[
-                    'item_code' => $products[0]['SKU'], 'description' => 'Acceptance line', 'quantity' => '2', 'unit_price' => '10.25',
+                    'product_id' => (string) $products[0]['PRODUCT_ID'], 'description' => 'Acceptance line', 'quantity' => '2', 'unit_price' => '10.25',
                 ]]];
             $saved = $service->create($actor, $input);
             $number = $saved['invoice_number'];

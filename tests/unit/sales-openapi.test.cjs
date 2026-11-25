@@ -52,6 +52,25 @@ test('Invoice sources are Orders and removed Shipper definitions leave no refere
   assert.deepEqual(spec.components.parameters.DocumentType.schema.enum, ['Quote', 'Order', 'Invoice']);
 });
 
+test('Invoice product references and examples use numeric strings instead of SKU codes', () => {
+  const line = schemas.SalesLineInput;
+  assert(line.required.includes('product_id'));
+  assert.equal(line.properties.item_code, undefined);
+  assert.equal(line.properties.product_id.type, 'string');
+  const productId = new RegExp(line.properties.product_id.pattern);
+  for (const value of ['1', '163', '9999999999']) assert(productId.test(value), value);
+  for (const value of ['0', '0163', 'RF-001', '163.0', '10000000000']) assert(!productId.test(value), value);
+  const create = operation('/sales/invoices').requestBody.content['application/json'].example;
+  const examples = operation('/sales/invoices/{invoice_number}/update').requestBody.content['application/json'].examples;
+  for (const body of [create, ...Object.values(examples).map(example => example.value)]) {
+    for (const item of body.lines) {
+      assert.equal(typeof item.product_id, 'string');
+      assert(productId.test(item.product_id));
+      assert.equal(item.item_code, undefined);
+    }
+  }
+});
+
 test('whole-number quantities match the line migration and preserve valid Quote fields', () => {
   const quantity = new RegExp(schemas.SalesQuantity.pattern);
   for (const value of ['1', '12', '999999999']) assert(quantity.test(value), value);

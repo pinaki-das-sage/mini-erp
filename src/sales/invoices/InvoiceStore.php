@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-namespace MiniErp\sales;
+namespace MiniErp\sales\invoices;
 
 use MiniErp\shared\AppError;
 use MiniErp\shared\database\TransactionContext;
@@ -41,13 +41,12 @@ final class InvoiceStore
 
     public function lines(TransactionContext $tx, Actor $actor, string|int $id): array
     {
-        return $tx->query("SELECT L.*, P.SKU AS ITEM_CODE,
+        return $tx->query("SELECT L.*,
             TO_CHAR(L.RECORD#, 'FM999999999999999') AS LINE_ID,
             TO_CHAR(L.SOURCE_LINE_RECORD#, 'FM999999999999999') AS SOURCE_LINE_ID,
             TO_CHAR(L.QUANTITY, 'FM999999999') AS SAVED_QUANTITY,
             TO_CHAR(L.UNIT_PRICE, 'FM9999999990D00', 'NLS_NUMERIC_CHARACTERS=''.,''') AS SAVED_PRICE
-            FROM ME_OE_DOCUMENT_LINES L LEFT JOIN ME_INV_PRODUCTS P
-              ON P.COMPANY_ID = L.CNY# AND P.PRODUCT_ID = L.PRODUCT_ID
+            FROM ME_OE_DOCUMENT_LINES L
             WHERE L.CNY# = :company_id AND L.DOCUMENT_RECORD# = :id ORDER BY L.LINE_NUMBER",
             ['company_id' => $actor->companyId, 'id' => $id]);
     }
@@ -111,7 +110,7 @@ final class InvoiceStore
             'available_actions' => [], // Workflow adds permission-aware hints.
             'lines' => array_map(static fn (array $line): array => [
                 'line_id' => $line['LINE_ID'], 'source_line_id' => $line['SOURCE_LINE_ID'],
-                'line_number' => (int) $line['LINE_NUMBER'], 'item_code' => $line['ITEM_CODE'],
+                'line_number' => (int) $line['LINE_NUMBER'], 'product_id' => (string) $line['PRODUCT_ID'],
                 'description' => $line['DESCRIPTION'] ?? '', 'quantity' => $line['SAVED_QUANTITY'],
                 'unit_price' => $line['SAVED_PRICE'], 'warehouse_id' => $header['WAREHOUSE_ID'],
                 'line_amount' => InvoiceMoney::format(InvoiceMoney::line($line['SAVED_QUANTITY'], $line['SAVED_PRICE'])['cents']),
