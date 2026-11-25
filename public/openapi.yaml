@@ -566,6 +566,127 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /logistics/trip-lines:
+    get:
+      tags: [Trips]
+      summary: List company trip planning lines
+      operationId: listPlanningTripLines
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: trip_id
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Shared envelope with result.items, page and page_size
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Trips]
+      summary: Create an unpublished Draft planning line
+      description: >
+        Reads the complete Sales source quantity and Inventory product weight.
+        Does not post Sales assignment fields or change Inventory or trip status.
+        Published Sales assignments must use the team's coordinated workflow.
+      operationId: createPlanningTripLine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanningTripLineCreate'
+      responses:
+        '201':
+          description: Trip line created in the shared response envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanningTripLineEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /logistics/trip-lines/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Trips]
+      summary: Get a company trip planning line
+      operationId: getPlanningTripLine
+      responses:
+        '200':
+          description: Trip line details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanningTripLineEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /logistics/trip-lines/{id}/update:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Trips]
+      summary: Update or refresh an unpublished Draft planning line
+      operationId: updatePlanningTripLine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanningTripLineUpdate'
+      responses:
+        '200':
+          description: Trip line updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanningTripLineEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /logistics/trip-lines/{id}/delete:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Trips]
+      summary: Delete an unpublished Draft planning line
+      operationId: deletePlanningTripLine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Command'
+      responses:
+        '200':
+          description: Shared envelope with result.id and result.deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccess'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
   /logistics/trips:
     post:
       tags: [Trips]
@@ -1022,6 +1143,72 @@ components:
         default: 25
 
   schemas:
+    PlanningTripLineCreate:
+      allOf:
+        - $ref: '#/components/schemas/Command'
+        - type: object
+          required: [trip_id, sales_line_id]
+          properties:
+            trip_id:
+              type: integer
+              minimum: 1
+              example: 23
+            sales_line_id:
+              type: integer
+              minimum: 1
+              example: 83
+              description: ME_OE_DOCUMENT_LINES.RECORD#; product and quantity are read from this row. Its DOCUMENT_RECORD# must match the trip's SALES_ORDER_ID.
+      unevaluatedProperties: false
+
+    PlanningTripLineUpdate:
+      allOf:
+        - $ref: '#/components/schemas/Command'
+        - type: object
+          anyOf:
+            - required: [sales_line_id]
+            - required: [product_id]
+            - required: [quantity]
+          properties:
+            sales_line_id:
+              type: integer
+              minimum: 1
+            product_id:
+              type: integer
+              minimum: 1
+            quantity:
+              type: integer
+              minimum: 1
+      unevaluatedProperties: false
+
+    PlanningTripLine:
+      type: object
+      required: [id, trip_id, sales_line_id, product_id, quantity, total_weight, line_load]
+      properties:
+        id:
+          type: integer
+        trip_id:
+          type: integer
+        sales_line_id:
+          type: string
+        product_id:
+          type: string
+        quantity:
+          type: string
+        total_weight:
+          type: string
+          description: Full line weight in KG derived from Inventory unit grams and Sales quantity.
+        line_load:
+          type: string
+          description: Same full line KG weight, used for vehicle capacity checks.
+
+    PlanningTripLineEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccess'
+        - type: object
+          properties:
+            result:
+              $ref: '#/components/schemas/PlanningTripLine'
+
     Command:
       type: object
       required: [action_reference]

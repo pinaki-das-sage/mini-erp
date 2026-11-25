@@ -10,6 +10,8 @@ use MiniErp\shared\database\Connection;
 use MiniErp\shared\security\Actor;
 use MiniErp\logistics\vehicle\VehicleService;
 use MiniErp\logistics\driver\DriverService;
+use MiniErp\logistics\tripline\TripLineService;
+use MiniErp\logistics\tripline\TripLineValidator;
 
 /**
  * The application loads this file and calls the returned function to register routes.
@@ -170,6 +172,55 @@ return static function (Api $api, Connection $connection): void {
         ) use ($drivers): array {
             $id = (int) $params['id'];
             return $drivers->deleteDriver($actor, $id);
+        }
+    );
+    // Trip-line planning only; trip lifecycle and peer module implementations stay separate.
+    $tripLines = new TripLineService($connection);
+    $tripLineValidator = new TripLineValidator();
+    $api->register(
+        'GET',
+        '/logistics/trip-lines',
+        'logistics.trip_lines',
+        'read',
+        static function (Actor $actor, array $input, array $params, array $query) use ($tripLines): array {
+            return $tripLines->getTripLines($actor, Api::pagination($query, ['trip_id']));
+        }
+    );
+    $api->register(
+        'GET',
+        '/logistics/trip-lines/{id}',
+        'logistics.trip_lines',
+        'read',
+        static function (Actor $actor, array $input, array $params, array $query) use ($tripLines, $tripLineValidator): array {
+            return $tripLines->getTripLine($actor, $tripLineValidator->id($params['id']));
+        }
+    );
+    $api->register(
+        'POST',
+        '/logistics/trip-lines',
+        'logistics.trip_lines',
+        'create',
+        static function (Actor $actor, array $input, array $params, array $query) use ($tripLines): array {
+            return $tripLines->createTripLine($actor, $input);
+        },
+        201
+    );
+    $api->register(
+        'POST',
+        '/logistics/trip-lines/{id}/update',
+        'logistics.trip_lines',
+        'update',
+        static function (Actor $actor, array $input, array $params, array $query) use ($tripLines, $tripLineValidator): array {
+            return $tripLines->updateTripLine($actor, $tripLineValidator->id($params['id']), $input);
+        }
+    );
+    $api->register(
+        'POST',
+        '/logistics/trip-lines/{id}/delete',
+        'logistics.trip_lines',
+        'delete',
+        static function (Actor $actor, array $input, array $params, array $query) use ($tripLines, $tripLineValidator): array {
+            return $tripLines->deleteTripLine($actor, $tripLineValidator->id($params['id']), $input);
         }
     );
 };
