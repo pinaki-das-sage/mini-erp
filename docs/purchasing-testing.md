@@ -19,8 +19,8 @@ enforce uniqueness for (CNYID, VENDOR_ID), (CNYID, DOCNO), and
 values and arrange those database changes in the approved test schema before
 testing writes. No migration files were changed for this API wiring.
 
-This first database check preserves the current VARCHAR2 IDs and Oracle timestamp
-strings. Full OpenAPI response parity (integer IDs and timestamp formatting) is
+The API currently generates hexadecimal IDs and returns IDs as strings. Full
+OpenAPI response parity (integer IDs and timestamp formatting) is
 still pending. The all-endpoint Python smoke check will continue to fail for
 document and entry endpoints until they are implemented.
 
@@ -39,7 +39,7 @@ data queries do not prove constraints reject invalid writes.
 
 | Area | OpenAPI expectation | Current purchasing DDL |
 | --- | --- | --- |
-| Internal IDs | Integer IDs | VARCHAR2(40), with no generated default |
+| Internal IDs | Integer IDs | NUMBER(19,0) after purchasing 005, with no generated default |
 | Vendor email | Up to 254 characters | VARCHAR2(100) |
 | Vendor postal code | Up to 20 characters | VARCHAR(10) |
 | Vendor business ID | Unique per company | No unique constraint on (CNYID, VENDOR_ID) |
@@ -53,6 +53,37 @@ have no FK to ME_COMPANY; the product FK is deferred.
 Resolve agreed schema changes with new forward migrations. Preserve applied
 files and checksums. Shared 006_drop_purchasing.php drops all purchasing tables:
 never use it to reset test data or edit migration history to rerun it.
+
+### Numeric ID migration (empty tables only)
+
+Purchasing `005_numeric_ids.php` changes these columns to `NUMBER(19,0)`:
+
+- `ME_PUR_VENDOR.ID`
+- `ME_PUR_DOC.ID` and `ME_PUR_DOC.VENDOR_ID`
+- `ME_PUR_DOC_ENTRY.ID` and `ME_PUR_DOC_ENTRY.DOC_ID`
+
+Vendor business codes (`ME_PUR_VENDOR.VENDOR_ID`), product references, audit
+fields, and order/receiver/invoice reference columns remain unchanged.
+The migration checks that all three tables are empty before any DDL, temporarily
+drops the two purchasing foreign keys, modifies the columns, and restores the
+foreign keys. Composite primary keys, indexes, and NOT NULL constraints remain.
+It does not delete data, generate IDs, or update the API.
+
+Stop application traffic and other writers for the entire migration. **Do not
+resume API writes until hexadecimal ID generation has been replaced with numeric
+ID generation**; the current create endpoints are incompatible with numeric IDs.
+Using the approved schema with the shared foundation and preceding purchasing
+migrations already applied, run:
+
+~~~bash
+php bin/console.php migrate purchasing --confirm-schema=YOUR_APPROVED_SCHEMA
+~~~
+
+Verify the five columns using `USER_TAB_COLUMNS` and both foreign keys using
+`USER_CONSTRAINTS`. Oracle DDL commits implicitly; failures (including the
+empty-table guard) leave the migration marked RUNNING. Do not blindly retry,
+edit migration history, or assume rollback restored the schema. Follow the
+[migration recovery procedure](./SETUP.md#5-apply-migrations-to-the-approved-lab-schema).
 
 ## Live read-only HTTP smoke checks
 

@@ -741,7 +741,7 @@ components:
         id: "501"
         doc_id: "202"
         lineno: 1
-        product_id: "1001"
+        product_id: 1001
         description: Office chair
         quantity: 2
         unitcost: 125.5
@@ -758,7 +758,7 @@ components:
           id: "501"
           doc_id: "202"
           lineno: 1
-          product_id: "1001"
+          product_id: 1001
           description: Office chair
           quantity: 2
           unitcost: 125.5
@@ -772,7 +772,7 @@ components:
           id: "502"
           doc_id: "202"
           lineno: 2
-          product_id: "1002"
+          product_id: 1002
           description: Desk lamp
           quantity: 1
           unitcost: 45
@@ -795,14 +795,14 @@ components:
         recordtype: order
         entries:
           - lineno: 1
-            product_id: "1001"
+            product_id: 1001
             description: Office chair
             quantity: 2
             unitcost: 125.5
             lineamount: 251
             notes: Deliver to reception
           - lineno: 2
-            product_id: "1002"
+            product_id: 1002
             description: Desk lamp
             quantity: 1
             unitcost: 45
@@ -843,14 +843,14 @@ components:
         recordtype: receiver
         entries:
           - lineno: 1
-            product_id: "1001"
+            product_id: 1001
             description: Office chair
             quantity: 2
             unitcost: 125.5
             lineamount: 251
             notes: Deliver to reception
           - lineno: 2
-            product_id: "1002"
+            product_id: 1002
             description: Desk lamp
             quantity: 1
             unitcost: 45
@@ -892,14 +892,14 @@ components:
         duedate: 2026-12-20
         entries:
           - lineno: 1
-            product_id: "1001"
+            product_id: 1001
             description: Office chair
             quantity: 2
             unitcost: 125.5
             lineamount: 251
             notes: Deliver to reception
           - lineno: 2
-            product_id: "1002"
+            product_id: 1002
             description: Desk lamp
             quantity: 1
             unitcost: 45
@@ -931,7 +931,7 @@ components:
             id: "501"
             doc_id: "202"
             lineno: 1
-            product_id: "1001"
+            product_id: 1001
             description: Office chair
             quantity: 2
             unitcost: 125.5
@@ -945,7 +945,7 @@ components:
             id: "502"
             doc_id: "202"
             lineno: 2
-            product_id: "1002"
+            product_id: 1002
             description: Desk lamp
             quantity: 1
             unitcost: 45
@@ -967,7 +967,7 @@ components:
             notes: Deliver upstairs
           - doc_id: "202"
             lineno: 3
-            product_id: "1003"
+            product_id: 1003
             description: Monitor stand
             quantity: 1
             unitcost: 30
@@ -985,7 +985,7 @@ components:
             notes: Deliver upstairs
           - doc_id: "202"
             lineno: 3
-            product_id: "1003"
+            product_id: 1003
             description: Monitor stand
             quantity: 1
             unitcost: 30
@@ -1036,7 +1036,7 @@ components:
               id: "501"
               doc_id: "202"
               lineno: 1
-              product_id: "1001"
+              product_id: 1001
               description: Office chair
               quantity: 2
               unitcost: 125.5
@@ -1050,7 +1050,7 @@ components:
               id: "502"
               doc_id: "202"
               lineno: 2
-              product_id: "1002"
+              product_id: 1002
               description: Desk lamp
               quantity: 1
               unitcost: 45
@@ -1325,7 +1325,7 @@ components:
                 id: "501"
                 doc_id: "202"
                 lineno: 1
-                product_id: "1001"
+                product_id: 1001
                 description: Office chair
                 quantity: 2
                 unitcost: 125.5
@@ -1339,7 +1339,7 @@ components:
                 id: "502"
                 doc_id: "202"
                 lineno: 2
-                product_id: "1002"
+                product_id: 1002
                 description: Desk lamp
                 quantity: 1
                 unitcost: 45
@@ -1429,7 +1429,7 @@ components:
               notes: Deliver upstairs
             - doc_id: "202"
               lineno: 3
-              product_id: "1003"
+              product_id: 1003
               description: Monitor stand
               quantity: 1
               unitcost: 30
@@ -1447,7 +1447,7 @@ components:
             id: "501"
             doc_id: "202"
             lineno: 1
-            product_id: "1001"
+            product_id: 1001
             description: Office chair
             quantity: 2
             unitcost: 125.5
@@ -1461,7 +1461,7 @@ components:
             id: "502"
             doc_id: "202"
             lineno: 2
-            product_id: "1002"
+            product_id: 1002
             description: Desk lamp
             quantity: 1
             unitcost: 45
@@ -1483,7 +1483,7 @@ components:
           id: "501"
           doc_id: "202"
           lineno: 1
-          product_id: "1001"
+          product_id: 1001
           description: Office chair
           quantity: 2
           unitcost: 125.5
@@ -1524,7 +1524,7 @@ components:
               id: "501"
               doc_id: "202"
               lineno: 1
-              product_id: "1001"
+              product_id: 1001
               description: Office chair
               quantity: 2
               unitcost: 125.5
@@ -1538,7 +1538,7 @@ components:
               id: "502"
               doc_id: "202"
               lineno: 2
-              product_id: "1002"
+              product_id: 1002
               description: Desk lamp
               quantity: 1
               unitcost: 45
@@ -2309,10 +2309,10 @@ components:
           maximum: 9999999999
           x-oracle-type: NUMBER(10)
         product_id:
-          type: string
-          maxLength: 20
-          x-oracle-type: VARCHAR2(20)
-          minLength: 1
+          type: integer
+          minimum: 1
+          maximum: 9999999999
+          x-oracle-type: NUMBER(10)
         description:
           type: string
           minLength: 1
@@ -2766,10 +2766,10 @@ components:
           maximum: 9999999999
           x-oracle-type: NUMBER(10)
         product_id:
-          type: string
-          maxLength: 20
-          x-oracle-type: VARCHAR2(20)
-          minLength: 1
+          type: integer
+          minimum: 1
+          maximum: 9999999999
+          x-oracle-type: NUMBER(10)
         description:
           type: string
           minLength: 1
