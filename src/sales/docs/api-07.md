@@ -43,7 +43,7 @@ replay; no Invoice edit grant is required to exercise a granted Payment operatio
 
 | Field | Required | Rule |
 | --- | --- | --- |
-| action_reference | Yes | Shared retry reference; unique per company; preserve original input on retry |
+| action_reference | No | Optional retry reference; unique per company; preserve original input on explicit replay |
 | expected_version | Yes | Positive current Invoice revision |
 | payment_amount | Yes | Decimal string; positive; maximum 16 whole digits and 2 decimals; at most current due |
 | payment_date | Yes | Real YYYY-MM-DD date; on/after Invoice Date and not after business date |

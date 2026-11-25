@@ -34,6 +34,11 @@ final readonly class PaymentService
 
     public function record(Actor $actor, string $number, array $input): array
     {
+        // The public retry reference is optional, but every receipt retains an internal action identity.
+        // Without an explicit reference, retries are checked against the locked Invoice version.
+        if (!array_key_exists('action_reference', $input)) {
+            $input['action_reference'] = bin2hex(random_bytes(16));
+        }
         $actions = new InvoiceActions(new TransactionManager($this->connection), $this->permissions);
         return $actions->run($actor, 'record_payment', $number, $input, function (TransactionContext $tx) use ($actor, $number, $input): array {
             Validation::allowedFields($input, ['action_reference', 'expected_version', 'payment_amount', 'payment_date', 'payment_reference']);

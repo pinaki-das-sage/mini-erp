@@ -115,6 +115,28 @@ final class PaymentServiceTest extends TestCase
         self::assertSame(3, $db->documents[1]['VERSION']);
     }
 
+    public function testPaymentWithoutActionReferenceRejectsStaleRetryAndRecordsOnlyOnce(): void
+    {
+        $db = new InvoiceMemoryConnection();
+        $invoice = $this->submitted($db);
+        $service = $this->service($db);
+        $input = ['expected_version' => $invoice['current_version'], 'payment_amount' => '7.25',
+            'payment_date' => '2026-11-25', 'payment_reference' => 'TEST-BANK-001'];
+        $saved = $service->record($this->actor(), $invoice['invoice_number'], $input);
+        self::assertSame('Partially Paid', $saved['invoice']['payment_status']);
+        self::assertSame(3, $saved['current_version']);
+        self::assertSame('13.25', $saved['invoice']['amount_due']);
+        $this->reject(fn () => $service->record($this->actor(), $invoice['invoice_number'], $input), 'STALE_VERSION', 409);
+        self::assertCount(1, $db->payments);
+        self::assertSame('13.25', $db->customers[1]['BALANCE']);
+        self::assertCount(3, $db->audit);
+        $final = $service->record($this->actor(), $invoice['invoice_number'],
+            [...$input, 'expected_version' => 3, 'payment_amount' => '13.25', 'payment_reference' => 'TEST-BANK-002']);
+        self::assertSame('Paid', $final['invoice']['payment_status']);
+        self::assertSame('0.00', $db->customers[1]['BALANCE']);
+        self::assertCount(2, $db->payments);
+    }
+
     public function testPaymentsPreserveOtherInvoiceDebtAndAllowInactiveCustomerAndItem(): void
     {
         $db = new InvoiceMemoryConnection();
@@ -322,5 +344,24 @@ final class PaymentServiceTest extends TestCase
         foreach (['PATCH', 'DELETE'] as $method) {
             self::assertSame(404, $api->handle($method, $url, [], $headers)['status']);
         }
+    }
+
+    public function testPaymentRouteAcceptsNoReferenceAndReturnsCurrentVersion(): void
+    {
+        $db = new InvoiceMemoryConnection();
+        $invoice = $this->submitted($db);
+        $api = new Api($db, Config::fromArray([]));
+        $headers = ['authorization' => 'Bearer ' . str_repeat('a', 64), 'content-type' => 'application/json'];
+        $url = '/api/v1/sales/invoices/' . $invoice['invoice_number'] . '/payments';
+        $input = ['expected_version' => 2, 'payment_amount' => '7.25',
+            'payment_date' => '2026-11-25', 'payment_reference' => 'TEST-BANK-001'];
+        $response = $api->handle('POST', $url, $input, $headers);
+        self::assertSame(201, $response['status']);
+        $body = json_decode($response['body'], true, 512, JSON_THROW_ON_ERROR);
+        self::assertNull($body['operation_id']);
+        self::assertSame(3, $body['current_version']);
+        self::assertSame('13.25', $body['result']['invoice']['amount_due']);
+        self::assertSame(409, $api->handle('POST', $url, $input, $headers)['status']);
+        self::assertCount(1, $db->payments);
     }
 }

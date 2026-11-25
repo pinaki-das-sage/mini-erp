@@ -143,7 +143,15 @@ test('Invoice lifecycle examples require only the current version without changi
       '#/components/requestBodies/InvoiceAction');
   }
   assert(schemas.SalesDocumentActionRequest.required.includes('action_reference'));
-  assert(schemas.PaymentCreateRequest.required.includes('action_reference'));
+  assert(!schemas.PaymentCreateRequest.required.includes('action_reference'));
+});
+
+test('Payment examples omit optional retry references and responses allow a null operation ID', () => {
+  assert.deepEqual(schemas.PaymentCreateRequest.required,
+    ['expected_version', 'payment_amount', 'payment_date', 'payment_reference']);
+  const content = operation('/sales/invoices/{invoice_number}/payments').requestBody.content['application/json'];
+  for (const example of Object.values(content.examples)) assert.equal(example.value.action_reference, undefined);
+  assert.deepEqual(schemas.PaymentCreateResponse.allOf[1].properties.operation_id.type, ['string', 'null']);
 });
 
 test('whole-number quantities match the line migration and preserve valid Quote fields', () => {

@@ -42,7 +42,7 @@ contract above supersedes their standalone/manual-line examples.
 Invoice submit, move-to-Draft and delete also require only `expected_version`.
 `action_reference` remains optional for explicit replay; when omitted, an internal
 reference is generated and stale/state checks prevent repeated debt changes.
-Payment recording retains its required retry reference. Use the latest version for
+Payment recording also supports an optional retry reference. Use the latest version for
 each Invoice action; a retry without an explicit reference does not replay success.
 
 `GET /api/v1/sales/invoices/eligible-orders` is implemented as a read-only paginated
