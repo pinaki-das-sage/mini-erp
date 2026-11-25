@@ -105,10 +105,7 @@ final readonly class PurchasingDocumentController
         $entries = [];
         $lineNumbers = [];
         foreach ($input['entries'] as $entry) {
-            if (!is_array($entry)) {
-                throw new AppError('VALIDATION_ERROR', 'Each entry must be a JSON object.');
-            }
-            $entries[] = self::createEntry($entry, $lineNumbers);
+            $entries[] = self::createEntry(self::entryObject($entry), $lineNumbers);
         }
         return $this->documents->create($actor, $document, $entries);
     }
@@ -140,10 +137,7 @@ final readonly class PurchasingDocumentController
             $entries = [];
             $lineNumbers = [];
             foreach ($input['entries'] as $entry) {
-                if (!is_array($entry)) {
-                    throw new AppError('VALIDATION_ERROR', 'Each entry must be a JSON object.');
-                }
-                $entries[] = self::updateEntry($entry, $lineNumbers);
+                $entries[] = self::updateEntry(self::entryObject($entry), $lineNumbers);
             }
             $changes['entries'] = $entries;
         }
@@ -269,6 +263,18 @@ final readonly class PurchasingDocumentController
             return $result;
         }
         return self::createEntry($entry, $lineNumbers);
+    }
+
+    /** @return array<string, mixed> */
+    private static function entryObject(mixed $entry): array
+    {
+        if ($entry instanceof \stdClass) {
+            return get_object_vars($entry);
+        }
+        if (is_array($entry) && !array_is_list($entry)) {
+            return $entry;
+        }
+        throw new AppError('VALIDATION_ERROR', 'Each entry must be a JSON object.');
     }
 
     private static function productId(array $input): int
