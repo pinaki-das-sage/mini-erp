@@ -61,41 +61,35 @@ return static function (Api $api, Connection $connection): void {
         }
     );
 
-    // Choose the exact permission from the validated action, before handling it.
-    $vehicleAction = static function (array $input): string {
-        // Missing action defaults to create for existing clients. Explicit null is still invalid.
-        $action = array_key_exists('action', $input) ? $input['action'] : 'create';
-        if (!is_string($action) || !in_array($action, ['create', 'update', 'delete'], true)) {
-            throw new AppError('VALIDATION_ERROR', 'action must be create, update or delete.', 400);
-        }
-        return $action;
-    };
-
-    // One write endpoint. The action resolver selects create/update/delete permission first.
-    // It does not give delete access merely because the user can create vehicles.
+    // Each write route requires its own permission before invoking the service.
     $api->register(
         'POST',
         '/logistics/vehicles',
         'logistics.vehicles',
-        $vehicleAction,
-        static function (Actor $actor, array $input, array $params, array $query) use ($vehicles, $vehicleAction): array {
-            $action = $vehicleAction($input);
-            // Remove routing metadata so the service validates only its allowed command fields.
-            unset($input['action']);
-            if ($action === 'create') {
-                return $vehicles->createVehicle($actor, $input);
-            }
-            // Update/delete use id in the JSON body; integer() rejects quoted numbers and floats.
-            $id = Api::integer($input, 'id');
-            if ($id < 1) {
-                throw new AppError('VALIDATION_ERROR', 'id must be a positive JSON integer.', 400);
-            }
-            // Pass id separately: it identifies the row and must not become an editable field.
-            unset($input['id']);
-            // Ternary dispatch: update the selected record, otherwise run the validated delete action.
-            return $action === 'update'
-                ? $vehicles->updateVehicle($actor, $id, $input)
-                : $vehicles->deleteVehicle($actor, $id, $input);
+        'create',
+        static function (Actor $actor, array $input, array $params, array $query) use ($vehicles): array {
+            return $vehicles->createVehicle($actor, $input);
+        },
+        201
+    );
+
+    $api->register(
+        'POST',
+        '/logistics/vehicles/{id}/update',
+        'logistics.vehicles',
+        'update',
+        static function (Actor $actor, array $input, array $params, array $query) use ($vehicles, $vehicleId): array {
+            return $vehicles->updateVehicle($actor, $vehicleId($params), $input);
+        }
+    );
+
+    $api->register(
+        'POST',
+        '/logistics/vehicles/{id}/delete',
+        'logistics.vehicles',
+        'delete',
+        static function (Actor $actor, array $input, array $params, array $query) use ($vehicles, $vehicleId): array {
+            return $vehicles->deleteVehicle($actor, $vehicleId($params), $input);
         }
     );
     $drivers = new DriverService($connection);

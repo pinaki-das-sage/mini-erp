@@ -140,24 +140,24 @@ paths:
               allOf:
                 - $ref: '#/components/schemas/Command'
                 - type: object
-                  required: [vehicle_code, registration_number, capacity_kg]
+                  required: [vehicle_code, registration_number, capacity]
                   properties:
                     vehicle_code:
                       type: integer
                       minimum: 1
-                      example: 30
+                      example: 307
                     registration_number:
                       type: string
                       maxLength: 40
                       example: KA01AB1234
-                    capacity_kg:
+                    capacity:
                       $ref: '#/components/schemas/PositiveKilograms'
                     description:
                       type: [string, 'null']
                       maxLength: 255
-                    active:
-                      type: boolean
-                      default: true
+                    is_active:
+                      type: string
+                      default: "T"
       responses:
         '201':
           description: Vehicle created
@@ -221,7 +221,10 @@ paths:
                 $ref: '#/components/schemas/VehicleEnvelope'
         '404':
           $ref: '#/components/responses/NotFound'
-    patch:
+  /logistics/vehicles/{id}/update:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
       tags: [Vehicles]
       summary: Update a vehicle
       operationId: updateVehicle
@@ -231,7 +234,7 @@ paths:
           application/json:
             schema:
               allOf:
-                - $ref: '#/components/schemas/VersionedCommand'
+                - $ref: '#/components/schemas/Command'
                 - type: object
                   properties:
                     vehicle_code:
@@ -240,13 +243,14 @@ paths:
                     registration_number:
                       type: string
                       maxLength: 40
-                    capacity_kg:
+                    capacity:
                       $ref: '#/components/schemas/PositiveKilograms'
                     description:
                       type: [string, 'null']
                       maxLength: 255
-                    active:
-                      type: boolean
+                    is_active:
+                      type: string
+                      enum: ['T', 'F']
       responses:
         '200':
           description: Vehicle updated
@@ -260,7 +264,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
-    delete:
+  /logistics/vehicles/{id}/delete:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
       tags: [Vehicles]
       summary: Delete a never-used vehicle
       operationId: deleteVehicle
@@ -269,7 +276,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/VersionedCommand'
+              $ref: '#/components/schemas/Command'
       responses:
         '200':
           description: Vehicle deleted
