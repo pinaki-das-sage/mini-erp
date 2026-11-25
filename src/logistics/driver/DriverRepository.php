@@ -149,6 +149,29 @@ class DriverRepository
         return $result && $result[0]['COUNT'] > 0;
     }
 
+    public function findEligibleUsers(int $companyId, int $offset, int $pageSize, ?string $search = null): array
+    {
+        $sql = 'SELECT U.ID, U.USERNAME, U.DISPLAY_NAME FROM ME_USERS U
+                WHERE U.COMPANY_ID = :companyId AND U.ACTIVE = 1
+                AND NOT EXISTS (SELECT 1 FROM ME_LOG_DRIVERS D WHERE D.COMPANY_ID = U.COMPANY_ID AND D.USER_ID = U.ID AND D.ISACTIVE = \'T\')';
+        $params = ['companyId' => $companyId];
+
+        if ($search !== null && $search !== '') {
+            $sql .= ' AND (UPPER(U.USERNAME) LIKE :search OR UPPER(U.DISPLAY_NAME) LIKE :search)';
+            $params['search'] = '%' . strtoupper($search) . '%';
+        }
+
+        $sql .= ' ORDER BY U.USERNAME OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY';
+        $params['offset'] = $offset;
+        $params['page_size'] = $pageSize;
+
+        return array_map(static fn (array $row): array => [
+            'id' => (int) $row['ID'],
+            'username' => $row['USERNAME'],
+            'display_name' => $row['DISPLAY_NAME'],
+        ], $this->connection->query($sql, $params));
+    }
+
     public function findUserIdByCode(int $companyId, string $userCode): ?int
     {
         $result = $this->connection->query(
