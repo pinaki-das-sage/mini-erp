@@ -7,7 +7,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const collection = path.resolve(__dirname, '../../examples/bruno');
-const read = name => fs.readFileSync(path.join(collection, name), 'utf8');
+const read = name => fs.readFileSync(path.join(collection, name.startsWith('users-') ? 'users' : '', name), 'utf8').replace(/\r\n/g, '\n');
 const block = (source, name) => {
   const match = source.match(new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{\\n([\\s\\S]*?)^\\}`, 'm'));
   assert.ok(match, `Missing ${name} block`);
@@ -41,7 +41,7 @@ test('user requests match implemented routes and use runtime authentication and 
   const cases = [
     ['users-list.bru', 'get', '/users?page=1&page_size=25'],
     ['users-create.bru', 'post', '/users'],
-    ['users-update.bru', 'patch', '/users/{{target_user_id}}'],
+    ['users-update.bru', 'post', '/users/{{target_user_id}}/update'],
     ['users-permissions.bru', 'post', '/users/{{target_user_id}}/permissions'],
     ['users-reset-password.bru', 'post', '/users/{{target_user_id}}/reset-password'],
   ];

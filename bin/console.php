@@ -24,6 +24,23 @@ try {
     if (!in_array($command, ['doctor', 'migrate', 'bootstrap', 'seed', 'company:create'], true)) {
         throw new InvalidArgumentException('Unknown command.');
     }
+    $migrationModule = 'shared';
+    if ($command === 'migrate') {
+        $moduleProvided = false;
+        foreach (array_slice($argv, 2) as $argument) {
+            if (str_starts_with($argument, '--confirm-schema=')) {
+                continue;
+            }
+            if (!str_starts_with($argument, '--module=') || $moduleProvided) {
+                throw new InvalidArgumentException('Usage: migrate [--module=shared|sales] [--confirm-schema=NAME]');
+            }
+            $migrationModule = substr($argument, strlen('--module='));
+            if (!in_array($migrationModule, ['shared', 'sales'], true)) {
+                throw new InvalidArgumentException('Migration module must be shared or sales.');
+            }
+            $moduleProvided = true;
+        }
+    }
     if ($command === 'doctor' && in_array('--offline', $argv, true)) {
         echo "PHP 8.4 and Composer bootstrap OK. Offline only: Oracle, migrations and login NOT VERIFIED.\n";
         exit(0);

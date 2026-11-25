@@ -326,7 +326,7 @@ final class ApiFrameworkTest extends TestCase
         $headers = ['authorization' => 'Bearer ' . $token, 'content-type' => 'application/json'];
         foreach ([
             ['POST', '/api/v1/users', []],
-            ['PATCH', '/api/v1/users/u', []],
+            ['POST', '/api/v1/users/u/update', []],
             ['POST', '/api/v1/users/u/permissions', []],
             ['POST', '/api/v1/users/u/reset-password', []],
         ] as [$method, $path, $input]) {
