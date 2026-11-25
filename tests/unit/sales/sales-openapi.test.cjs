@@ -2,9 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { yaml } = require('../../node_modules/playwright-core/lib/utilsBundle.js');
+const { yaml } = require('../../../node_modules/playwright-core/lib/utilsBundle.js');
 
-const root = path.resolve(__dirname, '../..');
+const root = path.resolve(__dirname, '../../..');
 const raw = fs.readFileSync(path.join(root, 'public/openapi.yaml'), 'utf8');
 const spec = yaml.parse(raw, { uniqueKeys: true });
 const schemas = spec.components.schemas;
@@ -97,9 +97,9 @@ test('Invoice sources are Orders and removed Shipper definitions leave no refere
   assert(!/shipper/i.test(raw));
   assert(spec.paths['/sales/invoices/eligible-orders']);
   assert(schemas.InvoiceFields.properties.source_order_number);
-  for (const key of ['InvoiceCreateRequest', 'InvoiceUpdateRequest']) {
-    assert(schemas[key].if.required.includes('source_order_number'));
-  }
+  assert(schemas.InvoiceCreateRequest.required.includes('source_order_number'));
+  assert.equal(schemas.InvoiceFields.properties.source_order_number.$ref, '#/components/schemas/SalesDocumentNumber');
+  assert.match(schemas.InvoiceUpdateRequest.description, /immutable Order source/);
   assert.deepEqual(schemas.EligibleOrderSummary.allOf[1].properties.status.enum, ['Submitted', 'In Progress', 'Closed']);
   assert.deepEqual(spec.components.parameters.DocumentType.schema.enum, ['Quote', 'Order', 'Invoice']);
 });
@@ -155,6 +155,75 @@ test('Order progress and Trip responses match the three-document model', () => {
   assert.equal(schemas.OrderTripFields.else.properties.trip_reference.type, 'null');
 });
 
+test('Order flow requires a Quote and creates its Draft Invoice with reservations on Submit', () => {
+  assert(schemas.OrderCreateRequest.required.includes('source_quote_number'));
+  assert.equal(schemas.OrderFields.properties.source_quote_number.$ref, '#/components/schemas/SalesDocumentNumber');
+  assert.equal(schemas.InvoiceFields.properties.source_order_number.$ref, '#/components/schemas/SalesDocumentNumber');
+  assert.deepEqual(schemas.OrderCreateRequest.required, ['source_quote_number']);
+  assert.equal(schemas.OrderCreateRequest.properties.lines, undefined);
+  assert.equal(schemas.OrderCreateRequest.additionalProperties, false);
+  for (const field of ['customer_code', 'warehouse_id', 'shipping_address', 'payment_terms']) {
+    assert.equal(schemas.OrderCreateRequest.properties[field], undefined, field);
+  }
+  for (const name of ['OrderUpdateRequest']) {
+    assert.equal(schemas[name].properties.lines.items.$ref, '#/components/schemas/OrderLineInput', name);
+    assert.equal(schemas[name].else, undefined, name);
+  }
+  assert(!schemas.OrderLineInput.required.includes('source_line_id'));
+  assert(schemas.OrderLineInput.required.includes('product_id'));
+  assert.equal(schemas.OrderLineInput.properties.item_code, undefined);
+  const submit = operation('/sales/orders/{order_number}/submit');
+  assert.equal(submit.responses['200'].$ref, '#/components/responses/Order');
+  assert.equal(schemas.OrderSubmitResponse, undefined);
+  assert(!schemas.OrderCreateRequest.required.includes('action_reference'));
+  assert(!schemas.OrderUpdateRequest.required.includes('action_reference'));
+  assert.match(submit.description, /Create exactly one linked Draft Invoice on Submit/);
+  assert.match(submit.description, /any failure rolls everything back/);
+  assert.match(submit.description, /without duplicate reservations/);
+  const progress = operation('/sales/orders/{order_number}', 'get').description;
+  assert.match(progress, /Reads never change status or create Invoices/);
+  assert.match(progress, /On final delivery/);
+  assert.match(progress, /exactly one source-linked Draft Invoice/);
+  assert.match(progress, /same shared transaction/);
+  assert.match(progress, /different action reference/);
+  const move = operation('/sales/orders/{order_number}/move-to-draft');
+  assert.equal(move['x-implementation-status'], 'implemented');
+  assert.match(move.description, /release Inventory reservations/);
+  assert(schemas.OrderSummary.allOf[1].properties.available_actions.items.enum.includes('move_to_draft'));
+});
+
+test('Order Submit and saved-field return checks are connected', () => {
+  for (const [route, method] of [
+    ['/sales/orders', 'post'], ['/sales/orders', 'get'], ['/sales/orders/eligible-quotes', 'get'],
+    ['/sales/orders/{order_number}', 'get'], ['/sales/orders/{order_number}/update', 'post'],
+    ['/sales/orders/{order_number}/delete', 'post']]) {
+    assert.equal(operation(route, method)['x-implementation-status'], 'implemented', route);
+  }
+  assert.equal(operation('/sales/orders/{order_number}/submit')['x-implementation-status'], 'implemented');
+  assert.equal(operation('/sales/orders/{order_number}/move-to-draft')['x-implementation-status'], 'implemented');
+  assert.deepEqual(schemas.OrderActionRequest.required, ['expected_version']);
+  assert.match(operation('/sales/orders/{order_number}/submit').description, /inventory.reservations:reserve/);
+  assert.match(operation('/sales/orders/{order_number}/move-to-draft').description, /SalesTripAssignmentGuard/);
+  assert.match(operation('/sales/orders/{order_number}/move-to-draft').description, /both references have been cleared/);
+  const product = new RegExp(schemas.OrderLineInput.properties.product_id.pattern);
+  assert(product.test('163'));
+  assert(!product.test('ITEM-001'));
+  assert(!product.test('0'));
+  assert.equal(schemas.OrderLineInput.additionalProperties, false);
+});
+
+test('Draft Order updates permit editable lines and header-only changes with managed provenance', () => {
+  assert.deepEqual(schemas.OrderUpdateRequest.required, ['expected_version']);
+  assert(!schemas.OrderLineInput.required.includes('line_id'));
+  assert(!schemas.OrderLineInput.required.includes('source_line_id'));
+  assert.deepEqual(schemas.OrderLineInput.properties.source_line_id.type, ['string', 'null']);
+  assert.deepEqual(schemas.OrderLine.allOf[0].properties.source_line_id.type, ['string', 'null']);
+  assert.match(schemas.OrderUpdateRequest.description, /omit line_id to add a line/);
+  assert.match(schemas.OrderUpdateRequest.description, /Omitted header fields and omitted lines are preserved/);
+  assert.match(schemas.OrderLineInput.properties.source_line_id.description, /Replacing a Product clears/);
+  assert.equal(schemas.OrderUpdateRequest.example.lines[0].description, 'Sagar Testing order update');
+});
+
 test('lifecycle permissions and reservation rollback remain explicit', () => {
   for (const type of ['quotes', 'orders', 'invoices']) {
     const singular = { quotes: 'quote', orders: 'order', invoices: 'invoice' }[type];
@@ -166,7 +235,7 @@ test('lifecycle permissions and reservation rollback remain explicit', () => {
   assert(submit.responses['409']);
   assert(submit.responses['503']);
   assert.match(submit.description, /shared transaction/);
-  assert.match(operation('/sales/orders/{order_number}/move-to-draft').description, /no current valid Trip assignment and no Invoice reference/);
+  assert.match(operation('/sales/orders/{order_number}/move-to-draft').description, /no current valid Trip assignment and an eligible linked Draft Invoice/);
   assert.match(operation('/sales/orders/{order_number}/delete').summary, /Draft/);
   assert.match(operation('/sales/orders/{order_number}/delete').description, /Submitted, In Progress and Closed Orders cannot be deleted/);
 });

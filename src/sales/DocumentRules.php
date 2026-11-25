@@ -38,7 +38,7 @@ final class DocumentRules
         }
         $allowed = match ($action) {
             'create' => $status === null,
-            'read' => in_array($status, ['Draft', 'Submitted'], true),
+            'read' => in_array($status, ['Draft', 'Submitted', ...($type === 'order' ? ['In Progress', 'Closed'] : [])], true),
             'edit', 'submit' => $status === 'Draft',
             'delete' => $status === 'Draft' && !$hasDownstream && !$hasPayments,
             'return_to_draft' => $status === 'Submitted' && !$hasDownstream && !$hasPayments,

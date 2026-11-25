@@ -27,8 +27,8 @@ paths:
               required: [ company, username, password ]
               properties:
                 company: { type: string, enum: [ SIA-MINI-ERP ] }
-                username: { type: admin, format: username }
-                password: { type: admin, format: password }
+                username: { type: string, example: admin }
+                password: { type: string, format: password, example: admin }
       responses:
         "200":
           content:
@@ -54,21 +54,20 @@ paths:
       tags: [ Customers ]
       summary: Create a Customer
       operationId: createCustomer
-      description: Generate a numeric id for Customer URLs. Customer Code is unique within the signed-in company and
-        immutable. action_reference is optional; omit it for a normal request. Without a supplied reference,
-        repeated requests are processed independently.
+      description: Generate a numeric id for Customer URLs and an immutable Customer Code such as CUST-001.
+        Omit customer_code from the create request; the server generates it. Codes are unique within the
+        signed-in company. Optional action_reference supports safe retries.
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: "#/components/schemas/CustomerCreateRequest" }
             example:
-              customer_code: CUST-001
               customer_name: Example Traders
               billing_address_line_1: 12 Market Road
               city: Bengaluru
               country: India
-      responses: { "201": { $ref: "#/components/responses/Customer" }, default: { $ref: "#/components/responses/Error" } }
+      responses: { "201": { $ref: "#/components/responses/Customer" }, default: { $ref: "#/components/responses/CustomerQuoteError" } }
     get:
       tags: [ Customers ]
       summary: List Customers
@@ -82,7 +81,7 @@ paths:
         - { $ref: "#/components/parameters/PageSize" }
       responses:
         "200": { $ref: "#/components/responses/CustomerList" }
-        default: { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/CustomerQuoteError" }
 
   /sales/customers/{id}:
     parameters:
@@ -92,7 +91,7 @@ paths:
       summary: Get a Customer
       operationId: getCustomer
       description: Read an active or inactive Customer by numeric id within the signed-in company.
-      responses: { "200": { $ref: "#/components/responses/Customer" }, default: { $ref: "#/components/responses/Error" } }
+      responses: { "200": { $ref: "#/components/responses/Customer" }, default: { $ref: "#/components/responses/CustomerQuoteError" } }
 
   /sales/customers/{id}/update:
     parameters:
@@ -101,8 +100,7 @@ paths:
       tags: [ Customers ]
       summary: Update or activate/deactivate a Customer using POST
       operationId: updateCustomer
-      description: Update supplied fields by numeric id using POST. action_reference is optional; when supplied,
-        the same reference and input can be retried. Omitted fields retain their saved values.
+      description: Update supplied fields by numeric id using POST. Omitted fields retain their saved values.
       requestBody:
         required: true
         content:
@@ -111,7 +109,7 @@ paths:
             example:
               is_active: "F"
               billing_address_line_1: BTM Layout 2nd Stage
-      responses: { "200": { $ref: "#/components/responses/Customer" }, default: { $ref: "#/components/responses/Error" } }
+      responses: { "200": { $ref: "#/components/responses/Customer" }, default: { $ref: "#/components/responses/CustomerQuoteError" } }
 
   /sales/quotes:
     post:
@@ -119,14 +117,30 @@ paths:
       summary: Create a Draft Quote
       operationId: createQuote
       description: |
-        Create a Draft using customer_code and whole-number quantity strings. action_reference is optional,
-        matching Customers. Draft saves validate local fields without calling Inventory; no stock check
-        or reservation. Active Product/Warehouse validation is deferred to Submit. Submit uses Inventory's
-        validator. If Inventory is unavailable, Submit returns INVENTORY_UNAVAILABLE (HTTP 503) and preserves the Draft.
+        Create a Draft using customer_code and whole-number quantity strings.
+        Draft saves validate local fields without calling Inventory; no stock check
+        or reservation. Active Product/W01 validation runs through the connected Inventory adapter on Submit.
+        Inventory query failures return INVENTORY_UNAVAILABLE (HTTP 503) and preserve the Draft.
       requestBody:
         required: true
-        content: { application/json: { schema: { $ref: "#/components/schemas/QuoteCreateRequest" } } }
-      responses: { "201": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuoteCreateRequest" }
+            example:
+              customer_code: CUST-0023
+              warehouse_id: W01
+              quote_date: "2026-11-24"
+              valid_until: "2026-11-24"
+              requested_delivery_date: "2026-11-24"
+              shipping_address: 12 Market Road, Bengaluru, India
+              payment_terms: DUE_ON_RECEIPT
+              notes: Test quote
+              lines:
+                - product_id: "163"
+                  quantity: "10"
+                  unit_price: "9818.00"
+                  description: Test product
+      responses: { "201": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/CustomerQuoteError" } }
       x-implementation-status: implemented
     get:
       tags: [ Sales Quotes ]
@@ -142,7 +156,7 @@ paths:
         - { $ref: "#/components/parameters/PageSize" }
       responses:
         "200": { $ref: "#/components/responses/QuoteList" }
-        default: { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/CustomerQuoteError" }
       x-implementation-status: implemented
 
   /sales/quotes/{quote_number}:
@@ -152,7 +166,7 @@ paths:
       tags: [ Sales Quotes ]
       summary: Get a Quote
       operationId: getQuote
-      responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
+      responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/CustomerQuoteError" } }
       x-implementation-status: implemented
 
   /sales/quotes/{quote_number}/update:
@@ -162,12 +176,23 @@ paths:
       tags: [ Sales Quotes ]
       summary: Update a Draft Quote using POST
       operationId: updateQuote
-      description: Save the complete Draft lines and local header fields using Update permission. Inventory reference
-        validation is deferred to Submit. action_reference is optional for safe retries.
+      description: Save the complete Draft lines and local header fields using Update permission. Use the current
+        expected_version and saved line_id from GET Quote; the example values are illustrative. Inventory
+        reference validation is deferred to Submit.
       requestBody:
         required: true
-        content: { application/json: { schema: { $ref: "#/components/schemas/QuoteUpdateRequest" } } }
-      responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuoteUpdateRequest" }
+            example:
+              expected_version: 1
+              lines:
+                - line_id: "121"
+                  product_id: "163"
+                  quantity: "85"
+                  unit_price: "574511253.54"
+                  description: Test product Sagar
+      responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/CustomerQuoteError" } }
       x-implementation-status: implemented
 
   /sales/quotes/{quote_number}/submit:
@@ -180,9 +205,9 @@ paths:
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
-      responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
-      description: Requires the sales.quotes:update permission. Validate the saved Draft header and all lines; no
-        Inventory availability or reservation check.
+      responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/CustomerQuoteError" } }
+      description: Requires the sales.quotes:update permission. Validate the saved Draft header, all lines
+        and active same-company Products/W01 through Inventory. No stock availability check or reservation.
       x-implementation-status: implemented
 
   /sales/quotes/{quote_number}/move-to-draft:
@@ -196,7 +221,7 @@ paths:
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
-      responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/Error" } }
+      responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/CustomerQuoteError" } }
       x-implementation-status: implemented
 
   /sales/quotes/{quote_number}/delete:
@@ -212,7 +237,7 @@ paths:
         content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
       responses:
         "200": { $ref: "#/components/responses/QuoteDeleted" }
-        default: { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/CustomerQuoteError" }
       x-implementation-status: implemented
 
   /sales/orders:
@@ -224,13 +249,21 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/OrderCreateRequest" } } }
       responses: { "201": { $ref: "#/components/responses/Order" }, default: { $ref: "#/components/responses/Error" } }
-      description: Create standalone or copy an eligible Submitted Quote in full. Save Draft without Inventory
-        availability or reservation checks.
-      x-implementation-status: planned
+      description: Create only from an eligible same-company readable Submitted Quote not already claimed by
+        another Order. Copy its complete lines and inherited business values atomically with its source link.
+        Save Draft without Inventory availability or reservation checks. Standalone Orders are not supported.
+        Send only the Quote number and optional Order-specific fields; Customer, Warehouse, shipping address,
+        payment terms and the entire line set are copied by the server and must not be supplied in this request.
+        Requires sales.orders:create and sales.quotes:read. action_reference is optional; retain an explicit
+        reference and identical payload for safe retries. Order numbering requires the existing sales sequence.
+      x-implementation-status: implemented
     get:
       tags: [ Sales Orders ]
       summary: List Sales Orders
       operationId: listOrders
+      description: List only same-company Orders linked to a same-company Quote, filtering before pagination.
+        Legacy standalone Orders and records without a valid Quote source are outside this list's scope;
+        they are not deleted, repaired or assigned a guessed source. Direct detail/actions retain source validation.
       parameters:
         - { $ref: "#/components/parameters/CustomerCode" }
         - { $ref: "#/components/parameters/WarehouseId" }
@@ -242,13 +275,15 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/OrderList" }
         default: { $ref: "#/components/responses/Error" }
-      x-implementation-status: planned
+      x-implementation-status: implemented
 
   /sales/orders/eligible-quotes:
     get:
       tags: [ Sales Orders ]
       summary: List eligible Quote sources
       operationId: listOrderQuoteSources
+      description: Requires sales.orders:create and sales.quotes:read. This lookup does not claim a Quote;
+        creation revalidates Submitted state and exclusive source usage under the Quote parent lock.
       parameters:
         - { $ref: "#/components/parameters/CustomerCode" }
         - { $ref: "#/components/parameters/WarehouseId" }
@@ -259,21 +294,29 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/QuoteList" }
         default: { $ref: "#/components/responses/Error" }
-      x-implementation-status: planned
+      x-implementation-status: implemented
 
   /sales/orders/{order_number}:
     parameters:
       - { $ref: "#/components/parameters/OrderNumber" }
     get:
       tags: [ Sales Orders ]
-      summary: Get a Order
+      summary: Get an Order
       operationId: getOrder
       responses: { "200": { $ref: "#/components/responses/Order" }, default: { $ref: "#/components/responses/Error" } }
-      description: "Return header and complete ordered lines, source information, totals, current status, revision,
-        permitted actions and each line current Trip reference/assignment/status. Logistics alone updates
-        progress: all lines assigned to Delivered Trips means Closed; otherwise any valid assignment means In
-        Progress; no valid assignments means Submitted."
-      x-implementation-status: planned
+      description: >-
+        Return header and complete ordered lines, source information, totals, current status, revision,
+        permitted actions and each line's current Trip reference/assignment/status. Reads never change status
+        or create Invoices. Logistics calls internal Sales fulfillment services using the shared transaction;
+        Sales validates events and owns Order status/version updates. Draft stays Draft until explicit Submit.
+        For submitted Orders, any valid assignment means In Progress; no valid assignments means Submitted;
+        all lines delivered means Closed. Assignment cancellation recalculates progress but cannot undo dispatch
+        or delivery. On final delivery, record the delivery and close the Order in the same shared transaction,
+        including audit and replay results. Order submission creates exactly one source-linked Draft Invoice.
+        Delivery never creates another Invoice, including when sent with a different action reference. Draft Invoice creation
+        has no Customer balance effect. Invoice submission is separate and never gates Logistics progress.
+      x-implementation-status: implemented
+      x-integration-status: Submit-time Invoice creation is connected; Logistics event writers require team integration.
 
   /sales/orders/{order_number}/update:
     parameters:
@@ -286,7 +329,7 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/OrderUpdateRequest" } } }
       responses: { "200": { $ref: "#/components/responses/Order" }, default: { $ref: "#/components/responses/Error" } }
-      x-implementation-status: planned
+      x-implementation-status: implemented
 
   /sales/orders/{order_number}/submit:
     parameters:
@@ -295,19 +338,36 @@ paths:
       tags: [ Sales Orders ]
       summary: Submit a saved Draft Order
       operationId: submitOrder
-      requestBody: { $ref: "#/components/requestBodies/SalesDocumentAction" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrderActionRequest" }
+            example: { expected_version: 1 }
       responses:
         "200": { $ref: "#/components/responses/Order" }
         "409": { $ref: "#/components/responses/InventoryConflict" }
         "503": { $ref: "#/components/responses/InventoryUnavailable" }
         default: { $ref: "#/components/responses/Error" }
-      description: Requires the sales.orders:submit permission. Validate saved Draft and source. Aggregate repeated
-        Item quantities within the header Warehouse; available = On Hand - Reserved, supplied by Inventory.
+      description: Requires sales.orders:submit, sales.quotes:read, sales.invoices:create and inventory.reservations:reserve permissions.
+        Validate saved Draft and source. Repeated Item demand within the header Warehouse is checked cumulatively
+        under Inventory balance locks; available = On Hand - Reserved, supplied by Inventory.
         Equality is sufficient. Submit only after every Item passes and Inventory confirms reservation.
         Coordinate concurrent requests; on insufficiency, service failure or partial reservation keep the
         whole Order Draft and roll back all reservations and Sales changes in the shared transaction.
-        Retry/reconcile without duplicate reservations.
-      x-implementation-status: planned
+        After reservation, mark Submitted and save audit/action results in the same transaction; any failure
+        rolls everything back. An exact retry returns the original result without duplicate reservations.
+        Create exactly one linked Draft Invoice on Submit, copying the final saved Order header and lines.
+        Return its invoice_number with the Order result. Invoice Date uses Order Date; Due Date follows payment terms.
+        Invoice creation, stock reservation and status posting share one transaction; Invoice failure also rolls
+        back reservations and leaves the Order Draft. Draft Invoice creation does not change Customer debt or stock.
+        Logistics delivery only closes the Order and never creates another Invoice.
+        InventoryOrderAdapter connects the supplied ReservationService using the same transaction. It locks saved
+        Sales lines by ID, validates active same-company Products/W01 through QuoteInventoryValidator and calls
+        reserveStock ordered by Product ID then Sales line ID. Missing Inventory schema returns
+        INVENTORY_UNAVAILABLE (503), preserving the Draft. There is no simulated stock success.
+      x-implementation-status: implemented
+      x-integration-status: Real provider wired; live Oracle concurrency/rollback and permission acceptance remain pending.
 
   /sales/orders/{order_number}/move-to-draft:
     parameters:
@@ -316,18 +376,33 @@ paths:
       tags: [ Sales Orders ]
       summary: Return an eligible Submitted Order to Draft
       operationId: moveOrderToDraft
-      requestBody: { $ref: "#/components/requestBodies/SalesDocumentAction" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrderActionRequest" }
+            example: { expected_version: 2 }
       responses:
         "200": { $ref: "#/components/responses/Order" }
         "503": { $ref: "#/components/responses/InventoryUnavailable" }
         default: { $ref: "#/components/responses/Error" }
       description: Requires the sales.orders:return_to_draft permission and Submitted state. Require no current
-        valid Trip assignment and no Invoice reference, including Draft. Lock and recheck through the agreed
-        Logistics interface, release Inventory reservations and return the Order to Draft in the same shared
+        valid Trip assignment and an eligible linked Draft Invoice without payments or downstream references.
+        Deleting that Draft Invoice requires sales.invoices:delete. Older Orders with no Invoice can also return.
+        Lock and recheck through the agreed Sales Trip fields and linked Invoice; delete the Draft Invoice and its source link,
+        release Inventory reservations and return the Order to Draft in the same shared
         transaction. Assignment, Invoice creation and return must not race successfully. If dependency checks
         or release fail, preserve the Submitted Order and reservations. Retain its Quote source link and
-        inherited locks. In Progress and Closed Orders cannot return to Draft.
-      x-implementation-status: planned
+        inherited header locks. Draft line editing is allowed after release. In Progress and Closed Orders cannot return to Draft.
+        SalesTripAssignmentGuard blocks if any line has TRIP_ID, LOGISTICS_TRIP_LINE_ID or an active Trip status.
+        trip_status is a string such as Draft, Dispatched or Delivered, not a boolean. Cancelled status is
+        eligible only when both references have been cleared. The same guard supplies Inventory's real saved
+        Draft-claim quantities; zero follows successful verification, never a missing lookup. Release requires
+        inventory.reservations:read and release permissions. Logistics must mirror assignment/cancellation
+        fields through Sales callbacks in its own transaction using the same parent/line locks. Independent
+        Logistics-only claims are outside this simplified protocol. Query/release failures roll everything back.
+      x-implementation-status: implemented
+      x-integration-status: Saved-field return guard connected; real Logistics synchronization/races still require verification.
 
   /sales/orders/{order_number}/delete:
     parameters:
@@ -336,14 +411,26 @@ paths:
       tags: [ Sales Orders ]
       summary: Delete an eligible Draft Order
       operationId: deleteOrder
-      requestBody: { $ref: "#/components/requestBodies/SalesDocumentAction" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ expected_version ]
+              properties:
+                expected_version: { type: integer, minimum: 1, maximum: 9999999999 }
+                action_reference: { $ref: "#/components/schemas/ActionReference" }
+              additionalProperties: false
+            example:
+              expected_version: 1
       responses:
         "200": { $ref: "#/components/responses/OrderDeleted" }
         default: { $ref: "#/components/responses/Error" }
       description: Requires the sales.orders:delete permission. Delete only an unreferenced Draft without valid Trip
-        assignments. Release its optional Quote source claim atomically. Submitted, In Progress and Closed
+        assignments. Release its Quote source claim atomically. Submitted, In Progress and Closed
         Orders cannot be deleted. Never reuse its number.
-      x-implementation-status: planned
+      x-implementation-status: implemented
 
   /sales/invoices:
     post:
@@ -354,10 +441,10 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/InvoiceCreateRequest" } } }
       responses: { "201": { $ref: "#/components/responses/Invoice" }, default: { $ref: "#/components/responses/Error" } }
-      description: Create standalone or copy an eligible Submitted / In Progress / Closed Order in full. Revalidate
-        source on save and submit; reserve it atomically. Draft has no payment status, payment entry or
-        Customer balance effect.
-      x-implementation-status: planned
+      description: Manual Invoice creation is outside this increment. Order submission automatically creates
+        exactly one linked Draft Invoice from the complete Order in the reservation transaction. Standalone
+        Invoices are not supported. Draft has no payment status, payment entry or Customer balance effect.
+      x-implementation-status: out-of-scope
     get:
       tags: [ Sales Invoices ]
       summary: List Sales Invoices
@@ -408,7 +495,7 @@ paths:
       operationId: submitInvoice
       requestBody: { $ref: "#/components/requestBodies/SalesDocumentAction" }
       responses: { "200": { $ref: "#/components/responses/Invoice" }, default: { $ref: "#/components/responses/Error" } }
-      description: Requires the sales.invoices:submit permission. Revalidate saved fields, lines and optional Order
+      description: Requires the sales.invoices:submit permission. Revalidate saved fields, lines and required Order
         source; Invoice Date must be on/after Order Date. Require Invoice Total greater than 0. Set Submitted
         and Unpaid; add its debt to the stored Customer balance once in the same transaction. The source Order
         need not be delivered. Repeated requests cannot duplicate debt.
@@ -439,10 +526,11 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/InvoiceDeleted" }
         default: { $ref: "#/components/responses/Error" }
-      description: Requires Delete permission. Only an authorized unreferenced Draft can be deleted, from All
+      description: Deleting automatically created Invoices is outside the current linear flow; retain the
+        Order link. The future general workflow requires Delete permission. Only an authorized unreferenced Draft can be deleted, from All
         Documents. Every Submitted Invoice is protected, whether Unpaid, Partially Paid or Paid. Release its
         source claim atomically; never reuse its number.
-      x-implementation-status: planned
+      x-implementation-status: out-of-scope
 
   /sales/invoices/{invoice_number}/payments:
     parameters:
@@ -556,10 +644,10 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/EligibleOrders" }
         default: { $ref: "#/components/responses/Error" }
-      description: Readable same-company Orders in Submitted, In Progress or Closed, unused by another Invoice.
-        Draft Orders are excluded. Lookup does not reserve; revalidate on Invoice save and submit. Standalone
-        Invoices remain valid regardless of Order progress.
-      x-implementation-status: planned
+      description: Outside this increment because Draft Invoices are created automatically by Order submission.
+        Reserved for a future manual creation workflow listing readable same-company Submitted, In Progress
+        or Closed Orders unused by another Invoice. Draft Orders are excluded.
+      x-implementation-status: out-of-scope
 
 components:
   securitySchemes:
@@ -612,6 +700,7 @@ components:
       name: quote_number
       in: path
       required: true
+      description: Quote DOCUMENT_NUMBER in ME_OE_DOCUMENTS, not the internal record ID.
       schema: { $ref: "#/components/schemas/SalesDocumentNumber" }
     OrderNumber:
       name: order_number
@@ -664,7 +753,7 @@ components:
         - Only Submitted documents can move to Draft.
         - Cannot move to Draft: this document is used as a source by {Document number}.
         - Only Draft documents with no downstream documents can be deleted.
-        - Selected source is no longer available. Refresh and select another source, or leave Source blank.
+        - Selected source is no longer available. Refresh and select another eligible source.
         - Cannot move to Draft: a payment has been recorded for this Invoice.
         - Enter Payment Amount. / Enter a valid Payment Amount.
         - Payment Amount must be greater than 0.
@@ -688,7 +777,7 @@ components:
         - In Progress and Closed are updated by Logistics and cannot be changed manually.
         - Cannot move to Draft: this Order is assigned to a Logistics Trip.
         - Cannot move to Draft: Order is In Progress or Closed.
-        - Select a Submitted, In Progress or Closed Order, or leave Source blank for a standalone Invoice.
+        - Invoice must retain its automatically linked Submitted, In Progress or Closed Order.
         - Selected Order is already used by another Invoice.
       headers: { WWW-Authenticate: { description: Present for HTTP 401., schema: { type: string } } }
       content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
@@ -762,6 +851,75 @@ components:
         - Unable to check Inventory availability. Please try again.
         - Unable to reserve Inventory for this Order. Please try again.
         Release failures or unknown outcomes must identify the Inventory dependency; reconcile before retrying a different request.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
+    CustomerQuoteError:
+      description: |-
+        400 validation; 401 unauthenticated; 403 forbidden; 404 not found; 409 state/source/revision conflict; 415 JSON required; 500 server error; 503 dependency unavailable.
+        Exact business validation messages:
+        - Missing required field: Enter {Field label}.
+        - Overlength: {Field label} must be {limit} characters or fewer.
+        - Customer Code cannot be changed after creation.
+        - Customer Code may contain only letters, numbers and hyphens.
+        - Enter a valid Email Address.
+        - Enter a valid Phone Number.
+        - Enter Country.
+        - Country must be 80 characters or fewer.
+        - Select a valid Is Active value (T or F).
+        - Select valid Payment Terms.
+        - Amount Customer Owes Us is calculated and cannot be edited.
+        - Customer Code already exists. Enter a unique code.
+        - This document has changed. Refresh and try again.
+        - This action reference belongs to a different request.
+        - Enter {Field label}. / {Field label} must be {limit} characters or fewer.
+        - Add at least one item line.
+        - Select a valid {Field label} available to your company.
+        - Selected {Customer / Item / Warehouse} is inactive. Select an active record.
+        - Enter a valid {Date label} in YYYY-MM-DD format.
+        - {Date label} must be on or after {Earlier date label}.
+        - From Date must be on or before To Date.
+        - Line {n}: Select a valid line belonging to this document.
+        - Line {n}: Duplicate line identifier.
+        - Line {n}: Select an active Item available to your company.
+        - Line {n}: Enter Description. / Line {n}: Description must be 200 characters or fewer.
+        - Line {n}: Enter a positive whole Quantity with up to 9 digits.
+        - Line {n}: Enter Unit Price of 0 or more, with up to 10 whole digits and 2 decimal places.
+        - Line {n}: Warehouse must match the document Warehouse.
+        - Line {n}: Line Amount is calculated and cannot be edited.
+        - Document Total is calculated and cannot be edited.
+        - {Line Amount / Document Total} exceeds the allowed numeric limit.
+        - Use the available action to change Document Status.
+        - Only Draft documents can be edited.
+        - Only a saved Draft can be submitted.
+        - Only Submitted documents can move to Draft.
+        - Cannot move to Draft: this document is used as a source by {Document number}.
+        - Only Draft documents with no downstream documents can be deleted.
+        - Selected source is no longer available. Refresh and select another source, or leave Source blank.
+        - Cannot move to Draft: a payment has been recorded for this Invoice.
+        - Enter Payment Amount. / Enter a valid Payment Amount.
+        - Payment Amount must be greater than 0.
+        - Payment Amount can have at most 2 decimal places.
+        - Payment Amount exceeds the allowed numeric limit.
+        - Payment Amount cannot exceed Amount Due ({current amount due}).
+        - Enter Payment Reference.
+        - Payment Reference must be 50 characters or fewer.
+        - Enter Payment Date.
+        - Enter a valid Payment Date in YYYY-MM-DD format.
+        - Payment Date must be on or after Invoice Date.
+        - Payment Date cannot be in the future.
+        - Submit the Invoice before recording a payment.
+        - This Invoice is fully paid. No further payment can be recorded.
+        - Amount Due has changed to {current amount due}. Review the amount and try again.
+        - {Field label} must match the source document.
+        - Source-linked lines cannot be added, changed or removed.
+        - {Date label} cannot be in the future.
+        - You do not have permission to perform this action.
+        - Invoice Total must be greater than 0.
+        - In Progress and Closed are updated by Logistics and cannot be changed manually.
+        - Cannot move to Draft: this Order is assigned to a Logistics Trip.
+        - Cannot move to Draft: Order is In Progress or Closed.
+        - Select a Submitted, In Progress or Closed Order, or leave Source blank for a standalone Invoice.
+        - Selected Order is already used by another Invoice.
+      headers: { WWW-Authenticate: { description: Present for HTTP 401., schema: { type: string } } }
       content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
   schemas:
     SuccessEnvelope:
@@ -841,33 +999,14 @@ components:
         - { $ref: "#/components/schemas/CustomerDetails" }
         - type: object
           properties:
-            action_reference:
-              {
-                $ref: "#/components/schemas/ActionReference",
-                description: "Optional retry key. Omit for ordinary requests; the server generates an internal reference. For
-                  safe retries, the client generates a UUID once per new operation and reuses it only for the
-                  same input. Without a supplied key, requests execute independently and operation_id is
-                  null."
-              }
-            customer_code: { $ref: "#/components/schemas/CustomerCode" }
             is_active: { $ref: "#/components/schemas/CustomerDetails/properties/is_active", default: "T" }
             payment_terms: { $ref: "#/components/schemas/CustomerDetails/properties/payment_terms", default: NET_30 }
-      required: [ customer_code, customer_name, billing_address_line_1, city, country ]
+      required: [ customer_name, billing_address_line_1, city, country ]
       unevaluatedProperties: false
     CustomerUpdateRequest:
       type: object
       allOf:
         - { $ref: "#/components/schemas/CustomerDetails" }
-        - type: object
-          properties:
-            action_reference:
-              {
-                $ref: "#/components/schemas/ActionReference",
-                description: "Optional retry key. Omit for ordinary requests; the server generates an internal reference. For
-                  safe retries, the client generates a UUID once per new operation and reuses it only for the
-                  same input. Without a supplied key, requests execute independently and operation_id is
-                  null."
-              }
       minProperties: 1
       unevaluatedProperties: false
       description: Omitted fields retain values; empty string clears optional text. Supply at least one editable
@@ -1085,12 +1224,11 @@ components:
         - { $ref: "#/components/schemas/QuoteFields" }
         - type: object
           properties:
-            action_reference: { $ref: "#/components/schemas/ActionReference" }
             lines:
               type: array
               minItems: 1
               items:
-                $ref: "#/components/schemas/SalesLineInput"
+                $ref: "#/components/schemas/QuoteLineInput"
                 not: { required: [ line_id ] }
                 unevaluatedProperties: false
       required: [ customer_code, warehouse_id, lines ]
@@ -1101,20 +1239,25 @@ components:
         - { $ref: "#/components/schemas/QuoteFields" }
         - type: object
           properties:
-            action_reference: { $ref: "#/components/schemas/ActionReference" }
             expected_version: { type: integer, minimum: 1, maximum: 9999999999 }
             lines:
               type: array
               minItems: 1
-              items: { $ref: "#/components/schemas/SalesLineInput", unevaluatedProperties: false }
+              items: { $ref: "#/components/schemas/QuoteLineInput", unevaluatedProperties: false }
       required: [ expected_version, lines ]
       unevaluatedProperties: false
     QuoteActionRequest:
       type: object
       required: [ expected_version ]
       properties:
-        action_reference: { $ref: "#/components/schemas/ActionReference" }
         expected_version: { type: integer, minimum: 1, maximum: 9999999999 }
+      additionalProperties: false
+    OrderActionRequest:
+      type: object
+      required: [ expected_version ]
+      properties:
+        expected_version: { type: integer, minimum: 1, maximum: 9999999999 }
+        action_reference: { $ref: "#/components/schemas/ActionReference" }
       additionalProperties: false
     SalesDocumentActionRequest:
       type: object
@@ -1221,9 +1364,8 @@ components:
         - { $ref: "#/components/schemas/SalesDocumentNumber" }
         - { type: "null" }
       default: null
-      description: "Optional: Submitted Quote for Order; Submitted / In Progress / Closed Order for Invoice.
-        Omit/null on create for standalone; omit on update to retain, null to clear. Revalidate on save and
-        submit."
+      description: "Legacy nullable storage representation. Current Order and Invoice fields require non-null
+        sources and prohibit clearing or replacing them. Revalidate on save and submit."
     SalesSourceLineInput:
       type: object
       allOf:
@@ -1243,38 +1385,89 @@ components:
     OrderFields:
       type: object
       properties:
-        source_quote_number: { $ref: "#/components/schemas/SalesSourceNumber" }
+        source_quote_number:
+          $ref: "#/components/schemas/SalesDocumentNumber"
+          description: Required Submitted Quote on creation. Immutable thereafter; omit on update to retain.
         customer_code: { $ref: "#/components/schemas/CustomerCode" }
         warehouse_id: { $ref: "#/components/schemas/QuoteFields/properties/warehouse_id" }
-        order_date: { type: string, format: date }
-        requested_delivery_date: { type: [ string, "null" ], format: date }
+        order_date:
+          type: string
+          format: date
+          description: Defaults to current business date on create; must be on or after source Quote Date.
+        requested_delivery_date:
+          type: [ string, "null" ]
+          format: date
+          description: On create, copy the source Quote requested date only if it is on or after Order Date;
+            otherwise leave unset (null). An explicitly supplied non-null date must be on or after Order Date.
         customer_po_number: { type: string, maxLength: 30 }
         shipping_address: { $ref: "#/components/schemas/QuoteFields/properties/shipping_address" }
         payment_terms: { $ref: "#/components/schemas/CustomerDetails/properties/payment_terms" }
         notes: { $ref: "#/components/schemas/QuoteFields/properties/notes" }
     OrderCreateRequest:
       type: object
-      allOf:
-        - { $ref: "#/components/schemas/OrderFields" }
-        - { $ref: "#/components/schemas/CreateDocumentLines" }
-      required: [ action_reference, lines ]
-      if: { required: [ source_quote_number ], properties: { source_quote_number: { type: string } } }
-      then: { properties: { lines: { items: { required: [ source_line_id ] } } } }
-      else:
-        properties: { lines: { items: { not: { required: [ source_line_id ] } } } }
-        required: [ customer_code, warehouse_id ]
-      unevaluatedProperties: false
+      required: [ source_quote_number ]
+      properties:
+        source_quote_number:
+          $ref: "#/components/schemas/SalesDocumentNumber"
+          description: Eligible Submitted Quote whose Customer, Warehouse, address, terms and complete lines will be copied.
+          example: SQ-000000000000044
+        order_date: { $ref: "#/components/schemas/OrderFields/properties/order_date" }
+        requested_delivery_date: { $ref: "#/components/schemas/OrderFields/properties/requested_delivery_date" }
+        customer_po_number: { $ref: "#/components/schemas/OrderFields/properties/customer_po_number" }
+        notes: { $ref: "#/components/schemas/OrderFields/properties/notes" }
+        action_reference: { $ref: "#/components/schemas/ActionReference" }
+      additionalProperties: false
+      example:
+        source_quote_number: SQ-000000000000044
     OrderUpdateRequest:
       type: object
+      example:
+        expected_version: 1
+        notes: Updated order notes
+        lines:
+          - line_id: "122"
+            product_id: "163"
+            description: Sagar Testing order update
+            quantity: "12"
+            unit_price: "9818.00"
       allOf:
         - { $ref: "#/components/schemas/OrderFields" }
-        - { $ref: "#/components/schemas/UpdateDocumentLines" }
-        - if: { required: [ source_quote_number ], properties: { source_quote_number: { type: "null" } } }
-          then: { properties: { lines: { items: { not: { required: [ source_line_id ] } } } } }
-      required: [ action_reference, expected_version, lines ]
-      if: { required: [ source_quote_number ], properties: { source_quote_number: { type: string } } }
-      then: { properties: { lines: { items: { required: [ source_line_id ] } } } }
+      required: [ expected_version ]
+      description: Draft only. Quote source, Customer, Warehouse, shipping address and payment terms remain locked.
+        Omitted header fields and omitted lines are preserved. When lines is supplied, it is the complete intended
+        Order line set in display order; keep line_id to edit/reorder a saved line, omit line_id to add a line,
+        and omit a saved line from the collection to remove it. Product, description, quantity and price are
+        editable independently of the unchanged Quote. At least one line is required. Totals are calculated
+        server-side and the parent version increments once. Use the latest GET response for saved line IDs/version.
+      properties:
+        action_reference: { $ref: "#/components/schemas/ActionReference" }
+        expected_version: { type: integer, minimum: 1, maximum: 9999999999 }
+        lines:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/OrderLineInput" }
       unevaluatedProperties: false
+    OrderLineInput:
+      type: object
+      additionalProperties: false
+      required: [ product_id, description, quantity, unit_price ]
+      properties:
+        line_id:
+          type: string
+          pattern: "^[1-9][0-9]{0,14}$"
+          description: Retain an existing Order line ID to edit/reorder it. Omit for a new line; null is invalid.
+        source_line_id:
+          type: [ string, "null" ]
+          pattern: "^[1-9][0-9]{0,14}$"
+          description: Optional unchanged origin echo for an existing line. Server-managed; cannot be reassigned.
+            New lines have null origin. Replacing a Product clears its Quote-line origin; other edits retain it.
+        product_id: { type: string, pattern: "^[1-9][0-9]{0,9}$" }
+        description: { type: string, maxLength: 200 }
+        quantity: { $ref: "#/components/schemas/SalesQuantity" }
+        unit_price: { $ref: "#/components/schemas/SalesUnitPrice" }
+      description: Editable Draft Order line. Lines may differ from the source Quote; prices and quantities
+        use exact decimal strings. Product existence/company is enforced by the database reference; active
+        Product/Warehouse validation and all stock reservations are performed by Inventory on Submit.
     OrderSummary:
       type: object
       allOf:
@@ -1284,6 +1477,10 @@ components:
             order_number:
               $ref: "#/components/schemas/SalesDocumentNumber"
               readOnly: true
+            invoice_number:
+              $ref: "#/components/schemas/SalesDocumentNumber"
+              readOnly: true
+              description: Draft Invoice number returned by successful Order Submit, including exact retries.
             status:
               type: string
               enum:
@@ -1311,9 +1508,10 @@ components:
                   - delete
               readOnly: true
               description: Requires the corresponding registered Sales permission and current business eligibility. Draft
-                may allow edit, submit and delete. Submitted may allow move_to_draft only after confirming no
-                Trip assignments or Invoice references and releasing reservations. In Progress and Closed are
-                read-only to Sales users.
+                may allow edit, submit and delete. Submitted may allow move_to_draft only with no valid Trip
+                assignment and an eligible linked Draft Invoice (or no Invoice on an older Order); the action
+                deletes that Draft Invoice and releases all reservations atomically.
+                In Progress and Closed are read-only to Sales users.
           required:
             - order_number
             - status
@@ -1459,31 +1657,26 @@ components:
             changes unless explicitly supplied.
         notes: { $ref: "#/components/schemas/QuoteFields/properties/notes" }
         source_order_number:
-          $ref: "#/components/schemas/SalesSourceNumber"
-          description: Same-company readable Order in Submitted, In Progress or Closed, unused by another Invoice. A
-            Draft Invoice reserves it; accept its own retained claim.
+          $ref: "#/components/schemas/SalesDocumentNumber"
+          description: Required immutable same-company Order source, linked automatically during Order submission.
+            Cannot be cleared or replaced. Accept this Invoice's retained claim when validating.
     InvoiceCreateRequest:
+      description: Reserved input shape for internal automatic creation; no manual create endpoint in this increment.
       type: object
       allOf:
         - { $ref: "#/components/schemas/InvoiceFields" }
         - { $ref: "#/components/schemas/CreateDocumentLines" }
-      required: [ action_reference, lines ]
-      if: { required: [ source_order_number ], properties: { source_order_number: { type: string } } }
-      then: { properties: { lines: { items: { required: [ source_line_id ] } } } }
-      else:
-        properties: { lines: { items: { not: { required: [ source_line_id ] } } } }
-        required: [ customer_code, warehouse_id ]
+      required: [ action_reference, source_order_number, lines ]
+      properties: { lines: { items: { required: [ source_line_id ] } } }
       unevaluatedProperties: false
     InvoiceUpdateRequest:
       type: object
       allOf:
         - { $ref: "#/components/schemas/InvoiceFields" }
         - { $ref: "#/components/schemas/UpdateDocumentLines" }
-        - if: { required: [ source_order_number ], properties: { source_order_number: { type: "null" } } }
-          then: { properties: { lines: { items: { not: { required: [ source_line_id ] } } } } }
       required: [ action_reference, expected_version, lines ]
-      if: { required: [ source_order_number ], properties: { source_order_number: { type: string } } }
-      then: { properties: { lines: { items: { required: [ source_line_id ] } } } }
+      description: Retain the immutable Order source and complete inherited business values and source lines.
+      properties: { lines: { items: { required: [ source_line_id ] } } }
       unevaluatedProperties: false
     InvoicePaymentSummary:
       type: object
@@ -1519,13 +1712,13 @@ components:
             available_actions:
               type: array
               uniqueItems: true
-              items: { type: string, enum: [ edit, submit, move_to_draft, delete, record_payment ] }
+              items: { type: string, enum: [ edit, submit, move_to_draft, record_payment ] }
               readOnly: true
             shipping_address:
               type: [ string, "null" ]
               maxLength: 500
               readOnly: true
-              description: Preserved source Order address; null is allowed on a standalone Invoice.
+              description: Preserved source Order address. Standalone Invoices are outside this increment.
           required: [ invoice_number, status, current_version, available_actions ]
         - { $ref: "#/components/schemas/InvoicePaymentSummary" }
         - if: { required: [ status ], properties: { status: { const: Draft } } }
@@ -1533,7 +1726,7 @@ components:
             properties:
               payment_status: { type: "null" }
               total_paid: { const: "0.00" }
-              available_actions: { items: { enum: [ edit, submit, delete ] } }
+              available_actions: { items: { enum: [ edit, submit ] } }
         - if: { required: [ status ], properties: { status: { const: Submitted } } }
           then:
             properties:
@@ -1824,7 +2017,21 @@ components:
       else: { properties: { trip_reference: { type: "null" }, trip_status: { enum: [ Cancelled, null ] } } }
     OrderLine:
       allOf:
-        - { $ref: "#/components/schemas/SalesSourceLine" }
+        - type: object
+          required: [ line_id, source_line_id, line_number, product_id, description, quantity, unit_price, line_amount, warehouse_id ]
+          properties:
+            line_id: { type: string, readOnly: true }
+            source_line_id:
+              type: [ string, "null" ]
+              readOnly: true
+              description: Original Quote line, or null for new lines and lines whose Product was replaced.
+            line_number: { type: integer, minimum: 1, readOnly: true }
+            product_id: { type: string, pattern: "^[1-9][0-9]{0,9}$" }
+            description: { type: string, maxLength: 200 }
+            quantity: { $ref: "#/components/schemas/SalesQuantity" }
+            unit_price: { $ref: "#/components/schemas/SalesUnitPrice" }
+            line_amount: { $ref: "#/components/schemas/SalesAmount" }
+            warehouse_id: { type: string, enum: [ W01 ], readOnly: true }
         - { $ref: "#/components/schemas/OrderTripFields" }
     DatabaseCustomerRow:
       type: object
@@ -2616,3 +2823,15 @@ components:
           columns:
             - CNY#
             - INVOICE_RECORD#
+    QuoteLineInput:
+      type: object
+      required: [ product_id, description, quantity, unit_price ]
+      properties:
+        line_id: { $ref: "#/components/schemas/SalesLineInput/properties/line_id" }
+        product_id:
+          type: string
+          minLength: 1
+          description: Existing Inventory product ID. Verify the sample ID against the connected Inventory data.
+        description: { $ref: "#/components/schemas/SalesLineInput/properties/description" }
+        quantity: { $ref: "#/components/schemas/SalesQuantity" }
+        unit_price: { $ref: "#/components/schemas/SalesUnitPrice" }

@@ -36,6 +36,8 @@ final class SalesRulesTest extends TestCase
             ['quote', 'record_payment', 'Submitted', false, false],
             ['order', 'create', 'Draft', false, false],
             ['order', 'submit', 'Unknown', false, false],
+            ['quote', 'read', 'In Progress', false, false],
+            ['invoice', 'read', 'Closed', false, false],
         ];
     }
 
@@ -51,7 +53,9 @@ final class SalesRulesTest extends TestCase
             DocumentRules::requireAction($type, 'delete', 'Draft');
         }
         DocumentRules::requireAction('invoice', 'record_payment', 'Submitted', false, true);
-        $this->addToAssertionCount(29);
+        DocumentRules::requireAction('order', 'read', 'In Progress');
+        DocumentRules::requireAction('order', 'read', 'Closed');
+        $this->addToAssertionCount(31);
     }
 
     public function testCrossCompanyAccessIsHiddenEvenForAdmin(): void
