@@ -7,10 +7,12 @@ use MiniErp\shared\database\Connection;
 use MiniErp\shared\security\Actor;
 use MiniErp\logistics\vehicle\VehicleService;
 use MiniErp\logistics\driver\DriverService;
+use MiniErp\logistics\trip\TripService;
 
 return static function (Api $api, Connection $connection): void {
     $vehicles = new VehicleService($connection);
     $drivers = new DriverService($connection);
+    $trips = new TripService($connection);
 
     $api->register(
         'GET',
@@ -121,6 +123,118 @@ return static function (Api $api, Connection $connection): void {
         ) use ($drivers): array {
             $pagination = Api::pagination($query, ['search']);
             return $drivers->getEligibleUsers($actor, $pagination);
+        }
+    );
+
+    $api->register(
+        'GET',
+        '/logistics/trips',
+        'logistics.trips',
+        'read',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($trips): array {
+            $pagination = Api::pagination($query);
+            return $trips->getTrips($actor, $pagination);
+        }
+    );
+
+    $api->register(
+        'GET',
+        '/logistics/trips/{id}',
+        'logistics.trips',
+        'read',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($trips): array {
+            $id = (int) $params['id'];
+            return $trips->getTrip($actor, $id);
+        }
+    );
+
+    $api->register(
+        'POST',
+        '/logistics/trips',
+        'logistics.trips',
+        'create',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($trips): array {
+            return $trips->createTrip($actor, $input);
+        },
+        201
+    );
+
+    $api->register(
+        'POST',
+        '/logistics/trips/{id}/update',
+        'logistics.trips',
+        'update',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($trips): array {
+            $id = (int) $params['id'];
+            return $trips->updateTrip($actor, $id, $input);
+        }
+    );
+
+    $api->register(
+        'POST',
+        '/logistics/trips/{id}/cancel',
+        'logistics.trips',
+        'update',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($trips): array {
+            $id = (int) $params['id'];
+            return $trips->cancelTrip($actor, $id, $input);
+        }
+    );
+
+    $api->register(
+        'POST',
+        '/logistics/trips/{id}/dispatch',
+        'logistics.trips',
+        'update',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($trips): array {
+            $id = (int) $params['id'];
+            return $trips->dispatchTrip($actor, $id, $input);
+        }
+    );
+
+    $api->register(
+        'POST',
+        '/logistics/trips/{id}/deliver',
+        'logistics.trips',
+        'update',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($trips): array {
+            $id = (int) $params['id'];
+            return $trips->deliverTrip($actor, $id, $input);
         }
     );
 };
