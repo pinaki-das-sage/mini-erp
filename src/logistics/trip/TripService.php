@@ -230,8 +230,8 @@ class TripService
                 );
                 $order = $fulfillment->lockOrderForEvent($tx, $actor, $orderNumber, 'cancellation');
 
-                if (($order['status'] ?? null) !== 'Submitted') {
-                    throw new AppError('INVALID_STATE', 'Only a Submitted Sales Order can be cancelled from a Draft Trip.', 409);
+                if (!in_array($order['status'] ?? null, ['Submitted', 'In Progress'], true)) {
+                    throw new AppError('INVALID_STATE', 'Only a Submitted or In Progress Sales Order can be cancelled from a Draft Trip.', 409);
                 }
                 $this->assertOrderMatchesTrip($order, $trip, $tripLines);
 
@@ -336,8 +336,8 @@ class TripService
                     $trip['sales_order_id']
                 );
                 $order = $fulfillment->lockOrderForEvent($tx, $actor, $orderNumber, 'assignment');
-                if (($order['status'] ?? null) !== 'Submitted') {
-                    throw new AppError('INVALID_STATE', 'Only a Submitted Sales Order can be dispatched.', 409);
+                if (($order['status'] ?? null) !== 'In Progress') {
+                    throw new AppError('INVALID_STATE', 'Only an In Progress Sales Order can be dispatched.', 409);
                 }
                 $this->assertOrderMatchesTrip($order, $trip, $tripLines);
 
