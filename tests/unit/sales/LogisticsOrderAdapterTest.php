@@ -46,19 +46,23 @@ final class LogisticsOrderAdapterTest extends TestCase
         $mapping = [['line_id' => '123', 'trip_line_id' => '501']];
         foreach (['D' => 'assignment', 'S' => 'assignment', 'X' => 'cancellation', 'C' => 'delivery'] as $status => $event) {
             $db->status = $status;
-            $service->assertEvent($tx, $actor, $event, '11', '7', $mapping, 'event-1');
+            $referenceEvent = $status === 'S' ? 'dispatch' : $event;
+            $service->assertEvent($tx, $actor, $event, '11', '7', $mapping, 'logtrip_' . $referenceEvent . '_event_1');
         }
         $db->eventActor = 'someone-else';
-        $this->reject(fn () => $service->assertEvent($tx, $actor, 'delivery', '11', '7', $mapping, 'event-2'), 'FORBIDDEN');
-        $db->eventActor = $actor->id; $db->driverUser = 'another-driver';
-        $this->reject(fn () => $service->assertEvent($tx, $actor, 'delivery', '11', '7', $mapping, 'event-2'), 'FORBIDDEN');
-        $db->driverUser = $actor->id; $db->timestamp = null;
-        $this->reject(fn () => $service->assertEvent($tx, $actor, 'delivery', '11', '7', $mapping, 'event-2'), 'FORBIDDEN');
+        $this->reject(fn () => $service->assertEvent($tx, $actor, 'delivery', '11', '7', $mapping, 'logtrip_delivery_event_2'), 'FORBIDDEN');
+        $db->eventActor = $db->actorUserId; $db->driverUser = 'another-driver';
+        $this->reject(fn () => $service->assertEvent($tx, $actor, 'delivery', '11', '7', $mapping, 'logtrip_delivery_event_2'), 'FORBIDDEN');
+        $db->driverUser = $db->actorUserId; $db->timestamp = null;
+        $this->reject(fn () => $service->assertEvent($tx, $actor, 'delivery', '11', '7', $mapping, 'logtrip_delivery_event_2'), 'FORBIDDEN');
         $db->timestamp = '2026-11-25';
-        $this->reject(fn () => $service->assertEvent($tx, $actor, 'delivery', '11', '7', [], 'event-2'), 'INVALID_STATE');
-        $this->reject(fn () => $service->assertEvent($tx, $actor, 'delivery', '11', '7', [['line_id' => '123', 'trip_line_id' => '502']], 'event-2'), 'INVALID_STATE');
-        $this->reject(fn () => $service->assertEvent($tx, $actor, 'assignment', '11', '7', $mapping, 'event-2'), 'INVALID_STATE');
-        $this->reject(fn () => $service->assertEvent($tx, $actor, 'delivery', '12', '7', $mapping, 'event-2'), 'NOT_FOUND');
+        $this->reject(fn () => $service->assertEvent($tx, $actor, 'delivery', '11', '7', [], 'logtrip_delivery_event_2'), 'INVALID_STATE');
+        $this->reject(fn () => $service->assertEvent($tx, $actor, 'delivery', '11', '7', [['line_id' => '123', 'trip_line_id' => '502']], 'logtrip_delivery_event_2'), 'INVALID_STATE');
+        $this->reject(fn () => $service->assertEvent($tx, $actor, 'assignment', '11', '7', $mapping, 'logtrip_assignment_event_2'), 'INVALID_STATE');
+        $this->reject(fn () => $service->assertEvent($tx, $actor, 'delivery', '12', '7', $mapping, 'logtrip_delivery_event_2'), 'NOT_FOUND');
+        $this->reject(fn () => $service->assertEvent($tx, $actor, 'delivery', '11', '7', $mapping, 'logtrip_assignment_wrong_event'), 'INVALID_STATE');
+        $db->activeUser = false;
+        $this->reject(fn () => $service->assertEvent($tx, $actor, 'delivery', '11', '7', $mapping, 'logtrip_delivery_event_2'), 'FORBIDDEN');
     }
 
     public function testProviderRejectsMultipleTripsOrMixedProgressForOneOrder(): void
@@ -117,8 +121,10 @@ final class LogisticsProviderConnection implements Connection
 {
     public ?array $assignmentRows = null;
     public string $status = 'D';
-    public string $eventActor = 'driver-user';
-    public string $driverUser = 'driver-user';
+    public string $actorUserId = '42';
+    public string $eventActor = '42';
+    public string $driverUser = '42';
+    public bool $activeUser = true;
     public ?string $timestamp = '2026-11-25';
     public string $quantity = '2';
     public bool $duplicate = false;
@@ -134,6 +140,9 @@ final class LogisticsProviderConnection implements Connection
         TestCase::assertArrayHasKey('company_id', $parameters);
         if ($this->fail) { throw new DatabaseError(942); }
         if ($parameters['company_id'] !== 7 || isset($parameters['order_id']) && $parameters['order_id'] !== '11') { return []; }
+        if (str_contains($sql, 'FROM ME_USERS')) {
+            return $this->activeUser && $parameters['user_id'] === 'driver-user' ? [['ID' => $this->actorUserId]] : [];
+        }
         if (str_contains($sql, 'DRIVER_USER_ID')) {
             if ($parameters['trip_id'] !== '7') { return []; }
             return [['ID' => 7, 'STATUS' => $this->status, 'SALES_ORDER_ID' => 11,
@@ -143,7 +152,7 @@ final class LogisticsProviderConnection implements Connection
                 'DELIVERED_AT' => $this->timestamp, 'DELIVERED_BY' => $this->eventActor, 'DRIVER_USER_ID' => $this->driverUser]];
         }
         if (str_contains($sql, 'FROM ME_LOG_TRIP_LINES WHERE')) { return [['LINE_ID' => 123, 'TRIP_LINE_ID' => 501]]; }
-        if (str_contains($sql, 'FROM ME_LOG_TRIPS T JOIN')) {
+        if (preg_match('/FROM ME_LOG_TRIPS T\s+JOIN ME_LOG_TRIP_LINES/', $sql)) {
             if ($this->assignmentRows !== null) { return $this->assignmentRows; }
             if ($this->status === 'X') { return []; }
             $row = ['LINE_ID' => 123, 'TRIP_ID' => 7, 'TRIP_LINE_ID' => 501, 'PRODUCT_ID' => 163,
