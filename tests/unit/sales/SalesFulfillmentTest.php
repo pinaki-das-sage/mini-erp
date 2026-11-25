@@ -77,7 +77,7 @@ final class SalesFulfillmentTest extends TestCase
     {
         $setup = $this->setupOrder(); [$db, $provider, , $orders, $service, $order] = $setup;
         $assigned = $this->assign($setup);
-        self::assertSame('In Progress', $assigned['status']); self::assertSame(3, $assigned['current_version']);
+        self::assertSame('Submitted', $assigned['status']); self::assertSame(3, $assigned['current_version']);
         self::assertSame(4, $db->inventory->balances[163]['RESERVED']);
         $this->reject(fn () => $orders->action($this->actor(), $order['order_number'], 'return_to_draft', ['expected_version' => 3]), 'INVALID_STATE');
         $cancelled = (new TransactionManager($db))->run(function (TransactionContext $tx) use ($provider, $service, $order): array {
@@ -200,12 +200,163 @@ final class SalesFulfillmentTest extends TestCase
             self::fail('Audit failure must roll back.');
         } catch (\MiniErp\shared\database\DatabaseError) {
             self::assertCount(2, $provider->assignments);
-            self::assertSame('In Progress', $orders->get($this->actor(), $order['order_number'])['status']);
+            self::assertSame('Submitted', $orders->get($this->actor(), $order['order_number'])['status']);
             self::assertSame(3, $orders->get($this->actor(), $order['order_number'])['current_version']);
             self::assertSame(4, $db->inventory->balances[163]['RESERVED']);
             self::assertCount(3, $db->inventory->sales->audit);
         }
     }
+
+    /** Simulate Logistics writing only selected whole lines inside the shared transaction. */
+    private function selectedEvent(array $setup, array $indexes, int $tripId, string $status,
+        string $reference, bool $consume = true, ?int $expectedVersion = null): array
+    {
+        [$db, $provider, $reservations, , $service, $order] = $setup;
+        $event = match ($status) { 'Cancelled' => 'cancellation', 'Delivered' => 'delivery', default => 'assignment' };
+        return (new TransactionManager($db))->run(function (TransactionContext $tx) use (
+            $provider, $reservations, $service, $order, $indexes, $tripId, $status, $reference, $consume, $expectedVersion, $event,
+        ): array {
+            $locked = $service->lockOrderForEvent($tx, $this->actor(), $order['order_number'], $event);
+            self::assertCount(count($order['lines']), $locked['lines']);
+            $selected = array_map(static fn (int $index): array => $order['lines'][$index], $indexes);
+            $mapping = [];
+            foreach ($selected as $line) {
+                $tripLineId = $tripId * 100 + $line['line_number'];
+                $mapping[] = ['line_id' => $line['line_id'], 'trip_line_id' => (string) $tripLineId];
+                if ($status === 'Dispatched' && $consume) {
+                    $detail = $reservations->getReservationDetail($this->actor(), $tx, (int) $locked['order_id'], (int) $line['line_id']);
+                    $reservations->consumeReservation($this->actor(), $tx, $detail['reservation_id'],
+                        (int) $locked['order_id'], (int) $line['line_id'], (int) $line['product_id'],
+                        (int) $line['quantity'], $tripId, $tripLineId);
+                }
+                $provider->assignments = array_values(array_filter($provider->assignments,
+                    static fn (array $fact): bool => $fact['line_id'] !== $line['line_id']));
+                if ($status !== 'Cancelled') {
+                    $provider->assignments[] = ['line_id' => $line['line_id'], 'trip_id' => (string) $tripId,
+                        'trip_line_id' => (string) $tripLineId, 'product_id' => $line['product_id'],
+                        'quantity' => $line['quantity'], 'trip_status' => $status];
+                }
+            }
+            $input = ['expected_version' => $expectedVersion ?? $locked['current_version'],
+                'event_reference' => $reference, 'trip_id' => (string) $tripId, 'lines' => $mapping];
+            return match ($event) {
+                'cancellation' => $service->recordTripCancellation($tx, $this->actor(), $order['order_number'], $input),
+                'delivery' => $service->recordDelivery($tx, $this->actor(), $order['order_number'], $input),
+                default => $service->recordTripAssignment($tx, $this->actor(), $order['order_number'], $input),
+            };
+        });
+    }
+
+    public function testEveryEventRequiresAllOrderLinesAndRollsBackPartialRequests(): void
+    {
+        foreach (['Draft', 'Dispatched', 'Cancelled', 'Delivered'] as $status) {
+            $setup = $this->setupOrder(); [$db, $provider, , $orders, , $order] = $setup;
+            if ($status !== 'Draft') { $this->assign($setup); }
+            if ($status === 'Delivered') { $this->dispatch($setup); }
+            $before = $orders->get($this->actor(), $order['order_number']);
+            $balances = $db->inventory->balances; $assignments = $provider->assignments; $movements = $db->movements;
+            $this->reject(fn () => $this->selectedEvent($setup, [0], 7, $status, 'partial-' . $status), 'VALIDATION_ERROR');
+            self::assertSame($before, $orders->get($this->actor(), $order['order_number']));
+            self::assertSame($balances, $db->inventory->balances); self::assertSame($assignments, $provider->assignments);
+            self::assertSame($movements, $db->movements); self::assertSame('DRAFT', $db->inventory->sales->documents[12]['STATUS']);
+        }
+    }
+
+    public function testWholeOrderRejectsMixedTripIdsAndMixedProgress(): void
+    {
+        foreach (['trip_id', 'trip_status'] as $field) {
+            $setup = $this->setupOrder(); [$db, $provider, , $orders, $service, $order] = $setup;
+            $this->reject(fn () => (new TransactionManager($db))->run(function (TransactionContext $tx) use ($provider, $service, $order, $field): array {
+                $provider->assignments = $this->facts($order, 'Draft');
+                $provider->assignments[1][$field] = $field === 'trip_id' ? '8' : 'Dispatched';
+                return $service->recordTripAssignment($tx, $this->actor(), $order['order_number'], $this->input($order, 2, 'mixed-assignment'));
+            }), 'INVALID_STATE');
+            self::assertSame([], $provider->assignments);
+            self::assertSame(['ON_HAND' => 20, 'RESERVED' => 4], $db->inventory->balances[163]);
+            self::assertFalse($orders->get($this->actor(), $order['order_number'])['lines'][0]['trip_assigned']);
+        }
+    }
+
+    public function testWholeOrderCanChangeTripOnlyAfterDraftAssignmentCancellation(): void
+    {
+        $setup = $this->setupOrder(); [$db, , , $orders, , $order] = $setup;
+        $invoice = $db->inventory->sales->documents[12];
+        self::assertSame('Submitted', $this->selectedEvent($setup, [0, 1], 7, 'Draft', 'assign-whole')['status']);
+        $this->reject(fn () => $this->selectedEvent($setup, [0, 1], 8, 'Draft', 'take-over-whole'), 'INVALID_STATE');
+        $cancel = $this->selectedEvent($setup, [0, 1], 7, 'Cancelled', 'cancel-whole');
+        self::assertSame('Submitted', $cancel['status']); self::assertSame(4, $db->inventory->balances[163]['RESERVED']);
+        $read = $orders->get($this->actor(), $order['order_number']);
+        self::assertSame([null, null], array_column($read['lines'], 'trip_reference'));
+        self::assertSame(['move_to_draft'], $read['available_actions']);
+        self::assertSame('Submitted', $this->selectedEvent($setup, [0, 1], 8, 'Draft', 'reassign-whole')['status']);
+        self::assertSame('In Progress', $this->selectedEvent($setup, [0, 1], 8, 'Dispatched', 'dispatch-whole')['status']);
+        self::assertSame(['8', '8'], array_column($orders->get($this->actor(), $order['order_number'])['lines'], 'trip_reference'));
+        $closed = $this->selectedEvent($setup, [0, 1], 8, 'Delivered', 'deliver-whole');
+        self::assertSame('Closed', $closed['status']); self::assertSame(7, $closed['current_version']);
+        self::assertSame($invoice, $db->inventory->sales->documents[12]);
+        self::assertSame(['ON_HAND' => 16, 'RESERVED' => 0], $db->inventory->balances[163]);
+        self::assertCount(2, $db->movements);
+    }
+
+    public function testWholeOrderCannotSkipDispatchOrUndoConsumedStock(): void
+    {
+        $setup = $this->setupOrder(); [$db, , , $orders, , $order] = $setup;
+        $this->reject(fn () => $this->selectedEvent($setup, [0, 1], 7, 'Dispatched', 'skip-assignment'), 'INVALID_STATE');
+        $this->selectedEvent($setup, [0, 1], 7, 'Draft', 'assign-whole-first');
+        $this->reject(fn () => $this->selectedEvent($setup, [0, 1], 8, 'Cancelled', 'wrong-trip-cancel'), 'INVALID_STATE');
+        $this->reject(fn () => $this->selectedEvent($setup, [0, 1], 7, 'Delivered', 'early-delivery'), 'INVALID_STATE');
+        $this->reject(fn () => $this->selectedEvent($setup, [0, 1], 7, 'Dispatched', 'missing-consumption', false), 'INVALID_STATE');
+        self::assertSame(['ON_HAND' => 20, 'RESERVED' => 4], $db->inventory->balances[163]);
+        self::assertSame([], $db->movements);
+        $this->selectedEvent($setup, [0, 1], 7, 'Dispatched', 'valid-dispatch');
+        $this->reject(fn () => $this->selectedEvent($setup, [0, 1], 7, 'Cancelled', 'undo-dispatch'), 'INVALID_STATE');
+        $this->reject(fn () => $this->selectedEvent($setup, [0, 1], 7, 'Draft', 'reverse-dispatch'), 'INVALID_STATE');
+        self::assertSame(['Dispatched', 'Dispatched'], array_column($orders->get($this->actor(), $order['order_number'])['lines'], 'trip_status'));
+    }
+
+    public function testWholeOrderReplayAndStaleDispatchKeepStockAndVersionsSafe(): void
+    {
+        $setup = $this->setupOrder(); [$db, , , $orders, $service, $order] = $setup;
+        $first = $this->selectedEvent($setup, [0, 1], 7, 'Draft', 'stable-whole-assignment');
+        $this->reject(fn () => $this->selectedEvent($setup, [0, 1], 7, 'Dispatched', 'stale-dispatch', true, 2), 'STALE_VERSION');
+        self::assertSame(['ON_HAND' => 20, 'RESERVED' => 4], $db->inventory->balances[163]);
+        self::assertSame([], $db->movements);
+        $this->selectedEvent($setup, [0, 1], 7, 'Dispatched', 'successful-dispatch');
+        $input = ['expected_version' => 2, 'event_reference' => 'stable-whole-assignment', 'trip_id' => '7',
+            'lines' => [['line_id' => $order['lines'][0]['line_id'], 'trip_line_id' => '701'],
+                ['line_id' => $order['lines'][1]['line_id'], 'trip_line_id' => '702']]];
+        $replay = (new TransactionManager($db))->run(fn (TransactionContext $tx): array =>
+            $service->recordTripAssignment($tx, $this->actor(), $order['order_number'], $input));
+        self::assertSame($first, $replay);
+        self::assertSame(4, $orders->get($this->actor(), $order['order_number'])['current_version']);
+        self::assertSame(['ON_HAND' => 16, 'RESERVED' => 0], $db->inventory->balances[163]);
+    }
+
+    public function testWholeOrderDispatchAuditFailureRollsBackAllConsumptionAndProgress(): void
+    {
+        $setup = $this->setupOrder(); [$db, $provider, , $orders, , $order] = $setup;
+        $this->selectedEvent($setup, [0, 1], 7, 'Draft', 'assign-before-failure');
+        $db->inventory->sales->failAudit = true;
+        try { $this->selectedEvent($setup, [0, 1], 7, 'Dispatched', 'failed-dispatch'); self::fail('Audit must fail.'); }
+        catch (\MiniErp\shared\database\DatabaseError) {
+            self::assertSame(['Draft', 'Draft'], array_column($provider->assignments, 'trip_status'));
+            self::assertSame('Submitted', $orders->get($this->actor(), $order['order_number'])['status']);
+            self::assertSame(['ON_HAND' => 20, 'RESERVED' => 4], $db->inventory->balances[163]);
+            self::assertSame([], $db->movements); self::assertCount(3, $db->inventory->sales->actions);
+            self::assertSame('DRAFT', $db->inventory->sales->documents[12]['STATUS']);
+        }
+    }
+
+    public function testWholeOrderCancellationRequiresAllLogisticsClaimsRemoved(): void
+    {
+        $setup = $this->setupOrder(); [$db, , , $orders, $service, $order] = $setup;
+        $this->assign($setup);
+        $this->reject(fn () => (new TransactionManager($db))->run(fn (TransactionContext $tx): array =>
+            $service->recordTripCancellation($tx, $this->actor(), $order['order_number'], $this->input($order, 3, 'claims-still-present'))), 'INVALID_STATE');
+        self::assertSame(['7', '7'], array_column($orders->get($this->actor(), $order['order_number'])['lines'], 'trip_reference'));
+        self::assertSame(4, $db->inventory->balances[163]['RESERVED']);
+    }
+
 }
 
 /** Test-only authoritative Logistics double. Production must provide the real owner implementation. */

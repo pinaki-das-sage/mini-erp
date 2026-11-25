@@ -104,6 +104,47 @@ test('Invoice sources are Orders and removed Shipper definitions leave no refere
   assert.deepEqual(spec.components.parameters.DocumentType.schema.enum, ['Quote', 'Order', 'Invoice']);
 });
 
+test('Invoice creation accepts only its Submitted Order number and optional retry metadata', () => {
+  const create = schemas.InvoiceCreateRequest;
+  assert.deepEqual(create.required, ['source_order_number']);
+  assert.deepEqual(Object.keys(create.properties).sort(), ['action_reference', 'source_order_number']);
+  assert.equal(create.additionalProperties, false);
+  assert.equal(create.properties.source_order_number.$ref, '#/components/schemas/SalesDocumentNumber');
+  const example = operation('/sales/invoices').requestBody.content['application/json'].example;
+  assert(example.source_order_number);
+  assert.equal(example.lines, undefined);
+  assert.equal(example.action_reference, undefined);
+  assert.match(operation('/sales/invoices').description, /Submitted Sales Order number/);
+  assert(schemas.InvoiceLineInput.required.includes('product_id'));
+  assert.equal(schemas.InvoiceLineInput.properties.item_code, undefined);
+});
+
+test('Invoice update exposes only dates, notes and version with optional retry metadata', () => {
+  const update = schemas.InvoiceUpdateRequest;
+  assert.deepEqual(update.required, ['expected_version']);
+  assert.deepEqual(Object.keys(update.properties).sort(),
+    ['action_reference', 'due_date', 'expected_version', 'invoice_date', 'notes']);
+  assert.equal(update.additionalProperties, false);
+  assert.deepEqual(operation('/sales/invoices/{invoice_number}/update').requestBody.content['application/json'].example, {
+    expected_version: 1, invoice_date: '2026-11-25', due_date: '2026-11-25', notes: 'Payment due on receipt.',
+  });
+});
+
+test('Invoice lifecycle examples require only the current version without changing shared actions', () => {
+  const body = spec.components.requestBodies.InvoiceAction;
+  assert.deepEqual(body.content['application/json'].example, { expected_version: 2 });
+  const action = schemas.InvoiceActionRequest;
+  assert.deepEqual(action.required, ['expected_version']);
+  assert.equal(action.additionalProperties, false);
+  assert(action.properties.action_reference);
+  for (const path of ['submit', 'move-to-draft', 'delete']) {
+    assert.equal(operation('/sales/invoices/{invoice_number}/' + path).requestBody.$ref,
+      '#/components/requestBodies/InvoiceAction');
+  }
+  assert(schemas.SalesDocumentActionRequest.required.includes('action_reference'));
+  assert(schemas.PaymentCreateRequest.required.includes('action_reference'));
+});
+
 test('whole-number quantities match the line migration and preserve valid Quote fields', () => {
   const quantity = new RegExp(schemas.SalesQuantity.pattern);
   for (const value of ['1', '12', '999999999']) assert(quantity.test(value), value);
@@ -153,6 +194,17 @@ test('Order progress and Trip responses match the three-document model', () => {
   assert.equal(schemas.Order.allOf[1].properties.lines.items.$ref, '#/components/schemas/OrderLine');
   assert.deepEqual(schemas.OrderTripFields.then.properties.trip_status.enum, ['Draft', 'Dispatched', 'Delivered']);
   assert.equal(schemas.OrderTripFields.else.properties.trip_reference.type, 'null');
+  const orderRules = schemas.Order.allOf;
+  assert.equal(orderRules[3].if.properties.status.const, 'Draft');
+  assert.equal(orderRules[4].if.properties.status.const, 'Submitted');
+  assert.deepEqual(orderRules[4].then.properties.lines.items.properties.trip_status.enum, ['Draft', 'Cancelled', null]);
+  assert.deepEqual(orderRules[5].then.properties.lines.contains.properties.trip_status.enum, ['Dispatched', 'Delivered']);
+  const progress = operation('/sales/orders/{order_number}', 'get').description;
+  assert.match(progress, /Draft Trip assignment keeps the Order Submitted/);
+  assert.match(progress, /Dispatch of all lines means In Progress/);
+  assert.match(progress, /One whole Order belongs to one current Trip/);
+  assert.deepEqual(orderRules[4].then.properties.lines.anyOf[0].items.properties.trip_assigned, { const: false });
+  assert.equal(orderRules[5].then.properties.lines.items.properties.trip_status.const, 'Dispatched');
 });
 
 test('Order flow requires a Quote and creates its Draft Invoice with reservations on Submit', () => {

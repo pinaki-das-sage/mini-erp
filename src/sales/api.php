@@ -2,6 +2,8 @@
 declare(strict_types=1);
 
 use MiniErp\sales\customers\CustomerService;
+use MiniErp\sales\invoices\InvoiceService;
+use MiniErp\sales\payments\PaymentService;
 use MiniErp\inventory\QuoteInventoryValidator;
 use MiniErp\inventory\ReservationService;
 use MiniErp\sales\quotes\QuoteService;
@@ -15,6 +17,8 @@ use MiniErp\shared\security\Actor;
 
 return static function (Api $api, Connection $connection): void {
     $customers = new CustomerService($connection);
+    $invoices = new InvoiceService($connection);
+    $payments = new PaymentService($connection);
     $quotes = new QuoteService($connection, new QuoteInventoryValidator());
     // Logistics must mirror current assignments through Sales' callbacks atomically. Return/release use
     // the same saved Sales Trip fields under parent/line locks; no external Logistics lookup is required.
@@ -57,4 +61,21 @@ return static function (Api $api, Connection $connection): void {
         static fn (Actor $actor, array $input, array $params): array => $customers->get($actor, $params['id']));
     $api->register('POST', '/sales/customers/{id}/update', SalesPermissions::CUSTOMERS, 'update',
         static fn (Actor $actor, array $input, array $params): array => $customers->update($actor, $params['id'], $input));
+
+    $api->register('GET', '/sales/invoices', SalesPermissions::DOCUMENTS['invoice'], 'read',
+        static fn (Actor $actor, array $input, array $params, array $query): array => $invoices->list($actor, $query));
+    $api->register('POST', '/sales/invoices', SalesPermissions::DOCUMENTS['invoice'], 'create',
+        static fn (Actor $actor, array $input): array => $invoices->create($actor, $input), 201);
+    $api->register('GET', '/sales/invoices/{invoice_number}', SalesPermissions::DOCUMENTS['invoice'], 'read',
+        static fn (Actor $actor, array $input, array $params): array => $invoices->get($actor, $params['invoice_number']));
+    $api->register('POST', '/sales/invoices/{invoice_number}/update', SalesPermissions::DOCUMENTS['invoice'], 'update',
+        static fn (Actor $actor, array $input, array $params): array => $invoices->update($actor, $params['invoice_number'], $input));
+    foreach (['submit' => 'submit', 'move-to-draft' => 'return_to_draft', 'delete' => 'delete'] as $path => $action) {
+        $api->register('POST', '/sales/invoices/{invoice_number}/' . $path, SalesPermissions::DOCUMENTS['invoice'], $action,
+            static fn (Actor $actor, array $input, array $params): array => $invoices->action($actor, $params['invoice_number'], $action, $input));
+    }
+    $api->register('POST', '/sales/invoices/{invoice_number}/payments', SalesPermissions::PAYMENTS, 'record',
+        static fn (Actor $actor, array $input, array $params): array => $payments->record($actor, $params['invoice_number'], $input), 201);
+    $api->register('GET', '/sales/invoices/{invoice_number}/payments', SalesPermissions::PAYMENTS, 'read',
+        static fn (Actor $actor, array $input, array $params, array $query): array => $payments->list($actor, $params['invoice_number'], $query));
 };

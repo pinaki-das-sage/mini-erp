@@ -61,6 +61,25 @@ final class LogisticsOrderAdapterTest extends TestCase
         $this->reject(fn () => $service->assertEvent($tx, $actor, 'delivery', '12', '7', $mapping, 'event-2'), 'NOT_FOUND');
     }
 
+    public function testProviderRejectsMultipleTripsOrMixedProgressForOneOrder(): void
+    {
+        [$db, $service, $tx, $actor] = $this->setupProvider();
+        $db->assignmentRows = [
+            ['LINE_ID' => 123, 'TRIP_ID' => 7, 'TRIP_LINE_ID' => 501, 'PRODUCT_ID' => 163, 'QUANTITY_TEXT' => '2', 'STATUS' => 'D'],
+            ['LINE_ID' => 124, 'TRIP_ID' => 8, 'TRIP_LINE_ID' => 502, 'PRODUCT_ID' => 268, 'QUANTITY_TEXT' => '3', 'STATUS' => 'S'],
+            ['LINE_ID' => 125, 'TRIP_ID' => 9, 'TRIP_LINE_ID' => 503, 'PRODUCT_ID' => 37, 'QUANTITY_TEXT' => '1', 'STATUS' => 'C'],
+        ];
+        $this->reject(fn () => $service->getAssignments($tx, $actor, '11'), 'INVALID_STATE');
+        $this->reject(fn () => $service->getPlannedQuantity($actor, $tx, 11, 123), 'INVALID_STATE');
+        foreach ($db->assignmentRows as &$row) { $row['TRIP_ID'] = 7; }
+        unset($row);
+        $this->reject(fn () => $service->getAssignments($tx, $actor, '11'), 'INVALID_STATE');
+        foreach ($db->assignmentRows as &$row) { $row['STATUS'] = 'D'; }
+        unset($row);
+        self::assertSame(['7', '7', '7'], array_column($service->getAssignments($tx, $actor, '11'), 'trip_id'));
+        self::assertSame(2, $service->getPlannedQuantity($actor, $tx, 11, 123));
+    }
+
     public function testInvalidFactsAndDuplicateClaimsDoNotBecomeZero(): void
     {
         [$db, $service, $tx, $actor] = $this->setupProvider();
@@ -96,6 +115,7 @@ final class LogisticsOrderAdapterTest extends TestCase
 
 final class LogisticsProviderConnection implements Connection
 {
+    public ?array $assignmentRows = null;
     public string $status = 'D';
     public string $eventActor = 'driver-user';
     public string $driverUser = 'driver-user';
@@ -124,6 +144,7 @@ final class LogisticsProviderConnection implements Connection
         }
         if (str_contains($sql, 'FROM ME_LOG_TRIP_LINES WHERE')) { return [['LINE_ID' => 123, 'TRIP_LINE_ID' => 501]]; }
         if (str_contains($sql, 'FROM ME_LOG_TRIPS T JOIN')) {
+            if ($this->assignmentRows !== null) { return $this->assignmentRows; }
             if ($this->status === 'X') { return []; }
             $row = ['LINE_ID' => 123, 'TRIP_ID' => 7, 'TRIP_LINE_ID' => 501, 'PRODUCT_ID' => 163,
                 'QUANTITY_TEXT' => $this->quantity, 'STATUS' => $this->status];

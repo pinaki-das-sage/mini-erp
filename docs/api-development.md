@@ -16,8 +16,13 @@ Invoice Date uses Order Date; Due Date follows payment terms. The Submit result 
 Any failure rolls back stock, Invoice, Order status/version, audit and replay records. Exact retries
 return the original result. Draft creation has no Customer debt effect and does not deduct stock.
 
-Logistics assignment makes the Order In Progress. Dispatch consumes reservations. Whole-Order delivery
-makes it Closed; delivery does not create or modify the Invoice. Logistics does not wait for Invoice submission.
+One whole Sales Order belongs to one current Trip, including every line and full quantity. Draft
+Trip assignment leaves the Order Submitted. Successful dispatch consumes all reservations and makes
+the Order In Progress. Full delivery makes it Closed. Whole Draft assignment cancellation clears every
+Trip reference and leaves stock reserved. Partial line selections and mixed Trip IDs/statuses are rejected. Delivery
+does not create or modify the Invoice. Logistics does not wait for Invoice submission.
+Logistics selects whole Submitted Orders whose lines are all unassigned; Submitted status alone does
+not mean no Trip exists. The full detail API exposes each line's Trip state.
 
 An unassigned Submitted Order can return to Draft when its linked Invoice is Draft without payments
 or downstream references. Delete that Invoice/link, release reservations and return the Order atomically.
@@ -158,8 +163,9 @@ php bin/lint.php
 node --test tests/unit/sales/sales-openapi.test.cjs
 ```
 
-Local verification for this increment: 294 focused PHPUnit tests passed (OrderService, QuoteService,
-CustomerService, SalesRules, InventoryQuoteValidator, InventoryOrderAdapter, SalesFulfillment and SalesTripAssignmentGuard), with 1,469 assertions
+Local verification for this increment: 311 focused PHPUnit tests passed (OrderService, QuoteService,
+CustomerService, SalesRules, InventoryQuoteValidator, InventoryOrderAdapter, OrderInvoiceService, LogisticsOrderAdapter,
+SalesFulfillment and SalesTripAssignmentGuard), with 1,701 assertions
 on PHP 8.4.27 WebAssembly. This includes the supplied ReservationService executing against a transactional
 database double for exact stock, cumulative shortages, permission checks, audit rollback and release/resubmit cycles.
 PHP parser checks passed for 85 application/test/migration PHP files. Native PHP execution is blocked on
