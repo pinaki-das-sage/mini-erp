@@ -105,7 +105,22 @@ return static function (Api $api, Connection $connection): void {
         ) use ($drivers): array {
             $id = (int) $params['id'];
             return $drivers->deleteDriver($actor, $id);
-        },
-        wrapResponse: false
+        }
+    );
+
+    $api->register(
+        'GET',
+        '/logistics/driver-users',
+        'logistics.drivers',
+        'read',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($drivers): array {
+            $pagination = Api::pagination($query, ['search']);
+            return $drivers->getEligibleUsers($actor, $pagination);
+        }
     );
 };

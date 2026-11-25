@@ -47,6 +47,23 @@ class DriverService
         ];
     }
 
+    // GET /logistics/driver-users
+    public function getEligibleUsers(Actor $actor, array $pagination): array
+    {
+        (new Authorization($this->connection))->requirePermission($actor, 'logistics.drivers', 'read');
+
+        return [
+            'items' => $this->repository->findEligibleUsers(
+                $actor->companyId,
+                $pagination['offset'],
+                $pagination['page_size'],
+                $pagination['filters']['search'] ?? null
+            ),
+            'page' => $pagination['page'],
+            'page_size' => $pagination['page_size']
+        ];
+    }
+
     public function getDriver(Actor $actor, int $id): array
     {
         $authorization = new Authorization($this->connection);
@@ -133,7 +150,7 @@ class DriverService
                 : $this->repository->delete($actor->companyId, $id)
         );
 
-        return [];
+        return ['id' => $id, 'deleted' => true];
     }
 
     private function actorId(Actor $actor): int
