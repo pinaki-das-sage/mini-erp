@@ -379,43 +379,46 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /logistics/drivers/{id}/update:
     post:
       tags: [Drivers]
       summary: Update a driver profile
       operationId: updateDriver
+      parameters:
+        - $ref: '#/components/parameters/Id'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              allOf:
-                - type: object
-                  required: [driver_code, first_name, last_name, licence_number, licence_expiry]
-                  properties:
-                    driver_code:
-                      type: string
-                      maxLength: 30
-                    user_id:
-                      type: [integer, 'null']
-                      minimum: 1
-                    first_name:
-                      type: string
-                      maxLength: 100
-                    last_name:
-                      type: string
-                      maxLength: 100
-                    phone:
-                      type: [string, 'null']
-                      maxLength: 30
-                    licence_number:
-                      type: string
-                      maxLength: 50
-                    licence_expiry:
-                      type: string
-                      format: date
-                    isactive:
-                      type: string
-                      enum: ['T', 'F']
+              type: object
+              required: [driver_code, first_name, last_name, licence_number, licence_expiry]
+              properties:
+                driver_code:
+                  type: string
+                  maxLength: 30
+                user_id:
+                  type: [integer, 'null']
+                  minimum: 1
+                first_name:
+                  type: string
+                  maxLength: 100
+                last_name:
+                  type: string
+                  maxLength: 100
+                phone:
+                  type: [string, 'null']
+                  maxLength: 30
+                licence_number:
+                  type: string
+                  maxLength: 50
+                licence_expiry:
+                  type: string
+                  format: date
+                isactive:
+                  type: string
+                  enum: ['T', 'F']
       responses:
         '200':
           description: Driver updated
