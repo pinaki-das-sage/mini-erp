@@ -1,21 +1,23 @@
+<link rel="stylesheet" href="{$data.styleUrl}">
+<div class="sales-document document-detail">
 <div class="panel">
     <h2>Payment recorded</h2>
 
-    <dl>
-        <dt>Payment number</dt>
-        <dd>{$data.payment.payment_number}</dd>
+    <dl class="document-blocks">
+        <div class="document-block"><dt>Payment number</dt>
+        <dd>{$data.payment.payment_number}</dd></div>
 
-        <dt>Invoice number</dt>
-        <dd>{$data.payment.invoice_number}</dd>
+        <div class="document-block"><dt>Invoice number</dt>
+        <dd>{$data.payment.invoice_number}</dd></div>
 
-        <dt>Amount paid</dt>
-        <dd>{$data.payment.payment_amount}</dd>
+        <div class="document-block"><dt>Amount paid</dt>
+        <dd>{$data.payment.payment_amount}</dd></div>
 
-        <dt>Payment date</dt>
-        <dd>{$data.payment.payment_date}</dd>
+        <div class="document-block"><dt>Payment date</dt>
+        <dd>{$data.payment.payment_date}</dd></div>
 
-        <dt>Payment reference</dt>
-        <dd>{$data.payment.payment_reference|default:'—'}</dd>
+        <div class="document-block"><dt>Payment reference</dt>
+        <dd>{$data.payment.payment_reference|default:'—'}</dd></div>
     </dl>
 </div>
 
@@ -23,18 +25,18 @@
     <h2>Invoice balance after this payment</h2>
     <p>These totals show the balance immediately after this payment was recorded.</p>
 
-    <dl>
-        <dt>Invoice total</dt>
-        <dd>{$data.invoice.document_total}</dd>
+    <dl class="document-blocks">
+        <div class="document-block"><dt>Invoice total</dt>
+        <dd>{$data.invoice.document_total}</dd></div>
 
-        <dt>Total paid</dt>
-        <dd>{$data.invoice.total_paid}</dd>
+        <div class="document-block"><dt>Total paid</dt>
+        <dd>{$data.invoice.total_paid}</dd></div>
 
-        <dt>Amount due</dt>
-        <dd>{$data.invoice.amount_due}</dd>
+        <div class="document-block"><dt>Amount due</dt>
+        <dd>{$data.invoice.amount_due}</dd></div>
 
-        <dt>Payment status</dt>
-        <dd>{$data.invoice.payment_status}</dd>
+        <div class="document-block"><dt>Payment status</dt>
+        <dd>{$data.invoice.payment_status}</dd></div>
     </dl>
 
     {if $data.invoiceUrl}
@@ -46,4 +48,6 @@
     {/if}
 
     <p><a href="{$data.homeUrl}">Back to payments</a></p>
+</div>
+
 </div>

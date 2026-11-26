@@ -1,9 +1,11 @@
+<link rel="stylesheet" href="{$basePath}/assets/sales/documents.css">
+<div class="sales-document document-detail">
 <p><a href="{$data.listUrl}">Back to invoices</a></p>
 
 <div class="panel">
-    <h2>{$data.invoice.invoice_number}</h2>
+    <h2>Invoice information</h2>
 
-    <div class="filters">
+    <div class="document-toolbar">
         {if $data.editUrl}
             <a class="button" href="{$data.editUrl}">Edit draft</a>
         {/if}
@@ -21,27 +23,27 @@
         {/if}
     </div>
 
-    <dl>
-        <dt>Customer code</dt>
-        <dd>{$data.invoice.customer_code}</dd>
+    <dl class="document-blocks">
+        <div class="document-block"><dt>Customer code</dt>
+        <dd>{$data.invoice.customer_code}</dd></div>
 
-        <dt>Invoice date</dt>
-        <dd>{$data.invoice.invoice_date}</dd>
+        <div class="document-block"><dt>Invoice date</dt>
+        <dd>{$data.invoice.invoice_date}</dd></div>
 
-        <dt>Due date</dt>
-        <dd>{$data.invoice.due_date}</dd>
+        <div class="document-block"><dt>Due date</dt>
+        <dd>{$data.invoice.due_date}</dd></div>
 
-        <dt>Payment terms</dt>
-        <dd>{$data.paymentTermsLabel}</dd>
+        <div class="document-block"><dt>Payment terms</dt>
+        <dd>{$data.paymentTermsLabel}</dd></div>
 
-        <dt>Status</dt>
-        <dd>{$data.invoice.status}</dd>
+        <div class="document-block"><dt>Status</dt>
+        <dd>{$data.invoice.status}</dd></div>
 
-        <dt>Payment status</dt>
-        <dd>{$data.invoice.payment_status|default:'-'}</dd>
+        <div class="document-block"><dt>Payment status</dt>
+        <dd>{$data.invoice.payment_status|default:'-'}</dd></div>
 
-        <dt>Source order</dt>
-        <dd>{$data.invoice.source_order_number|default:'Standalone invoice'}</dd>
+        <div class="document-block"><dt>Source order</dt>
+        <dd>{$data.invoice.source_order_number|default:'Standalone invoice'}</dd></div>
     </dl>
 </div>
 
@@ -73,17 +75,23 @@
 </div>
 
 <div class="panel">
-    <dl>
-        <dt>Invoice total</dt>
-        <dd>{$data.invoice.document_total}</dd>
+    <h2>Payment summary</h2>
+    <dl class="document-blocks">
+        <div class="document-block"><dt>Invoice total</dt>
+        <dd>{$data.invoice.document_total}</dd></div>
 
-        <dt>Total paid</dt>
-        <dd>{$data.invoice.total_paid}</dd>
+        <div class="document-block"><dt>Total paid</dt>
+        <dd>{$data.invoice.total_paid}</dd></div>
 
-        <dt>Amount due</dt>
-        <dd>{$data.invoice.amount_due}</dd>
+        <div class="document-block"><dt>Amount due</dt>
+        <dd>{$data.invoice.amount_due}</dd></div>
     </dl>
 
+</div>
+
+<div class="panel">
     <h2>Notes</h2>
-    <p>{$data.invoice.notes|default:'No notes.'}</p>
+    <p class="document-notes">{$data.invoice.notes|default:'No notes.'}</p>
+</div>
+
 </div>

@@ -1,11 +1,11 @@
 <link rel="stylesheet" href="{$data.styleUrl}">
-<div class="sales-document">
+<div class="sales-document document-detail">
     <p><a href="{$data.salesUrl}">Back to Sales</a></p>
     <div class="panel">
         <h2>Find a Submitted Invoice</h2>
         <p>Choose an Invoice below to record a payment or review its payment history.</p>
         <form method="get" action="{$data.listUrl}">
-            <div class="document-grid">
+            <div class="document-grid document-entry-grid">
                 <label>Invoice number<input name="invoice_number" maxlength="20" value="{$data.filters.invoice_number}" placeholder="SI-000000000000001"></label>
                 <label>Customer code<input name="customer_code" maxlength="20" value="{$data.filters.customer_code}" placeholder="CUST-001"></label>
                 <label>Payment status<select name="payment_status">

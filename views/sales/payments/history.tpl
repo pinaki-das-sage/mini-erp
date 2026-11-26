@@ -1,5 +1,5 @@
 <link rel="stylesheet" href="{$data.styleUrl}">
-<div class="sales-document">
+<div class="sales-document document-detail">
 <p><a href="{$data.salesUrl}">Back to Sales</a></p>
 
 <div class="panel">
@@ -27,13 +27,16 @@
 </div>
 
 {if $data.payments !== null}
+    <section class="panel">
     <h2>Payments for {$data.invoiceNumber}</h2>
+    <dl class="document-blocks"><div><dt>Invoice number</dt><dd>{$data.invoiceNumber}</dd></div><div><dt>Page</dt><dd>{$data.payments.page}</dd></div></dl>
     <p>Amount due and payment status show the balance after each payment, in recording order.</p>
 
     {if $data.invoiceUrl}
         <p><a href="{$data.invoiceUrl}">View invoice</a></p>
     {/if}
 
+    </section>
     <div class="table-scroll">
         <table>
             <thead>
