@@ -44,3 +44,39 @@ legend { font-weight: bold; }
   header { padding: 1rem; }
   .brand { font-size: 1.2rem; }
 }
+.logistics-intro { color: #435665; max-width: 75rem; }
+.logistics-tabs { display: flex; gap: .5rem; border-bottom: 1px solid #c8d5df; margin: 1.5rem 0 0; }
+.logistics-tab { background: transparent; color: #075a80; border-radius: .3rem .3rem 0 0; }
+.logistics-tab[aria-selected="true"] { background: #15394e; color: white; }
+.logistics-panel { background: white; border: 1px solid #d4dfe8; border-top: 0; padding: 1.25rem; }
+.logistics-section-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.logistics-section-heading h2 { margin-top: 0; }
+.logistics-section-heading p { color: #536575; }
+.logistics-toolbar, .logistics-pagination, .logistics-dialog-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.logistics-pagination { justify-content: flex-end; margin-top: 1rem; }
+.logistics-note, .logistics-help { color: #536575; font-size: .95rem; }
+.logistics-note { background: #edf4f8; border-left: 3px solid #6392aa; padding: .75rem 1rem; }
+.logistics-status { min-height: 1.5em; }
+.logistics-actions { min-width: 10rem; }
+.logistics-actions button { margin: .15rem; white-space: nowrap; }
+.button-secondary { background: #e8eef3; color: #15394e; border: 1px solid #c8d5df; }
+.button-danger { background: #9b1c20; color: white; }
+.logistics-badge { display: inline-block; padding: .2rem .5rem; border-radius: 999px; font-size: .85rem; font-weight: 700; white-space: nowrap; }
+.logistics-badge-draft { background: #fff3cd; color: #634d00; }
+.logistics-badge-dispatched { background: #d7efff; color: #084c71; }
+.logistics-badge-delivered { background: #d9f0e2; color: #155b30; }
+.logistics-badge-cancelled, .logistics-badge-unknown { background: #e8e8e8; color: #424242; }
+.logistics-dialog { width: min(38rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); overflow: auto; border: 1px solid #c8d5df; border-radius: .6rem; padding: 1.5rem; }
+.logistics-dialog::backdrop { background: rgb(16 32 44 / 55%); }
+.logistics-dialog h2 { margin-top: 0; }
+.logistics-dialog label { max-width: none; }
+.logistics-dialog-actions { justify-content: flex-end; margin-top: 1.25rem; }
+.logistics-inline-search { display: flex; gap: .5rem; align-items: center; }
+.logistics-inline-search button { flex: 0 0 auto; }
+.logistics-inline-search input { min-width: 0; }
+@media (max-width: 700px) {
+  .logistics-section-heading { flex-direction: column; }
+  .logistics-panel { padding: .85rem; }
+  .logistics-tabs { gap: .25rem; }
+  .logistics-tab { flex: 1; padding: .55rem .35rem; }
+}

@@ -15,6 +15,10 @@ final readonly class SalesOrderProvider implements LogisticsOrderProviderContrac
 {
     public function __construct(private Connection $connection) {}
 
+    /** Owner event references use logtrip_assignment_, logtrip_dispatch_, logtrip_cancellation_
+     * or logtrip_delivery_. Audit and assigned-driver IDs reference numeric ME_USERS.ID,
+     * resolved from the authenticated actor's company-scoped USER_ID.
+     */
     public function assertEvent(
         TransactionContext $tx,
         Actor $actor,
@@ -36,9 +40,10 @@ final readonly class SalesOrderProvider implements LogisticsOrderProviderContrac
         $rows = $tx->query(
             'SELECT T.ID, T.STATUS, T.SALES_ORDER_ID, T.ASSIGNED_AT, T.ASSIGNED_BY,
                     T.CANCELLED_AT, T.CANCELLED_BY, T.DISPATCHED_AT, T.DISPATCHED_BY,
-                    T.DELIVERED_AT, T.DELIVERED_BY
-                                 FROM ME_LOG_TRIPS T
-                                 WHERE T.COMPANY_ID = :company_id AND T.ID = :trip_id AND T.SALES_ORDER_ID = :order_id',
+                    T.DELIVERED_AT, T.DELIVERED_BY, D.USER_ID AS DRIVER_USER_ID
+             FROM ME_LOG_TRIPS T LEFT JOIN ME_LOG_DRIVERS D
+               ON D.COMPANY_ID = T.COMPANY_ID AND D.ID = T.DRIVER_ID
+             WHERE T.COMPANY_ID = :company_id AND T.ID = :trip_id AND T.SALES_ORDER_ID = :order_id',
             ['company_id' => $actor->companyId, 'trip_id' => $tripId, 'order_id' => $orderId]
         );
 
@@ -87,6 +92,10 @@ final readonly class SalesOrderProvider implements LogisticsOrderProviderContrac
             throw new AppError('FORBIDDEN', 'Trip event must be recorded by the authenticated actor.', 403);
         }
 
+        if ($event === 'delivery' && (string) ($trip['DRIVER_USER_ID'] ?? '') !== $actorUserId) {
+            throw new AppError('FORBIDDEN', 'Only the assigned driver may record delivery.', 403);
+        }
+
         $actual = $tx->query(
             'SELECT ID AS TRIP_LINE_ID, SALES_LINE_ID AS LINE_ID
              FROM ME_LOG_TRIP_LINES WHERE COMPANY_ID = :company_id AND TRIP_ID = :trip_id ORDER BY ID',
@@ -132,6 +141,8 @@ final readonly class SalesOrderProvider implements LogisticsOrderProviderContrac
         );
         $result = [];
         $seen = [];
+        $tripStatuses = [];
+        $tripLines = [];
 
         foreach ($rows as $row) {
             $status = match ($row['STATUS']) {
@@ -149,11 +160,16 @@ final readonly class SalesOrderProvider implements LogisticsOrderProviderContrac
                 'trip_status' => $status
             ];
 
-            if (isset($seen[$fact['line_id']])) {
+            if (isset($seen[$fact['line_id']]) || isset($tripLines[$fact['trip_line_id']])) {
                 throw new AppError('INVALID_STATE', 'An Order line has multiple current Trip assignments.', 409);
+            }
+            if (isset($tripStatuses[$fact['trip_id']]) && $tripStatuses[$fact['trip_id']] !== $status) {
+                throw new AppError('INVALID_STATE', 'Lines on the same Trip must have the same Trip status.', 409);
             }
 
             $seen[$fact['line_id']] = true;
+            $tripLines[$fact['trip_line_id']] = true;
+            $tripStatuses[$fact['trip_id']] = $status;
             $result[] = $fact;
         }
 

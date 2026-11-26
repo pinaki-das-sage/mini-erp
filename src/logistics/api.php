@@ -26,6 +26,7 @@ use MiniErp\logistics\tripline\TripLineValidator;
  * - query: URL query parameters, e.g. page, page_size, active and search.
  */
 return static function (Api $api, Connection $connection): void {
+    $drivers = new DriverService($connection);
     // Construct the business service using the same connection as the framework.
     $vehicles = new VehicleService($connection);
     // Reusable URL-ID validator: unlike an integer cast, filter_var rejects malformed IDs.
@@ -48,7 +49,7 @@ return static function (Api $api, Connection $connection): void {
         static function (Actor $actor, array $input, array $params, array $query) use ($vehicles): array {
             // use ($vehicles) captures the outer service for this anonymous function.
             // pagination() validates page/size, calculates offset and permits only these filters.
-            return $vehicles->getVehicles($actor, Api::pagination($query, ['active', 'search']));
+            return $vehicles->getVehicles($actor, Api::pagination($query, ['active', 'assignment_status', 'search']));
         }
     );
 
@@ -95,7 +96,6 @@ return static function (Api $api, Connection $connection): void {
             return $vehicles->deleteVehicle($actor, $vehicleId($params), $input);
         }
     );
-    $drivers = new DriverService($connection);
 
     $api->register(
         'GET',
@@ -110,6 +110,37 @@ return static function (Api $api, Connection $connection): void {
         ) use ($drivers): array {
             $pagination = Api::pagination($query);
             return $drivers->getDrivers($actor, $pagination);
+        }
+    );
+
+    $api->register(
+        'GET',
+        '/logistics/drivers/eligible',
+        'logistics.drivers',
+        'read',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($drivers): array {
+            $pagination = Api::pagination($query, ['exclude_trip_id', 'planned_departure_at']);
+            $plannedDepartureAt = $pagination['filters']['planned_departure_at'] ?? null;
+            if ($plannedDepartureAt === null) {
+                throw new \MiniErp\shared\AppError('VALIDATION_ERROR', 'planned_departure_at is required.');
+            }
+            $excludeTripId = null;
+            if (isset($pagination['filters']['exclude_trip_id'])) {
+                $excludeTripId = filter_var(
+                    $pagination['filters']['exclude_trip_id'],
+                    FILTER_VALIDATE_INT,
+                    ['options' => ['min_range' => 1]]
+                );
+                if ($excludeTripId === false) {
+                    throw new \MiniErp\shared\AppError('VALIDATION_ERROR', 'exclude_trip_id must be a positive integer.');
+                }
+            }
+            return $drivers->getEligibleDrivers($actor, $pagination, $plannedDepartureAt, $excludeTripId);
         }
     );
 
@@ -203,9 +234,6 @@ return static function (Api $api, Connection $connection): void {
             array $params,
             array $query
         ) use ($drivers): array {
-            if (!method_exists($drivers, 'getEligibleUsers')) {
-                throw new AppError('DEPENDENCY_UNAVAILABLE', 'Merge the driver-user lookup implementation first.', 503);
-            }
             $pagination = Api::pagination($query, ['search']);
             return $drivers->getEligibleUsers($actor, $pagination);
         }

@@ -121,7 +121,7 @@ final readonly class OrderService
 
     private function listing(Actor $actor, array $query, bool $sources): array
     {
-        $page = Api::pagination($query, ['customer_code', 'warehouse_id', 'from_date', 'to_date', ...($sources ? [] : ['status'])]);
+        $page = Api::pagination($query, ['customer_code', 'warehouse_id', 'from_date', 'to_date', 'search', ...($sources ? [] : ['status'])]);
         $where = 'D.CNY# = :company_id AND D.DOCUMENT_TYPE = :document_type';
         $binds = ['company_id' => $actor->companyId, 'document_type' => $sources ? 'SALES_QUOTE' : 'SALES_ORDER',
             'offset_rows' => $page['offset'], 'limit_rows' => $page['page_size']];
@@ -137,7 +137,14 @@ final readonly class OrderService
                 AND QS.DOCUMENT_TYPE = 'SALES_QUOTE')";
         }
         foreach ($page['filters'] as $key => $value) {
-            if (in_array($key, ['from_date', 'to_date'], true)) {
+            if ($key === 'search') {
+                $search = Validation::text($value, 'Search', 100, false);
+                if ($search !== '') {
+                    $where .= ' AND (UPPER(D.DOCUMENT_NUMBER) LIKE :search OR UPPER(C.CUSTOMER_CODE) LIKE :search OR UPPER(C.CUSTOMER_NAME) LIKE :search)';
+                    $binds['search'] = '%' . mb_strtoupper($search, 'UTF-8') . '%';
+                }
+                continue;
+            } elseif (in_array($key, ['from_date', 'to_date'], true)) {
                 Validation::date($value, $key);
                 $where .= ' AND D.DOCUMENT_DATE ' . ($key === 'from_date' ? '>=' : '<=') . " TO_DATE(:$key, 'YYYY-MM-DD')";
             } elseif ($key === 'status') {

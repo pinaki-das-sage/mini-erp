@@ -2,6 +2,8 @@
 
 The shared framework implements bearer authentication, permission-checked route registration, JSON responses and input/pagination helpers. The note and user-administration APIs are working examples. Customer routes and the Quote backend are implemented; Quote Inventory validation is pending. Other domain endpoints remain team work.
 
+The Logistics browser workspace uses a session-authenticated `/ui-api/logistics` bridge because server-rendered pages do not hold bearer tokens. The bridge is browser-only, verifies CSRF on writes, and delegates to the existing Logistics services; it does not change or replace the bearer-only `/api/v1` contract. Keep permission checks and workflow validation in those services.
+
 ## Agreed Order increment: linear source flow
 
 The current Order contract in `public/openapi.yaml` narrows the broader future workflow described below:

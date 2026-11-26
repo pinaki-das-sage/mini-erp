@@ -13,7 +13,7 @@ class TripValidator
     {
         try {
             $unknown = array_diff(array_keys($data), [
-                'order_number', 'trip_reference', 'vehicle_id', 'driver_id', 'planned_departure_at',
+                'order_number', 'trip_code', 'vehicle_id', 'driver_id', 'planned_departure_at',
             ]);
 
             if ($unknown !== []) {
@@ -22,7 +22,7 @@ class TripValidator
 
             return [
                 'order_number' => $this->validateOrderNumber($data['order_number'] ?? null),
-                'trip_reference' => $this->validatePositiveInteger($data['trip_reference'] ?? null, 'Trip reference'),
+                'trip_code' => $this->validatePositiveInteger($data['trip_code'] ?? null, 'Trip code'),
                 'vehicle_id' => $this->validatePositiveInteger($data['vehicle_id'] ?? null, 'Vehicle ID'),
                 'driver_id' => $this->validatePositiveInteger($data['driver_id'] ?? null, 'Driver ID'),
                 'planned_departure_at' => $this->validatePlannedDepartureAt($data['planned_departure_at'] ?? null),
@@ -102,6 +102,16 @@ class TripValidator
     {
         if ($id <= 0) {
             throw new AppError('VALIDATION_ERROR', 'Trip ID must be a positive integer.');
+        }
+    }
+
+    public function departureDate(mixed $value): string
+    {
+        try {
+            $normalized = $this->validatePlannedDepartureAt($value);
+            return (new \DateTimeImmutable($normalized))->format('Y-m-d');
+        } catch (\InvalidArgumentException $error) {
+            throw new AppError('VALIDATION_ERROR', $error->getMessage());
         }
     }
 

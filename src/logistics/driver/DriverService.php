@@ -47,6 +47,53 @@ class DriverService
         ];
     }
 
+    public function getEligibleDrivers(
+        Actor $actor,
+        array $pagination,
+        string $plannedDepartureAt,
+        ?int $excludeTripId = null
+    ): array
+    {
+        (new Authorization($this->connection))->requirePermission($actor, 'logistics.drivers', 'read');
+        if ($excludeTripId !== null) {
+            $this->validator->validateId($excludeTripId);
+        }
+        $departureDate = (new \MiniErp\logistics\trip\TripValidator())
+            ->departureDate($plannedDepartureAt);
+        return [
+            'items' => $this->repository->findEligible(
+                $actor->companyId,
+                $pagination['offset'],
+                $pagination['page_size'],
+                $departureDate,
+                $excludeTripId,
+            ),
+            'page' => $pagination['page'],
+            'page_size' => $pagination['page_size'],
+        ];
+    }
+
+    // GET /logistics/driver-users
+    public function getEligibleUsers(Actor $actor, array $pagination): array
+    {
+        (new Authorization($this->connection))->requirePermission($actor, 'logistics.drivers', 'read');
+        $search = $pagination['filters']['search'] ?? null;
+        if ($search !== null && mb_strlen($search, 'UTF-8') > 100) {
+            throw new AppError('VALIDATION_ERROR', 'Search must not exceed 100 characters.');
+        }
+
+        return [
+            'items' => $this->repository->findEligibleUsers(
+                $actor->companyId,
+                $pagination['offset'],
+                $pagination['page_size'],
+                $search
+            ),
+            'page' => $pagination['page'],
+            'page_size' => $pagination['page_size']
+        ];
+    }
+
     public function getDriver(Actor $actor, int $id): array
     {
         $authorization = new Authorization($this->connection);

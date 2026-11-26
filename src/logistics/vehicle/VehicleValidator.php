@@ -20,7 +20,7 @@ final class VehicleValidator
             throw new AppError('VALIDATION_ERROR', 'Requested page is too large.', 400);
         }
         $filters = $pagination['filters'] ?? [];
-        if (!is_array($filters) || array_diff(array_keys($filters), ['active', 'search']) !== []) {
+        if (!is_array($filters) || array_diff(array_keys($filters), ['active', 'assignment_status', 'search']) !== []) {
             throw new AppError('VALIDATION_ERROR', 'Unsupported vehicle filter.', 400);
         }
         foreach ($filters as $value) {
@@ -30,6 +30,9 @@ final class VehicleValidator
         }
         if (array_key_exists('active', $filters) && !in_array($filters['active'], ['true', 'false'], true)) {
             throw new AppError('VALIDATION_ERROR', 'active must be true or false.', 400);
+        }
+        if (array_key_exists('assignment_status', $filters) && !in_array($filters['assignment_status'], ['AVAILABLE', 'ASSIGNED'], true)) {
+            throw new AppError('VALIDATION_ERROR', 'assignment_status must be AVAILABLE or ASSIGNED.', 400);
         }
         if (array_key_exists('search', $filters)) {
             $filters['search'] = trim($filters['search']);

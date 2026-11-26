@@ -26,6 +26,15 @@ final class VehicleRepository
             $where[] = 'V.ISACTIVE = :active';
             $parameters['active'] = $filters['active'] === 'true' ? 'T' : 'F';
         }
+        if (array_key_exists('assignment_status', $filters)) {
+            $assignment = "EXISTS (
+                SELECT 1 FROM ME_LOG_TRIPS T
+                WHERE T.COMPANY_ID = V.COMPANY_ID AND T.VEHICLE_ID = V.ID AND T.STATUS IN ('D', 'S')
+            )";
+            $where[] = $filters['assignment_status'] === 'ASSIGNED'
+                ? $assignment
+                : 'NOT ' . $assignment;
+        }
         if (isset($filters['search']) && $filters['search'] !== '') {
             $parameters['search'] = '%' . str_replace(
                 ['!', '%', '_'],
@@ -36,10 +45,35 @@ final class VehicleRepository
                 OR UPPER(V.REGISTRATION_NUMBER) LIKE :search ESCAPE '!'
                 OR UPPER(V.DESCRIPTION) LIKE :search ESCAPE '!')";
         }
+        $sql = "SELECT V.ID, V.VEHICLE_CODE, V.REGISTRATION_NUMBER, V.DESCRIPTION, V.CAPACITY, V.ISACTIVE,
+                       CASE WHEN EXISTS (
+                           SELECT 1 FROM ME_LOG_TRIPS T
+                           WHERE T.COMPANY_ID = V.COMPANY_ID AND T.VEHICLE_ID = V.ID AND T.STATUS IN ('D', 'S')
+                       ) THEN 'ASSIGNED' ELSE 'AVAILABLE' END AS ASSIGNMENT_STATUS
+                FROM ME_LOG_VEHICLES V WHERE " . implode(' AND ', $where) . '
+                ORDER BY V.VEHICLE_CODE, V.ID OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY';
+        return $this->connection->query($sql, $parameters);
+    }
+
+    public function findEligible(int $companyId, int $offset, int $pageSize, ?int $excludeTripId = null): array
+    {
+        $parameters = ['company_id' => $companyId, 'offset' => $offset, 'page_size' => $pageSize];
+        $excludeTrip = '';
+        if ($excludeTripId !== null) {
+            $excludeTrip = ' AND T.ID <> :exclude_trip_id';
+            $parameters['exclude_trip_id'] = $excludeTripId;
+        }
         return $this->connection->query(
-            'SELECT V.ID, V.VEHICLE_CODE, V.REGISTRATION_NUMBER, V.DESCRIPTION, V.CAPACITY, V.ISACTIVE
-             FROM ME_LOG_VEHICLES V WHERE ' . implode(' AND ', $where) . '
-             ORDER BY V.VEHICLE_CODE, V.ID OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY',
+            "SELECT V.ID, V.VEHICLE_CODE, V.REGISTRATION_NUMBER, V.DESCRIPTION, V.CAPACITY, V.ISACTIVE,
+                    'AVAILABLE' AS ASSIGNMENT_STATUS
+             FROM ME_LOG_VEHICLES V
+             WHERE V.COMPANY_ID = :company_id AND V.ISACTIVE = 'T'
+               AND NOT EXISTS (
+                   SELECT 1 FROM ME_LOG_TRIPS T
+                   WHERE T.COMPANY_ID = V.COMPANY_ID AND T.VEHICLE_ID = V.ID
+                     AND T.STATUS IN ('D', 'S')$excludeTrip
+               )
+             ORDER BY V.VEHICLE_CODE, V.ID OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY",
             $parameters
         );
     }

@@ -33,6 +33,35 @@ class DriverRepository
         ]));
     }
 
+    public function findEligible(
+        int $companyId,
+        int $offset,
+        int $pageSize,
+        string $departureDate,
+        ?int $excludeTripId = null
+    ): array
+    {
+        $sql = "SELECT D.ID, D.DRIVER_CODE, D.USER_ID, D.FIRST_NAME, D.LAST_NAME, D.PHONE,
+            D.LICENCE_NUMBER, TO_CHAR(D.LICENCE_EXPIRY, 'YYYY-MM-DD') AS LICENCE_EXPIRY, D.ISACTIVE
+            FROM ME_LOG_DRIVERS D
+            WHERE D.COMPANY_ID = :company_id AND D.ISACTIVE = 'T'
+            AND TRUNC(D.LICENCE_EXPIRY) >= TO_DATE(:departure_date, 'YYYY-MM-DD')
+            AND (D.USER_ID IS NULL OR EXISTS (
+                SELECT 1 FROM ME_USERS U WHERE U.COMPANY_ID = D.COMPANY_ID AND U.ID = D.USER_ID AND U.ACTIVE = 1
+            ))
+            AND NOT EXISTS (SELECT 1 FROM ME_LOG_TRIPS T WHERE T.COMPANY_ID = D.COMPANY_ID
+                AND T.DRIVER_ID = D.ID AND T.STATUS IN ('D', 'S')";
+        $parameters = ['company_id' => $companyId, 'departure_date' => $departureDate];
+        if ($excludeTripId !== null) {
+            $sql .= ' AND T.ID <> :exclude_trip_id';
+            $parameters['exclude_trip_id'] = $excludeTripId;
+        }
+        $sql .= ') ORDER BY D.ID OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY';
+        $parameters['offset'] = $offset;
+        $parameters['page_size'] = $pageSize;
+        return array_map($this->mapRow(...), $this->connection->query($sql, $parameters));
+    }
+
     public function findById(int $companyId, int $id): array
     {
         $sql = 'SELECT ID, DRIVER_CODE, USER_ID, FIRST_NAME, LAST_NAME, PHONE,
@@ -147,6 +176,30 @@ class DriverRepository
         $result = $this->connection->query($sql, $params);
 
         return $result && $result[0]['COUNT'] > 0;
+    }
+
+    public function findEligibleUsers(int $companyId, int $offset, int $pageSize, ?string $search = null): array
+    {
+        $sql = 'SELECT U.ID, U.USER_ID AS FOUNDATION_USER_ID, U.USERNAME, U.DISPLAY_NAME FROM ME_USERS U
+                WHERE U.COMPANY_ID = :companyId AND U.ACTIVE = 1
+                AND NOT EXISTS (SELECT 1 FROM ME_LOG_DRIVERS D WHERE D.COMPANY_ID = U.COMPANY_ID AND D.USER_ID = U.ID AND D.ISACTIVE = \'T\')';
+        $params = ['companyId' => $companyId];
+
+        if ($search !== null && $search !== '') {
+            $sql .= ' AND (UPPER(U.USER_ID) LIKE :search OR UPPER(U.USERNAME) LIKE :search OR UPPER(U.DISPLAY_NAME) LIKE :search)';
+            $params['search'] = '%' . mb_strtoupper($search, 'UTF-8') . '%';
+        }
+
+        $sql .= ' ORDER BY U.USERNAME OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY';
+        $params['offset'] = $offset;
+        $params['page_size'] = $pageSize;
+
+        return array_map(static fn (array $row): array => [
+            'id' => (int) $row['ID'],
+            'foundation_user_id' => (string) $row['FOUNDATION_USER_ID'],
+            'username' => $row['USERNAME'],
+            'display_name' => $row['DISPLAY_NAME'],
+        ], $this->connection->query($sql, $params));
     }
 
     public function findUserIdByCode(int $companyId, string $userCode): ?int

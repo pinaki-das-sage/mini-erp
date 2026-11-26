@@ -34,6 +34,28 @@ final class VehicleService
         ];
     }
 
+    public function getEligibleVehicles(Actor $actor, array $pagination, ?int $excludeTripId = null): array
+    {
+        $this->authorize($actor, 'read');
+        $pagination = $this->validator->validatePagination($pagination);
+        if ($excludeTripId !== null) {
+            $this->validator->validateId($excludeTripId);
+        }
+        return [
+            'items' => array_map(
+                $this->present(...),
+                $this->repository->findEligible(
+                    $actor->companyId,
+                    ($pagination['page'] - 1) * $pagination['page_size'],
+                    $pagination['page_size'],
+                    $excludeTripId
+                )
+            ),
+            'page' => $pagination['page'],
+            'page_size' => $pagination['page_size'],
+        ];
+    }
+
     public function getVehicleById(Actor $actor, int $id): array
     {
         $this->authorize($actor, 'read');
@@ -87,10 +109,8 @@ final class VehicleService
                 throw new AppError('RESOURCE_IN_USE', 'Vehicle is assigned to a Draft or Dispatched trip. It must be free before changing capacity or setting is_active to F.', 409);
             }
             if (isset($changes['VEHICLE_CODE']) || isset($changes['REGISTRATION_NUMBER'])) {
-                // Preserve the existing duplicate-check scope during this structural refactor.
-                // The hardcoded company is a known issue documented in vehicle-api-design.md.
                 if ($this->repository->duplicateExists(
-                    1,
+                    $actor->companyId,
                     $changes['VEHICLE_CODE'] ?? $vehicle['VEHICLE_CODE'],
                     $changes['REGISTRATION_NUMBER'] ?? $vehicle['REGISTRATION_NUMBER'],
                     $id

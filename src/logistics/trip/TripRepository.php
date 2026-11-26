@@ -79,29 +79,29 @@ class TripRepository
         return $result ? $this->mapRow($result[0]) : [];
     }
 
-    public function tripReferenceExists(int $companyId, int $tripReference, ?TransactionContext $tx = null): bool
+    public function tripCodeExists(int $companyId, int $tripCode, ?TransactionContext $tx = null): bool
     {
         $result = $this->query(
-            'SELECT COUNT(*) AS COUNT FROM ME_LOG_TRIPS WHERE COMPANY_ID = :companyId AND TRIP_CODE = :tripReference',
-            ['companyId' => $companyId, 'tripReference' => $tripReference],
+            'SELECT COUNT(*) AS COUNT FROM ME_LOG_TRIPS WHERE COMPANY_ID = :companyId AND TRIP_CODE = :tripCode',
+            ['companyId' => $companyId, 'tripCode' => $tripCode],
             $tx
         );
 
         return $result && $result[0]['COUNT'] > 0;
     }
 
-    public function findTripIdByReference(
+    public function findTripIdByCode(
         TransactionContext $tx,
         int $companyId,
-        int $tripReference
+        int $tripCode
     ): ?int {
         $rows = $tx->query(
-            'SELECT ID FROM ME_LOG_TRIPS WHERE COMPANY_ID = :companyId AND TRIP_CODE = :tripReference',
-            ['companyId' => $companyId, 'tripReference' => $tripReference]
+            'SELECT ID FROM ME_LOG_TRIPS WHERE COMPANY_ID = :companyId AND TRIP_CODE = :tripCode',
+            ['companyId' => $companyId, 'tripCode' => $tripCode]
         );
 
         if (count($rows) > 1) {
-            throw new AppError('INVALID_STATE', 'Trip reference is not unique within the company.', 409);
+            throw new AppError('INVALID_STATE', 'Trip code is not unique within the company.', 409);
         }
 
         return $rows === [] ? null : (int) $rows[0]['ID'];
@@ -132,6 +132,27 @@ class TripRepository
         ], $tx);
 
         return $result && $result[0]['COUNT'] > 0;
+    }
+
+    public function driverLicenceValidForDate(
+        int $companyId,
+        int $driverId,
+        string $departureDate,
+        ?TransactionContext $tx = null
+    ): bool {
+        $rows = $this->query(
+            "SELECT ID FROM ME_LOG_DRIVERS
+             WHERE COMPANY_ID = :companyId AND ID = :driverId AND ISACTIVE = 'T'
+               AND TRUNC(LICENCE_EXPIRY) >= TO_DATE(:departureDate, 'YYYY-MM-DD')",
+            [
+                'companyId' => $companyId,
+                'driverId' => $driverId,
+                'departureDate' => $departureDate,
+            ],
+            $tx
+        );
+
+        return count($rows) === 1;
     }
 
     public function lockVehicle(TransactionContext $tx, int $companyId, int $vehicleId): bool
@@ -217,7 +238,7 @@ class TripRepository
                     COMPANY_ID, TRIP_CODE, VEHICLE_ID, DRIVER_ID, PLANNED_DEPARTURE_AT, STATUS,
                     SALES_ORDER_ID, ASSIGNED_AT, ASSIGNED_BY, CREATED_BY, UPDATED_BY
                 ) VALUES (
-                    :companyId, :tripReference, :vehicleId, :driverId,
+                    :companyId, :tripCode, :vehicleId, :driverId,
                     TO_TIMESTAMP_TZ(:plannedDepartureAt, \'YYYY-MM-DD HH24:MI:SS.FF6 TZH:TZM\'),
                     \'D\', :salesOrderId, SYSTIMESTAMP, :actorId, :actorId, :actorId
                 )';
@@ -225,7 +246,7 @@ class TripRepository
         try {
             $tx->execute($sql, [
                 'companyId' => $companyId,
-                'tripReference' => $data['trip_reference'],
+                'tripCode' => $data['trip_code'],
                 'vehicleId' => $data['vehicle_id'],
                 'driverId' => $data['driver_id'],
                 'plannedDepartureAt' => $data['planned_departure_at'],
@@ -234,15 +255,15 @@ class TripRepository
             ]);
         } catch (DatabaseError $error) {
             if ($error->oracleCode === 1) {
-                throw new AppError('CONFLICT', 'Trip reference already exists.', 409);
+                throw new AppError('CONFLICT', 'Trip code already exists.', 409);
             }
 
             throw $error;
         }
 
         $result = $tx->query(
-            'SELECT ID FROM ME_LOG_TRIPS WHERE COMPANY_ID = :companyId AND TRIP_CODE = :tripReference',
-            ['companyId' => $companyId, 'tripReference' => $data['trip_reference']]
+            'SELECT ID FROM ME_LOG_TRIPS WHERE COMPANY_ID = :companyId AND TRIP_CODE = :tripCode',
+            ['companyId' => $companyId, 'tripCode' => $data['trip_code']]
         );
 
         if (count($result) !== 1) {
@@ -326,7 +347,7 @@ class TripRepository
 
         return [
             'id' => (int) $rows[0]['ID'],
-            'trip_reference' => (int) $rows[0]['TRIP_CODE'],
+            'trip_code' => (int) $rows[0]['TRIP_CODE'],
             'vehicle_id' => (int) $rows[0]['VEHICLE_ID'],
             'driver_id' => (int) $rows[0]['DRIVER_ID'],
             'sales_order_id' => (int) $rows[0]['SALES_ORDER_ID'],
@@ -556,7 +577,7 @@ class TripRepository
     {
         return [
             'id' => (int) $row['ID'],
-            'trip_reference' => (int) $row['TRIP_CODE'],
+            'trip_code' => (int) $row['TRIP_CODE'],
             'vehicle_id' => (int) $row['VEHICLE_ID'],
             'driver_id' => (int) $row['DRIVER_ID'],
             'planned_departure_at' => $row['PLANNED_DEPARTURE_AT'],

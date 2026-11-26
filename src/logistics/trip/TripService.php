@@ -67,10 +67,10 @@ class TripService
 
         return (new TransactionManager($this->connection))->run(
             function (TransactionContext $tx) use ($actor, $actorId, $data, $fulfillment): array {
-                $existingId = $this->repository->findTripIdByReference(
+                $existingId = $this->repository->findTripIdByCode(
                     $tx,
                     $actor->companyId,
-                    $data['trip_reference']
+                    $data['trip_code']
                 );
 
                 if ($existingId !== null) {
@@ -92,7 +92,7 @@ class TripService
                             $data['planned_departure_at']
                         )
                     ) {
-                        throw new AppError('CONFLICT', 'Trip reference already exists for a different assignment.', 409);
+                        throw new AppError('CONFLICT', 'Trip code already exists for a different assignment.', 409);
                     }
 
                     // Trip and Sales assignment commit atomically, so an existing Draft Trip is a completed replay.
@@ -105,7 +105,8 @@ class TripService
                     $tx,
                     $actor->companyId,
                     $data['vehicle_id'],
-                    $data['driver_id']
+                    $data['driver_id'],
+                    $data['planned_departure_at']
                 );
 
                 $order = $fulfillment->lockOrderForEvent($tx, $actor, $data['order_number'], 'assignment');
@@ -143,7 +144,7 @@ class TripService
                 );
                 $eventInput = [
                     'expected_version' => $this->orderVersion($order),
-                    'event_reference' => $this->eventReference('assignment', $actor->companyId, $data['order_number'], $data['trip_reference']),
+                    'event_reference' => $this->eventReference('assignment', $actor->companyId, $data['order_number'], $data['trip_code']),
                     'trip_id' => (string) $tripId,
                     'lines' => $mapping
                 ];
@@ -178,6 +179,7 @@ class TripService
                     $actor->companyId,
                     $data['vehicle_id'],
                     $data['driver_id'],
+                    $data['planned_departure_at'],
                     $id
                 );
                 $trip = $this->repository->lockTrip($tx, $actor->companyId, $id);
@@ -279,6 +281,7 @@ class TripService
                         $actor->companyId,
                         $snapshot['vehicle_id'],
                         $snapshot['driver_id'],
+                        $snapshot['planned_departure_at'],
                         $id
                     );
                 }
@@ -481,6 +484,7 @@ class TripService
         int $companyId,
         int $vehicleId,
         int $driverId,
+        string $plannedDepartureAt,
         ?int $excludeTripId = null
     ): void {
         if (!$this->repository->lockVehicle($tx, $companyId, $vehicleId)) {
@@ -497,6 +501,15 @@ class TripService
 
         if ($this->repository->driverHasActiveTrip($companyId, $driverId, $excludeTripId, $tx)) {
             throw new AppError('CONFLICT', 'Driver is already assigned to an active trip.', 409);
+        }
+
+        if (!$this->repository->driverLicenceValidForDate(
+            $companyId,
+            $driverId,
+            $this->validator->departureDate($plannedDepartureAt),
+            $tx
+        )) {
+            throw new AppError('INVALID_STATE', 'Driver licence is not valid for the planned departure.', 409);
         }
     }
 
