@@ -13,7 +13,7 @@
 
     <article>
         <h2>Quotes</h2>
-        <p>Prepare quotations, maintain item lines and submit quotes.</p>
+        <p>Prepare quotations, maintain item lines and submit quotes for ordering.</p>
         {if isset($data.salesUrls.quotes)}
         <a class="button" href="{$data.salesUrls.quotes}">
             View quotes
@@ -31,7 +31,7 @@
 
     <article>
         <h2>Invoices</h2>
-        <p>Create draft invoices, review totals and submit invoices.</p>
+        <p>Create draft invoices, review totals and submit invoices for payment.</p>
         {if isset($data.salesUrls.invoices)}
         <a class="button" href="{$data.salesUrls.invoices}">
             View invoices
