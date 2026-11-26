@@ -12,6 +12,7 @@ use MiniErp\shared\security\AuthService;
 use MiniErp\shared\security\Security;
 use MiniErp\shared\security\UserService;
 use MiniErp\shared\view\Renderer;
+use MiniErp\sales\SalesPages;
 
 final class Kernel
 {
@@ -83,6 +84,11 @@ final class Kernel
                     return $this->page('shared/home.tpl', $actor->companyName, ['actor' => $actor]);
                 }
                 return $this->page('shared/security/login.tpl', 'Sign in to Mini ERP');
+            }
+            if ($path === '/modules/sales' || str_starts_with($path, '/modules/sales/')) {
+                $actor = $this->actor();
+                return (new SalesPages($this->db(), $this->paths, Security::csrfToken($this->session)))
+                    ->handle($method, $path, $actor, $input, $query);
             }
             if ($method === 'GET' && preg_match('#^/modules/(inventory|purchasing|sales|logistics)$#', $path, $match)) {
                 return $this->page($match[1] . '/index.tpl', ucfirst($match[1]), ['module' => $match[1], 'actor' => $this->actor()]);

@@ -109,7 +109,7 @@ final class RendererTest extends TestCase
         ]);
         self::assertStringContainsString('All registered permissions.', $admin);
         self::assertStringNotContainsString('data-operation="permissions"', $admin);
-        foreach (['inventory', 'purchasing', 'sales', 'logistics'] as $module) {
+        foreach (['inventory', 'purchasing', 'logistics'] as $module) {
             $html = $renderer->render($module . '/index.tpl', 'Module', 'csrf', ['actor' => $actor, 'module' => $module]);
             self::assertStringContainsString('This is the ' . $module . ' team', $html);
         }
@@ -126,5 +126,39 @@ final class RendererTest extends TestCase
                 self::assertSame('Unknown view template.', $error->getMessage());
             }
         }
+    }
+        public function testSalesLandingShowsNavigationWithMountedUrls(): void
+    {
+        $paths = new WebPath('/training');
+        $renderer = new Renderer($paths);
+        $actor = new Actor('admin', 'admin', [], 1, true);
+
+        $salesUrls = [];
+
+        foreach (['customers', 'quotes', 'orders', 'invoices', 'payments'] as $section) {
+            $salesUrls[$section] = $paths->url('/modules/sales/' . $section);
+        }
+
+        $html = $renderer->render('sales/index.tpl', 'Sales', 'csrf', [
+            'actor' => $actor,
+            'module' => 'sales',
+            'salesUrls' => $salesUrls,
+        ]);
+
+        foreach (['customers', 'quotes', 'invoices', 'payments'] as $section) {
+            self::assertStringContainsString(
+                'href="' . $salesUrls[$section] . '"',
+                $html,
+            );
+        }
+
+        self::assertStringContainsString('<h2>Customers</h2>', $html);
+        self::assertStringContainsString('<h2>Invoices</h2>', $html);
+        self::assertStringContainsString('Under construction', $html);
+        self::assertStringNotContainsString('href=""', $html);
+        self::assertStringNotContainsString(
+            'href="' . $salesUrls['orders'] . '"',
+            $html,
+        );
     }
 }
