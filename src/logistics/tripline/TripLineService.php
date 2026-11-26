@@ -4,14 +4,11 @@ declare(strict_types=1);
 
 namespace MiniErp\logistics\tripline;
 
-use MiniErp\shared\AppError;
 use MiniErp\shared\database\Connection;
-use MiniErp\shared\database\DatabaseError;
-use MiniErp\shared\database\TransactionManager;
 use MiniErp\shared\security\Actor;
 use MiniErp\shared\security\Authorization;
 
-/** Draft planning-line CRUD. Trip lifecycle and Sales assignment posting belong to teammates. */
+/** Read existing trip lines. Creation and lifecycle changes belong to the trip workflow. */
 final class TripLineService
 {
     private TripLineRepository $repository;
@@ -43,112 +40,6 @@ final class TripLineService
         return $this->present($this->repository->find($actor->companyId, $this->validator->id($id)));
     }
 
-    public function createTripLine(Actor $actor, array $input): array
-    {
-        $this->authorize($actor, 'create');
-        $input = $this->validator->create($input);
-        return $this->write(function () use ($actor, $input): array {
-            $trip = $this->repository->lockDraftTrip($actor->companyId, $input['trip_id']);
-            $data = $this->sourceData($actor, $trip, $input, null);
-            $row = $this->repository->create(
-                $actor->companyId,
-                $input['trip_id'],
-                $data,
-                $this->repository->auditUserId($actor->companyId, $actor->id)
-            );
-            $this->repository->assertCapacity($actor->companyId, $trip);
-            return $this->present($row);
-        });
-    }
-
-    public function updateTripLine(Actor $actor, int $id, array $input): array
-    {
-        $this->authorize($actor, 'update');
-        $id = $this->validator->id($id);
-        $input = $this->validator->update($input);
-        return $this->write(function () use ($actor, $id, $input): array {
-            [$trip, $line] = $this->lockedLine($actor, $id);
-            // Check the old Sales link before replacing it so published assignments cannot be orphaned.
-            $this->repository->lockSource($actor->companyId, $trip['SALES_ORDER_ID'], $line['SALES_LINE_ID']);
-            $input['sales_line_id'] ??= (int) $line['SALES_LINE_ID'];
-            $data = $this->sourceData($actor, $trip, $input, $id);
-            $row = $this->repository->update(
-                $actor->companyId,
-                $id,
-                $data,
-                $this->repository->auditUserId($actor->companyId, $actor->id)
-            );
-            $this->repository->assertCapacity($actor->companyId, $trip);
-            return $this->present($row);
-        });
-    }
-
-    public function deleteTripLine(Actor $actor, int $id, array $input): array
-    {
-        $this->authorize($actor, 'delete');
-        $id = $this->validator->id($id);
-        $this->validator->delete($input);
-        return $this->write(function () use ($actor, $id): array {
-            [$trip, $line] = $this->lockedLine($actor, $id);
-            $this->repository->lockSource($actor->companyId, $trip['SALES_ORDER_ID'], $line['SALES_LINE_ID']);
-            $this->repository->delete($actor->companyId, $id);
-            return ['id' => $id, 'deleted' => true];
-        });
-    }
-
-    private function lockedLine(Actor $actor, int $id): array
-    {
-        $snapshot = $this->repository->find($actor->companyId, $id);
-        $trip = $this->repository->lockDraftTrip($actor->companyId, (int) $snapshot['TRIP_ID']);
-        $line = $this->repository->find($actor->companyId, $id, true);
-        if ((string) $line['TRIP_ID'] !== (string) $trip['ID']) {
-            throw new AppError('CONFLICT', 'Trip line moved. Retry the request.', 409);
-        }
-        return [$trip, $line];
-    }
-
-    private function sourceData(Actor $actor, array $trip, array $input, ?int $excludeId): array
-    {
-        $source = $this->repository->lockSource($actor->companyId, $trip['SALES_ORDER_ID'], $input['sales_line_id']);
-        $quantity = (string) $source['QUANTITY'];
-        $product = (string) $source['PRODUCT_ID'];
-        if (!preg_match('/\A[1-9][0-9]{0,9}\z/D', $quantity) || !preg_match('/\A[1-9][0-9]{0,9}\z/D', $product)) {
-            throw new AppError('INVALID_STATE', 'Sales returned an invalid product or whole quantity.', 409);
-        }
-        // Optional client values are assertions, not authority to split an original Sales line.
-        if ((isset($input['quantity']) && (string) $input['quantity'] !== $quantity)
-            || (isset($input['product_id']) && (string) $input['product_id'] !== $product)
-        ) {
-            throw new AppError('VALIDATION_ERROR', 'product_id and quantity must match the complete Sales line.', 400);
-        }
-        if ($this->repository->duplicateExists($actor->companyId, $input['sales_line_id'], $excludeId)) {
-            throw new AppError('DUPLICATE_TRIP_LINE', 'Sales line already belongs to a non-cancelled trip.', 409);
-        }
-        $weight = $this->repository->weight($actor->companyId, $product, $quantity);
-        return [
-            'sales_line_id' => $input['sales_line_id'],
-            'product_id' => $product,
-            'quantity' => $quantity,
-            'total_weight' => $weight,
-            'line_load' => $weight
-        ];
-    }
-
-    private function write(callable $operation): array
-    {
-        try {
-            return (new TransactionManager($this->connection))->run($operation);
-        } catch (DatabaseError $error) {
-            if ($error->oracleCode === 1) {
-                throw new AppError('DUPLICATE_TRIP_LINE', 'Trip line conflicts with an existing record.', 409);
-            }
-            if ($error->oracleCode === 2292) {
-                throw new AppError('REFERENCED_RECORD', 'Trip line is referenced by another record.', 409);
-            }
-            throw $error;
-        }
-    }
-
     private function authorize(Actor $actor, string $operation): void
     {
         (new Authorization($this->connection))->requirePermission($actor, 'logistics.trip_lines', $operation);
@@ -156,14 +47,110 @@ final class TripLineService
 
     private function present(array $row): array
     {
+        $trip = $this->related($row, 'TRIP_', [
+            'trip_code' => 'int',
+            'vehicle_id' => 'int',
+            'driver_id' => 'int',
+            'sales_order_id' => 'int',
+            'status' => 'text',
+            'planned_departure_at' => 'text',
+            'assigned_at' => 'text',
+            'assigned_by' => 'int',
+            'cancelled_at' => 'text',
+            'cancelled_by' => 'int',
+            'cancellation_reason' => 'text',
+            'dispatched_at' => 'text',
+            'dispatched_by' => 'int',
+            'delivered_at' => 'text',
+            'delivered_by' => 'int',
+            'created_at' => 'text',
+            'updated_at' => 'text',
+        ]);
+        $salesLine = null;
+        $product = null;
+
+        // Keep the original line snapshot, but stop live lookups after a cancelled/missing trip.
+        // C is Delivered; only X is Cancelled.
+        if ($trip !== null && $trip['status'] !== 'X') {
+            $salesLine = $this->related($row, 'SALE_', [
+                'document_record_id' => 'int',
+                'line_number' => 'int',
+                'product_id' => 'int',
+                'description' => 'text',
+                'quantity' => 'int',
+                'unit_price' => 'float',
+                'source_line_record_id' => 'int',
+                'trip_id' => 'int',
+                'logistics_trip_line_id' => 'int',
+                'trip_status' => 'text',
+                'whencreated' => 'text',
+                'whenmodified' => 'text',
+            ]);
+            if ($salesLine !== null) {
+                $product = $this->related($row, 'PRODUCT_', [
+                    'product_name' => 'text',
+                    'sku' => 'text',
+                    'warehouse_id' => 'text',
+                    'unit_label' => 'text',
+                    'unit_weight_grams' => 'float',
+                    'is_active' => 'text',
+                    'when_created' => 'text',
+                    'when_updated' => 'text',
+                ]);
+                if ($product !== null) {
+                    // The balance is current Inventory state, not a dispatch/delivery snapshot.
+                    $product['stock_balance'] = $row['STOCK_PRODUCT_ID'] === null ? null : [
+                        'product_id' => $this->number($row['STOCK_PRODUCT_ID']),
+                        'on_hand' => $this->number($row['STOCK_ON_HAND']),
+                        'reserved' => $this->number($row['STOCK_RESERVED']),
+                        'available' => $this->number($row['STOCK_AVAILABLE']),
+                        'when_updated' => $row['STOCK_WHEN_UPDATED'],
+                    ];
+                }
+            }
+        }
+
         return [
-            'id' => (int) $row['ID'],
-            'trip_id' => (int) $row['TRIP_ID'],
-            'sales_line_id' => (string) $row['SALES_LINE_ID'],
-            'product_id' => (string) $row['PRODUCT_ID'],
-            'quantity' => (string) $row['QUANTITY'],
-            'total_weight' => (string) $row['TOTAL_WEIGHT'],
-            'line_load' => (string) $row['LINE_LOAD']
+            'id' => $this->number($row['ID']),
+            'trip_id' => $this->number($row['TRIP_ID']),
+            'sales_line_id' => $this->number($row['SALES_LINE_ID']),
+            'product_id' => $this->number($row['PRODUCT_ID']),
+            'quantity' => $this->number($row['QUANTITY']),
+            'total_weight' => $this->number($row['TOTAL_WEIGHT'], true),
+            'line_load' => $this->number($row['LINE_LOAD'], true),
+            'created_at' => $row['CREATED_AT'],
+            'updated_at' => $row['UPDATED_AT'],
+            'trip' => $trip,
+            'sales_line' => $salesLine,
+            'product' => $product,
         ];
+    }
+
+    /** Build a nested relation; LEFT JOIN misses stay null instead of becoming fake zero IDs. */
+    private function related(array $row, string $prefix, array $fields): ?array
+    {
+        if ($row[$prefix . 'IDENTITY'] === null) {
+            return null;
+        }
+        $result = ['id' => $this->number($row[$prefix . 'IDENTITY'])];
+        foreach ($fields as $field => $type) {
+            $value = $row[$prefix . strtoupper($field)];
+            $result[$field] = $type === 'text' ? $value : $this->number($value, $type === 'float');
+        }
+        return $result;
+    }
+
+    /** Cast only known NUMBER columns. VARCHAR codes and nulls retain their original meaning. */
+    private function number(mixed $value, bool $decimal = false): int|float|null
+    {
+        if ($value === null) {
+            return null;
+        }
+        if ($decimal) {
+            return (float) $value;
+        }
+        $integer = filter_var((string) $value, FILTER_VALIDATE_INT);
+        // Oracle NUMBER IDs can exceed PHP's integer range; avoid silently clamping them.
+        return $integer === false ? (float) $value : $integer;
     }
 }

@@ -167,11 +167,11 @@ final class VehicleService
     private function present(array $row): array
     {
         return [
-            'id' => $row['ID'],
-            'vehicle_code' => $row['VEHICLE_CODE'],
+            'id' => (int) $row['ID'],
+            'vehicle_code' => (int) $row['VEHICLE_CODE'],
             'registration_number' => $row['REGISTRATION_NUMBER'],
             'description' => $row['DESCRIPTION'],
-            'capacity' => (string) $row['CAPACITY'],
+            'capacity' => (float) $row['CAPACITY'],
             'is_active' => $row['ISACTIVE'],
             ...(array_key_exists('ASSIGNMENT_STATUS', $row) ? ['assignment_status' => $row['ASSIGNMENT_STATUS']] : []),
         ];

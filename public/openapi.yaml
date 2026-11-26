@@ -569,7 +569,7 @@ paths:
   /logistics/trip-lines:
     get:
       tags: [Trips]
-      summary: List company trip planning lines
+      summary: List saved company trip lines
       operationId: listPlanningTripLines
       parameters:
         - $ref: '#/components/parameters/Page'
@@ -581,49 +581,21 @@ paths:
             minimum: 1
       responses:
         '200':
-          description: Shared envelope with result.items, page and page_size
+          description: Shared envelope with enriched trip-line items, page and page_size
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GenericSuccess'
+                $ref: '#/components/schemas/PlanningTripLineListEnvelope'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
-    post:
-      tags: [Trips]
-      summary: Create an unpublished Draft planning line
-      description: >
-        Reads the complete Sales source quantity and Inventory product weight.
-        Does not post Sales assignment fields or change Inventory or trip status.
-        Published Sales assignments must use the team's coordinated workflow.
-      operationId: createPlanningTripLine
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PlanningTripLineCreate'
-      responses:
-        '201':
-          description: Trip line created in the shared response envelope
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlanningTripLineEnvelope'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-
   /logistics/trip-lines/{id}:
     parameters:
       - $ref: '#/components/parameters/Id'
     get:
       tags: [Trips]
-      summary: Get a company trip planning line
+      summary: Get a saved company trip line
       operationId: getPlanningTripLine
       responses:
         '200':
@@ -634,58 +606,6 @@ paths:
                 $ref: '#/components/schemas/PlanningTripLineEnvelope'
         '404':
           $ref: '#/components/responses/NotFound'
-
-  /logistics/trip-lines/{id}/update:
-    parameters:
-      - $ref: '#/components/parameters/Id'
-    post:
-      tags: [Trips]
-      summary: Update or refresh an unpublished Draft planning line
-      operationId: updatePlanningTripLine
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PlanningTripLineUpdate'
-      responses:
-        '200':
-          description: Trip line updated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlanningTripLineEnvelope'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-
-  /logistics/trip-lines/{id}/delete:
-    parameters:
-      - $ref: '#/components/parameters/Id'
-    post:
-      tags: [Trips]
-      summary: Delete an unpublished Draft planning line
-      operationId: deletePlanningTripLine
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/Command'
-      responses:
-        '200':
-          description: Shared envelope with result.id and result.deleted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GenericSuccess'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
 
   /logistics/trips:
     post:
@@ -813,79 +733,6 @@ paths:
                 $ref: '#/components/schemas/TripEnvelope'
         '400':
           $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-
-  /logistics/trips/{id}/lines:
-    parameters:
-      - $ref: '#/components/parameters/Id'
-    post:
-      tags: [Trips]
-      summary: Assign one complete Sales Order line to a Draft trip
-      description: >
-        A Trip may reference only one SUBMITTED Sales Order. Assign complete
-        allocated source lines, never partial quantities. The same Sales line
-        cannot be assigned to another non-cancelled Trip.
-      operationId: addTripLine
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              allOf:
-                - $ref: '#/components/schemas/VersionedCommand'
-                - type: object
-                  required: [sales_order_id, sales_line_id, expected_sales_order_version]
-                  properties:
-                    sales_order_id:
-                      type: string
-                    sales_line_id:
-                      type: string
-                    expected_sales_order_version:
-                      type: integer
-                      minimum: 1
-      responses:
-        '200':
-          description: Complete Sales Order line assigned to the Trip
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TripLineEnvelope'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-
-  /logistics/trips/{id}/lines/{sales_line_id}:
-    parameters:
-      - $ref: '#/components/parameters/Id'
-      - name: sales_line_id
-        in: path
-        required: true
-        schema:
-          type: string
-    delete:
-      tags: [Trips]
-      summary: Remove a complete Sales Order line from a Draft trip
-      description: Removes the whole source line only; it does not split quantity or change Sales or Inventory data.
-      operationId: removeTripLine
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/VersionedCommand'
-      responses:
-        '200':
-          description: TripLine removed from the Draft Trip
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GenericSuccess'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -1143,63 +990,201 @@ components:
         default: 25
 
   schemas:
-    PlanningTripLineCreate:
-      allOf:
-        - $ref: '#/components/schemas/Command'
-        - type: object
-          required: [trip_id, sales_line_id]
-          properties:
-            trip_id:
-              type: integer
-              minimum: 1
-              example: 23
-            sales_line_id:
-              type: integer
-              minimum: 1
-              example: 83
-              description: ME_OE_DOCUMENT_LINES.RECORD#; product and quantity are read from this row. Its DOCUMENT_RECORD# must match the trip's SALES_ORDER_ID.
-      unevaluatedProperties: false
-
-    PlanningTripLineUpdate:
-      allOf:
-        - $ref: '#/components/schemas/Command'
-        - type: object
-          anyOf:
-            - required: [sales_line_id]
-            - required: [product_id]
-            - required: [quantity]
-          properties:
-            sales_line_id:
-              type: integer
-              minimum: 1
-            product_id:
-              type: integer
-              minimum: 1
-            quantity:
-              type: integer
-              minimum: 1
-      unevaluatedProperties: false
-
     PlanningTripLine:
       type: object
-      required: [id, trip_id, sales_line_id, product_id, quantity, total_weight, line_load]
+      description: >
+        Saved line snapshot with current related details. For cancelled trips (X),
+        only trip details are expanded; sales_line and product are null. Snapshot
+        source IDs, quantities and weights remain available at the top level.
+      required: [id, trip_id, sales_line_id, product_id, quantity, total_weight, line_load, created_at, updated_at, trip, sales_line, product]
       properties:
         id:
           type: integer
         trip_id:
           type: integer
         sales_line_id:
-          type: string
+          type: integer
         product_id:
-          type: string
+          type: integer
         quantity:
-          type: string
+          type: integer
         total_weight:
-          type: string
+          type: number
+          format: double
           description: Full line weight in KG derived from Inventory unit grams and Sales quantity.
         line_load:
-          type: string
+          type: number
+          format: double
           description: Same full line KG weight, used for vehicle capacity checks.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: [string, 'null']
+          format: date-time
+        trip:
+          anyOf:
+            - $ref: '#/components/schemas/TripLineTripDetails'
+            - type: 'null'
+        sales_line:
+          description: Null for cancelled/missing trips or when the saved line does not belong to the trip's Sales Order.
+          anyOf:
+            - $ref: '#/components/schemas/TripLineSalesDetails'
+            - type: 'null'
+        product:
+          description: Follows sales_line.product_id; null when the trip is cancelled or the Sales line/product cannot be resolved.
+          anyOf:
+            - $ref: '#/components/schemas/TripLineProductDetails'
+            - type: 'null'
+
+    TripLineTripDetails:
+      type: object
+      description: Parent trip details; creator, updater and company data are excluded.
+      properties:
+        id:
+          type: integer
+        trip_code:
+          type: integer
+        vehicle_id:
+          type: integer
+        driver_id:
+          type: integer
+        sales_order_id:
+          type: integer
+        status:
+          type: string
+          enum: [D, S, C, X]
+        planned_departure_at:
+          type: string
+          format: date-time
+        assigned_at:
+          type: string
+          format: date-time
+        assigned_by:
+          type: [integer, 'null']
+        cancelled_at:
+          type: [string, 'null']
+          format: date-time
+        cancelled_by:
+          type: [integer, 'null']
+        cancellation_reason:
+          type: [string, 'null']
+        dispatched_at:
+          type: [string, 'null']
+          format: date-time
+        dispatched_by:
+          type: [integer, 'null']
+        delivered_at:
+          type: [string, 'null']
+          format: date-time
+        delivered_by:
+          type: [integer, 'null']
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: [string, 'null']
+          format: date-time
+
+    TripLineSalesDetails:
+      type: object
+      description: Sales line matched by company, the trip's sales_order_id and the saved sales_line_id.
+      properties:
+        id:
+          type: integer
+        document_record_id:
+          type: integer
+        line_number:
+          type: integer
+        product_id:
+          type: integer
+        description:
+          type: [string, 'null']
+        quantity:
+          type: integer
+        unit_price:
+          type: number
+          format: double
+        source_line_record_id:
+          type: [integer, 'null']
+        trip_id:
+          type: [integer, 'null']
+        logistics_trip_line_id:
+          type: [integer, 'null']
+        trip_status:
+          type: [string, 'null']
+        whencreated:
+          type: string
+          format: date-time
+        whenmodified:
+          type: string
+          format: date-time
+
+    TripLineProductDetails:
+      type: object
+      description: Inventory product reached through the matching Sales line; warehouse and SKU codes remain strings.
+      properties:
+        id:
+          type: integer
+        product_name:
+          type: string
+        sku:
+          type: string
+        warehouse_id:
+          type: string
+        unit_label:
+          type: string
+        unit_weight_grams:
+          type: number
+          format: double
+        is_active:
+          type: string
+        when_created:
+          type: string
+          format: date-time
+        when_updated:
+          type: [string, 'null']
+          format: date-time
+        stock_balance:
+          description: Current company/product balance, not historical stock at delivery; null if no balance row exists.
+          anyOf:
+            - $ref: '#/components/schemas/TripLineStockBalance'
+            - type: 'null'
+
+    TripLineStockBalance:
+      type: object
+      required: [product_id, on_hand, reserved, available, when_updated]
+      properties:
+        product_id:
+          type: integer
+        on_hand:
+          type: integer
+        reserved:
+          type: integer
+        available:
+          type: integer
+          description: Database-calculated on_hand minus reserved.
+        when_updated:
+          type: string
+          format: date-time
+
+    PlanningTripLineListEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccess'
+        - type: object
+          properties:
+            result:
+              type: object
+              required: [items, page, page_size]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/PlanningTripLine'
+                page:
+                  type: integer
+                page_size:
+                  type: integer
 
     PlanningTripLineEnvelope:
       allOf:

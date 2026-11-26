@@ -174,7 +174,7 @@ return static function (Api $api, Connection $connection): void {
             return $drivers->deleteDriver($actor, $id);
         }
     );
-    // Trip-line planning only; trip lifecycle and peer module implementations stay separate.
+    // Read-only trip-line routes; trip creation and lifecycle belong to the trip module.
     $tripLines = new TripLineService($connection);
     $tripLineValidator = new TripLineValidator();
     $api->register(
@@ -193,34 +193,6 @@ return static function (Api $api, Connection $connection): void {
         'read',
         static function (Actor $actor, array $input, array $params, array $query) use ($tripLines, $tripLineValidator): array {
             return $tripLines->getTripLine($actor, $tripLineValidator->id($params['id']));
-        }
-    );
-    $api->register(
-        'POST',
-        '/logistics/trip-lines',
-        'logistics.trip_lines',
-        'create',
-        static function (Actor $actor, array $input, array $params, array $query) use ($tripLines): array {
-            return $tripLines->createTripLine($actor, $input);
-        },
-        201
-    );
-    $api->register(
-        'POST',
-        '/logistics/trip-lines/{id}/update',
-        'logistics.trip_lines',
-        'update',
-        static function (Actor $actor, array $input, array $params, array $query) use ($tripLines, $tripLineValidator): array {
-            return $tripLines->updateTripLine($actor, $tripLineValidator->id($params['id']), $input);
-        }
-    );
-    $api->register(
-        'POST',
-        '/logistics/trip-lines/{id}/delete',
-        'logistics.trip_lines',
-        'delete',
-        static function (Actor $actor, array $input, array $params, array $query) use ($tripLines, $tripLineValidator): array {
-            return $tripLines->deleteTripLine($actor, $tripLineValidator->id($params['id']), $input);
         }
     );
 };

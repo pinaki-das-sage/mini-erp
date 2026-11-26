@@ -7,30 +7,74 @@ namespace MiniErp\logistics\tripline;
 use MiniErp\shared\AppError;
 use MiniErp\shared\database\Connection;
 
-/** Trip-line SQL and read-only lookups into teammate-owned tables. */
+/** Read saved lines, following live Sales/Inventory links only for non-cancelled trips. */
 final class TripLineRepository
 {
-    private const COLUMNS = 'ID, TRIP_ID, SALES_LINE_ID, PRODUCT_ID, QUANTITY, TOTAL_WEIGHT, LINE_LOAD';
+    // Explicit aliases prevent similarly named columns from overwriting each other in OCI rows.
+    // No company details, user records, creator or updater identities are selected.
+    // Each join follows a composite primary key: one output row per saved line, with no per-item queries.
+    // X stops the live chain; the order + source line predicates prevent joining other order lines.
+    private const SELECT = <<<'SQL'
+        SELECT L.ID, L.TRIP_ID, L.SALES_LINE_ID, L.PRODUCT_ID, L.QUANTITY, L.TOTAL_WEIGHT, L.LINE_LOAD,
+            TO_CHAR(L.CREATED_AT, 'YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM') AS CREATED_AT,
+            TO_CHAR(L.UPDATED_AT, 'YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM') AS UPDATED_AT,
+            T.ID AS TRIP_IDENTITY, T.TRIP_CODE AS TRIP_TRIP_CODE,
+            T.VEHICLE_ID AS TRIP_VEHICLE_ID, T.DRIVER_ID AS TRIP_DRIVER_ID,
+            T.SALES_ORDER_ID AS TRIP_SALES_ORDER_ID, T.STATUS AS TRIP_STATUS,
+            TO_CHAR(T.PLANNED_DEPARTURE_AT, 'YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM') AS TRIP_PLANNED_DEPARTURE_AT,
+            TO_CHAR(T.ASSIGNED_AT, 'YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM') AS TRIP_ASSIGNED_AT,
+            T.ASSIGNED_BY AS TRIP_ASSIGNED_BY,
+            TO_CHAR(T.CANCELLED_AT, 'YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM') AS TRIP_CANCELLED_AT,
+            T.CANCELLED_BY AS TRIP_CANCELLED_BY, T.CANCELLATION_REASON AS TRIP_CANCELLATION_REASON,
+            TO_CHAR(T.DISPATCHED_AT, 'YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM') AS TRIP_DISPATCHED_AT,
+            T.DISPATCHED_BY AS TRIP_DISPATCHED_BY,
+            TO_CHAR(T.DELIVERED_AT, 'YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM') AS TRIP_DELIVERED_AT,
+            T.DELIVERED_BY AS TRIP_DELIVERED_BY,
+            TO_CHAR(T.CREATED_AT, 'YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM') AS TRIP_CREATED_AT,
+            TO_CHAR(T.UPDATED_AT, 'YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM') AS TRIP_UPDATED_AT,
+            S.RECORD# AS SALE_IDENTITY, S.DOCUMENT_RECORD# AS SALE_DOCUMENT_RECORD_ID,
+            S.LINE_NUMBER AS SALE_LINE_NUMBER, S.PRODUCT_ID AS SALE_PRODUCT_ID,
+            S.DESCRIPTION AS SALE_DESCRIPTION, S.QUANTITY AS SALE_QUANTITY, S.UNIT_PRICE AS SALE_UNIT_PRICE,
+            S.SOURCE_LINE_RECORD# AS SALE_SOURCE_LINE_RECORD_ID,
+            S.TRIP_ID AS SALE_TRIP_ID, S.LOGISTICS_TRIP_LINE_ID AS SALE_LOGISTICS_TRIP_LINE_ID,
+            S.TRIP_STATUS AS SALE_TRIP_STATUS,
+            TO_CHAR(S.WHENCREATED, 'YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM') AS SALE_WHENCREATED,
+            TO_CHAR(S.WHENMODIFIED, 'YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM') AS SALE_WHENMODIFIED,
+            P.PRODUCT_ID AS PRODUCT_IDENTITY, P.PRODUCT_NAME AS PRODUCT_PRODUCT_NAME,
+            P.SKU AS PRODUCT_SKU, P.WAREHOUSE_ID AS PRODUCT_WAREHOUSE_ID,
+            P.UNIT_LABEL AS PRODUCT_UNIT_LABEL, P.UNIT_WEIGHT_GRAMS AS PRODUCT_UNIT_WEIGHT_GRAMS,
+            P.IS_ACTIVE AS PRODUCT_IS_ACTIVE,
+            TO_CHAR(P.WHEN_CREATED, 'YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM') AS PRODUCT_WHEN_CREATED,
+            TO_CHAR(P.WHEN_UPDATED, 'YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM') AS PRODUCT_WHEN_UPDATED,
+            B.PRODUCT_ID AS STOCK_PRODUCT_ID, B.ON_HAND AS STOCK_ON_HAND,
+            B.RESERVED AS STOCK_RESERVED, B.AVAILABLE AS STOCK_AVAILABLE,
+            TO_CHAR(B.WHEN_UPDATED, 'YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM') AS STOCK_WHEN_UPDATED
+        FROM ME_LOG_TRIP_LINES L
+        LEFT JOIN ME_LOG_TRIPS T ON T.COMPANY_ID = L.COMPANY_ID AND T.ID = L.TRIP_ID
+        LEFT JOIN ME_OE_DOCUMENT_LINES S ON T.STATUS <> 'X'
+            AND S.CNY# = T.COMPANY_ID AND S.DOCUMENT_RECORD# = T.SALES_ORDER_ID AND S.RECORD# = L.SALES_LINE_ID
+        LEFT JOIN ME_INV_PRODUCTS P ON P.COMPANY_ID = S.CNY# AND P.PRODUCT_ID = S.PRODUCT_ID
+        LEFT JOIN ME_INV_STOCK_BALANCE B ON B.COMPANY_ID = P.COMPANY_ID AND B.PRODUCT_ID = P.PRODUCT_ID
+        SQL;
 
     public function __construct(private Connection $connection) {}
 
     public function findAll(int $companyId, array $page): array
     {
-        $where = 'COMPANY_ID = :company_id';
+        $where = 'L.COMPANY_ID = :company_id';
         $parameters = ['company_id' => $companyId, 'offset' => $page['offset'], 'page_size' => $page['page_size']];
         if ($page['trip_id'] !== null) {
-            $where .= ' AND TRIP_ID = :trip_id';
+            $where .= ' AND L.TRIP_ID = :trip_id';
             $parameters['trip_id'] = $page['trip_id'];
         }
-        return $this->connection->query('SELECT ' . self::COLUMNS . ' FROM ME_LOG_TRIP_LINES WHERE ' . $where . '
-            ORDER BY TRIP_ID, ID OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY', $parameters);
+        return $this->connection->query(self::SELECT . ' WHERE ' . $where . '
+            ORDER BY L.TRIP_ID, L.ID OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY', $parameters);
     }
 
-    public function find(int $companyId, int $id, bool $lock = false): array
+    public function find(int $companyId, int $id): array
     {
         $rows = $this->connection->query(
-            'SELECT ' . self::COLUMNS . '
-            FROM ME_LOG_TRIP_LINES WHERE COMPANY_ID = :company_id AND ID = :id' . ($lock ? ' FOR UPDATE' : ''),
+            self::SELECT . ' WHERE L.COMPANY_ID = :company_id AND L.ID = :id',
             ['company_id' => $companyId, 'id' => $id]
         );
         if ($rows === []) {
@@ -39,164 +83,16 @@ final class TripLineRepository
         return $rows[0];
     }
 
-    public function trip(int $companyId, int $tripId, bool $lock = false): array
+    public function trip(int $companyId, int $tripId): array
     {
         $rows = $this->connection->query(
             'SELECT ID, VEHICLE_ID, SALES_ORDER_ID, STATUS FROM ME_LOG_TRIPS
-            WHERE COMPANY_ID = :company_id AND ID = :trip_id' . ($lock ? ' FOR UPDATE' : ''),
+            WHERE COMPANY_ID = :company_id AND ID = :trip_id',
             ['company_id' => $companyId, 'trip_id' => $tripId]
         );
         if ($rows === []) {
             throw new AppError('NOT_FOUND', 'Trip not found.', 404);
         }
         return $rows[0];
-    }
-
-    public function lockDraftTrip(int $companyId, int $tripId): array
-    {
-        $snapshot = $this->trip($companyId, $tripId);
-        // Lock the resource before its trip, matching the group's resource-first lock order.
-        $vehicles = $this->connection->query(
-            'SELECT ID FROM ME_LOG_VEHICLES
-            WHERE COMPANY_ID = :company_id AND ID = :vehicle_id FOR UPDATE',
-            ['company_id' => $companyId, 'vehicle_id' => $snapshot['VEHICLE_ID']]
-        );
-        $trip = $this->trip($companyId, $tripId, true);
-        if ($vehicles === [] || (string) $trip['VEHICLE_ID'] !== (string) $snapshot['VEHICLE_ID']) {
-            throw new AppError('CONFLICT', 'Trip vehicle changed. Retry the request.', 409);
-        }
-        if ($trip['STATUS'] !== 'D') {
-            throw new AppError('INVALID_STATE', 'Only Draft trip lines can be changed.', 409);
-        }
-        return $trip;
-    }
-
-    public function lockSource(int $companyId, mixed $orderId, mixed $lineId): array
-    {
-        // Lock Sales' parent before its line. No Sales data is changed by this module.
-        $orders = $this->connection->query(
-            "SELECT STATUS FROM ME_OE_DOCUMENTS
-            WHERE CNY# = :company_id AND RECORD# = :order_id AND DOCUMENT_TYPE = 'SALES_ORDER' FOR UPDATE",
-            ['company_id' => $companyId, 'order_id' => $orderId]
-        );
-        $lines = $this->connection->query(
-            'SELECT RECORD#, PRODUCT_ID, QUANTITY, TRIP_ID, LOGISTICS_TRIP_LINE_ID
-            FROM ME_OE_DOCUMENT_LINES WHERE CNY# = :company_id AND DOCUMENT_RECORD# = :order_id
-            AND RECORD# = :sales_line_id FOR UPDATE',
-            ['company_id' => $companyId, 'order_id' => $orderId, 'sales_line_id' => $lineId]
-        );
-        if ($orders === [] || $lines === []) {
-            throw new AppError('NOT_FOUND', 'Sales line does not belong to this trip order and company.', 404);
-        }
-        if ($lines[0]['TRIP_ID'] !== null || $lines[0]['LOGISTICS_TRIP_LINE_ID'] !== null) {
-            throw new AppError('REFERENCED_RECORD', 'Sales already references this line assignment. Use the team assignment workflow.', 409);
-        }
-        if ($orders[0]['STATUS'] !== 'SUBMITTED') {
-            throw new AppError('INVALID_STATE', 'The Sales order must be Submitted before editing planning lines.', 409);
-        }
-        return $lines[0];
-    }
-
-    public function weight(int $companyId, mixed $productId, string $quantity): string
-    {
-        // Oracle NUMBER arithmetic avoids rounding KG through a PHP float.
-        $rows = $this->connection->query(
-            "SELECT TO_CHAR(UNIT_WEIGHT_GRAMS * :quantity / 1000,
-            'FM999999990D000', 'NLS_NUMERIC_CHARACTERS=''.,''') AS TOTAL_WEIGHT
-            FROM ME_INV_PRODUCTS WHERE COMPANY_ID = :company_id AND PRODUCT_ID = :product_id
-            AND IS_ACTIVE = 'Y' AND UNIT_WEIGHT_GRAMS > 0 FOR UPDATE",
-            ['company_id' => $companyId, 'product_id' => $productId, 'quantity' => $quantity]
-        );
-        $weight = $rows[0]['TOTAL_WEIGHT'] ?? null;
-        if (!is_string($weight) || !preg_match('/\A[0-9]{1,9}\.[0-9]{3}\z/D', $weight) || !preg_match('/[1-9]/', $weight)) {
-            throw new AppError('INVALID_STATE', 'Product is inactive, missing, or has an invalid total weight.', 409);
-        }
-        return $weight;
-    }
-
-    public function duplicateExists(int $companyId, mixed $sourceId, ?int $excludeId): bool
-    {
-        $parameters = ['company_id' => $companyId, 'sales_line_id' => $sourceId];
-        $exclude = '';
-        if ($excludeId !== null) {
-            $exclude = ' AND L.ID <> :exclude_id';
-            $parameters['exclude_id'] = $excludeId;
-        }
-        return $this->connection->query(
-            "SELECT L.ID FROM ME_LOG_TRIP_LINES L
-            JOIN ME_LOG_TRIPS T ON T.COMPANY_ID = L.COMPANY_ID AND T.ID = L.TRIP_ID
-            WHERE L.COMPANY_ID = :company_id AND L.SALES_LINE_ID = :sales_line_id AND T.STATUS <> 'X'" . $exclude,
-            $parameters
-        ) !== [];
-    }
-
-    public function auditUserId(int $companyId, string $userCode): string
-    {
-        $rows = $this->connection->query(
-            'SELECT ID FROM ME_USERS
-            WHERE COMPANY_ID = :company_id AND USER_ID = :user_code AND ACTIVE = 1',
-            ['company_id' => $companyId, 'user_code' => $userCode]
-        );
-        if (count($rows) !== 1 || !preg_match('/\A[1-9][0-9]{0,29}\z/D', (string) $rows[0]['ID'])) {
-            throw new AppError('FORBIDDEN', 'An active numeric audit user is required.', 403);
-        }
-        return (string) $rows[0]['ID'];
-    }
-
-    public function create(int $companyId, int $tripId, array $data, string $auditId): array
-    {
-        $this->connection->execute(
-            'INSERT INTO ME_LOG_TRIP_LINES
-            (COMPANY_ID, TRIP_ID, SALES_LINE_ID, PRODUCT_ID, QUANTITY, TOTAL_WEIGHT, LINE_LOAD, CREATED_BY, UPDATED_BY)
-            VALUES (:company_id, :trip_id, :sales_line_id, :product_id, :quantity, :total_weight, :line_load, :created_by, :updated_by)',
-            ['company_id' => $companyId, 'trip_id' => $tripId, ...$data, 'created_by' => $auditId, 'updated_by' => $auditId]
-        );
-        $rows = $this->connection->query(
-            'SELECT ID FROM ME_LOG_TRIP_LINES
-            WHERE COMPANY_ID = :company_id AND TRIP_ID = :trip_id AND SALES_LINE_ID = :sales_line_id',
-            ['company_id' => $companyId, 'trip_id' => $tripId, 'sales_line_id' => $data['sales_line_id']]
-        );
-        if (count($rows) !== 1) {
-            throw new \LogicException('Created trip line could not be uniquely resolved.');
-        }
-        return $this->find($companyId, (int) $rows[0]['ID']);
-    }
-
-    public function update(int $companyId, int $id, array $data, string $auditId): array
-    {
-        $count = $this->connection->execute(
-            'UPDATE ME_LOG_TRIP_LINES SET SALES_LINE_ID = :sales_line_id,
-            PRODUCT_ID = :product_id, QUANTITY = :quantity, TOTAL_WEIGHT = :total_weight, LINE_LOAD = :line_load,
-            UPDATED_AT = SYSTIMESTAMP, UPDATED_BY = :updated_by WHERE COMPANY_ID = :company_id AND ID = :id',
-            ['company_id' => $companyId, 'id' => $id, ...$data, 'updated_by' => $auditId]
-        );
-        if ($count !== 1) {
-            throw new \LogicException('Unexpected trip-line update count.');
-        }
-        return $this->find($companyId, $id);
-    }
-
-    public function delete(int $companyId, int $id): void
-    {
-        if ($this->connection->execute(
-            'DELETE FROM ME_LOG_TRIP_LINES WHERE COMPANY_ID = :company_id AND ID = :id',
-            ['company_id' => $companyId, 'id' => $id]
-        ) !== 1) {
-            throw new \LogicException('Unexpected trip-line delete count.');
-        }
-    }
-
-    public function assertCapacity(int $companyId, array $trip): void
-    {
-        $rows = $this->connection->query(
-            "SELECT CASE WHEN NVL(SUM(L.LINE_LOAD), 0) <= V.CAPACITY
-            THEN 'T' ELSE 'F' END AS WITHIN_CAPACITY FROM ME_LOG_VEHICLES V
-            LEFT JOIN ME_LOG_TRIP_LINES L ON L.COMPANY_ID = V.COMPANY_ID AND L.TRIP_ID = :trip_id
-            WHERE V.COMPANY_ID = :company_id AND V.ID = :vehicle_id GROUP BY V.CAPACITY",
-            ['company_id' => $companyId, 'trip_id' => $trip['ID'], 'vehicle_id' => $trip['VEHICLE_ID']]
-        );
-        if (count($rows) !== 1 || $rows[0]['WITHIN_CAPACITY'] !== 'T') {
-            throw new AppError('CAPACITY_EXCEEDED', 'Trip load exceeds vehicle capacity.', 409);
-        }
     }
 }
