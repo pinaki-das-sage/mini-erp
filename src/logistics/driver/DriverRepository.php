@@ -37,7 +37,6 @@ class DriverRepository
         int $companyId,
         int $offset,
         int $pageSize,
-        string $departureDate,
         ?int $excludeTripId = null
     ): array
     {
@@ -45,13 +44,12 @@ class DriverRepository
             D.LICENCE_NUMBER, TO_CHAR(D.LICENCE_EXPIRY, 'YYYY-MM-DD') AS LICENCE_EXPIRY, D.ISACTIVE
             FROM ME_LOG_DRIVERS D
             WHERE D.COMPANY_ID = :company_id AND D.ISACTIVE = 'T'
-            AND TRUNC(D.LICENCE_EXPIRY) >= TO_DATE(:departure_date, 'YYYY-MM-DD')
             AND (D.USER_ID IS NULL OR EXISTS (
                 SELECT 1 FROM ME_USERS U WHERE U.COMPANY_ID = D.COMPANY_ID AND U.ID = D.USER_ID AND U.ACTIVE = 1
             ))
             AND NOT EXISTS (SELECT 1 FROM ME_LOG_TRIPS T WHERE T.COMPANY_ID = D.COMPANY_ID
                 AND T.DRIVER_ID = D.ID AND T.STATUS IN ('D', 'S')";
-        $parameters = ['company_id' => $companyId, 'departure_date' => $departureDate];
+        $parameters = ['company_id' => $companyId];
         if ($excludeTripId !== null) {
             $sql .= ' AND T.ID <> :exclude_trip_id';
             $parameters['exclude_trip_id'] = $excludeTripId;

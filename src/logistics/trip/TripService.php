@@ -105,8 +105,7 @@ class TripService
                     $tx,
                     $actor->companyId,
                     $data['vehicle_id'],
-                    $data['driver_id'],
-                    $data['planned_departure_at']
+                    $data['driver_id']
                 );
 
                 $order = $fulfillment->lockOrderForEvent($tx, $actor, $data['order_number'], 'assignment');
@@ -179,7 +178,6 @@ class TripService
                     $actor->companyId,
                     $data['vehicle_id'],
                     $data['driver_id'],
-                    $data['planned_departure_at'],
                     $id
                 );
                 $trip = $this->repository->lockTrip($tx, $actor->companyId, $id);
@@ -281,7 +279,6 @@ class TripService
                         $actor->companyId,
                         $snapshot['vehicle_id'],
                         $snapshot['driver_id'],
-                        $snapshot['planned_departure_at'],
                         $id
                     );
                 }
@@ -484,7 +481,6 @@ class TripService
         int $companyId,
         int $vehicleId,
         int $driverId,
-        string $plannedDepartureAt,
         ?int $excludeTripId = null
     ): void {
         if (!$this->repository->lockVehicle($tx, $companyId, $vehicleId)) {
@@ -503,14 +499,6 @@ class TripService
             throw new AppError('CONFLICT', 'Driver is already assigned to an active trip.', 409);
         }
 
-        if (!$this->repository->driverLicenceValidForDate(
-            $companyId,
-            $driverId,
-            $this->validator->departureDate($plannedDepartureAt),
-            $tx
-        )) {
-            throw new AppError('INVALID_STATE', 'Driver licence is not valid for the planned departure.', 409);
-        }
     }
 
     private function validateSalesLines(mixed $lines): array

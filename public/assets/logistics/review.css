@@ -1,0 +1,67 @@
+/* Fleet placement follows the PDF: existing records on the left, editor on the right. */
+.logistics-fleet-layout { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 1.25rem; margin-top: 1rem; }
+.logistics-fleet-layout:has(.logistics-fleet-editor[open]) { grid-template-columns: minmax(0, 1fr) minmax(24rem, .95fr); }
+.logistics-fleet-list { min-width: 0; }
+.logistics-fleet-editor[open] { position: static; display: block; width: auto; max-width: 100%; max-height: none; box-shadow: none; margin: 0; padding: 1.1rem; border: 1px solid #d3dfe8; border-radius: .45rem; background: #f8fafc; min-width: 0; }
+.logistics-fleet-editor form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.logistics-fleet-editor h2, .logistics-fleet-editor form > p, .logistics-fleet-editor .logistics-dialog-actions { grid-column: 1 / -1; margin: 0; }
+.logistics-fleet-editor label { margin: 0; min-width: 0; font-size: .875rem; }
+.logistics-fleet-editor form > label:has(.logistics-inline-search), .logistics-fleet-editor label[for="vehicle-description"] { grid-column: 1 / -1; }
+.logistics-fleet-editor textarea { min-height: 5rem; }
+.logistics-fleet-editor .logistics-dialog-actions { justify-content: flex-start; padding-top: .5rem; }
+.logistics-fleet-editor input, .logistics-fleet-editor select { min-width: 0; background: white; }
+.logistics-fleet-editor h2 { font-size: 1.15rem; }
+.logistics-fleet-editor .error { padding: .75rem; background: #fff0ee; border-left: 3px solid #ad3c3c; }
+.logistics-fleet-editor #vehicle-form h2, .logistics-fleet-editor #vehicle-form > p { order: 0; }
+#vehicle-form label[for="vehicle-code"] { order: 1; }
+#vehicle-form label[for="vehicle-registration"] { order: 2; }
+#vehicle-form label[for="vehicle-capacity"] { order: 3; }
+#vehicle-form label[for="vehicle-isactive"] { order: 4; }
+#vehicle-form label[for="vehicle-description"] { order: 5; }
+#vehicle-form .logistics-dialog-actions { order: 6; }
+.logistics-trip-review { width: min(1050px, calc(100vw - 2rem)); padding: 1.5rem; background: #f9fbfd; }
+.logistics-trip-review .logistics-detail-section { background: white; border: 1px solid #d9e3eb; border-radius: .4rem; padding: 1rem; }
+.logistics-trip-review .logistics-detail-section h3 { margin-top: 0; }
+.logistics-review-capacity { background: #edf4f7; padding: 1rem; margin-top: 1rem; border-radius: .4rem; }
+.logistics-review-capacity label { margin: 0 0 .5rem; font-size: .875rem; }
+.logistics-review-capacity progress { width: 100%; height: .65rem; accent-color: #287f86; }
+.logistics-review-capacity p { margin: .5rem 0 0; font-variant-numeric: tabular-nums; }
+.logistics-readonly { float: right; font-size: .875rem; color: #53677a; font-weight: 400; }
+.logistics-trip-review .table-scroll { border: 1px solid #d9e3eb; }
+.logistics-trip-review table { font-size: .875rem; }
+.logistics-trip-review th { background: #1f3d57; color: white; white-space: nowrap; }
+.logistics-trip-review tbody tr:nth-child(odd) { background: #f3f7f9; }
+.logistics-trip-review td { white-space: nowrap; }
+.logistics-dialog .error:not([hidden]) { background: #fff0ee; padding: .75rem; border-left: 3px solid #ad3c3c; border-radius: .3rem; }
+@media (max-width: 1100px) {
+  .logistics-fleet-layout:has(.logistics-fleet-editor[open]) { grid-template-columns: minmax(0, 1fr); }
+  .logistics-fleet-editor { scroll-margin-top: 1rem; }
+}
+@media (max-width: 550px) {
+  .logistics-fleet-editor form { grid-template-columns: minmax(0, 1fr); }
+  .logistics-trip-review { padding: 1rem; }
+}
+/* Keep the left-hand fleet selection compact while its editor is open. */
+#vehicles-panel .logistics-fleet-layout:has(.logistics-fleet-editor[open]) th:nth-child(2),
+#vehicles-panel .logistics-fleet-layout:has(.logistics-fleet-editor[open]) td:nth-child(2),
+#vehicles-panel .logistics-fleet-layout:has(.logistics-fleet-editor[open]) th:nth-child(3),
+#vehicles-panel .logistics-fleet-layout:has(.logistics-fleet-editor[open]) td:nth-child(3),
+#vehicles-panel .logistics-fleet-layout:has(.logistics-fleet-editor[open]) th:nth-child(5),
+#vehicles-panel .logistics-fleet-layout:has(.logistics-fleet-editor[open]) td:nth-child(5),
+#drivers-panel .logistics-fleet-layout:has(.logistics-fleet-editor[open]) th:nth-child(3),
+#drivers-panel .logistics-fleet-layout:has(.logistics-fleet-editor[open]) td:nth-child(3),
+#drivers-panel .logistics-fleet-layout:has(.logistics-fleet-editor[open]) th:nth-child(4),
+#drivers-panel .logistics-fleet-layout:has(.logistics-fleet-editor[open]) td:nth-child(4),
+#drivers-panel .logistics-fleet-layout:has(.logistics-fleet-editor[open]) th:nth-child(5),
+#drivers-panel .logistics-fleet-layout:has(.logistics-fleet-editor[open]) td:nth-child(5) { display: none; }
+.logistics-fleet-layout:has(.logistics-fleet-editor[open]) .logistics-actions button { display: block; width: 100%; margin: .2rem 0; }
+#vehicle-form .vehicle-assignment-help { order: 6; }
+#vehicle-form .logistics-dialog-actions { order: 7; }
+.logistics-trip-review .logistics-review-summary .logistics-detail-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .8rem; }
+.logistics-trip-review .logistics-review-summary .logistics-detail-section { padding: .8rem 1rem; }
+.logistics-activity summary { cursor: pointer; font-size: .875rem; font-weight: 600; }
+.logistics-pagination[hidden] { display: none; }
+.logistics-filter select { margin-top: .4rem; border: 1px solid #ccd8e2; border-radius: .45rem; min-height: 2.5rem; background: white; }
+@media (max-width: 800px) {
+  .logistics-trip-review .logistics-review-summary .logistics-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

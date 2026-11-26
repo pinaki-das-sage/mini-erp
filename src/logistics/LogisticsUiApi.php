@@ -6,6 +6,7 @@ namespace MiniErp\logistics;
 
 use MiniErp\logistics\driver\DriverService;
 use MiniErp\logistics\trip\TripService;
+use MiniErp\logistics\tripline\TripLineService;
 use MiniErp\logistics\vehicle\VehicleService;
 use MiniErp\sales\orders\OrderService;
 use MiniErp\shared\Api;
@@ -20,6 +21,7 @@ final class LogisticsUiApi
     private VehicleService $vehicles;
     private DriverService $drivers;
     private TripService $trips;
+    private TripLineService $tripLines;
     private OrderService $orders;
 
     public function __construct(Connection $connection)
@@ -28,6 +30,7 @@ final class LogisticsUiApi
         $this->vehicles = new VehicleService($connection);
         $this->drivers = new DriverService($connection);
         $this->trips = new TripService($connection);
+        $this->tripLines = new TripLineService($connection);
         $this->orders = new OrderService($connection);
     }
 
@@ -59,6 +62,7 @@ final class LogisticsUiApi
                     'delete' => isset($permissions['logistics.vehicles:delete']),
                 ],
                 'sales_orders_read' => isset($permissions['sales.orders:read']),
+                'trip-lines' => ['read' => isset($permissions['logistics.trip_lines:read'])],
             ]);
         }
         if ($method === 'GET' && $path === '/vehicles') {
@@ -83,9 +87,6 @@ final class LogisticsUiApi
         if ($method === 'GET' && $path === '/eligible-drivers') {
             $pagination = Api::pagination($query, ['exclude_trip_id', 'planned_departure_at']);
             $plannedDepartureAt = $pagination['filters']['planned_departure_at'] ?? null;
-            if ($plannedDepartureAt === null) {
-                throw new AppError('VALIDATION_ERROR', 'planned_departure_at is required.');
-            }
             return $this->response($this->drivers->getEligibleDrivers(
                 $actor,
                 $pagination,
@@ -98,6 +99,23 @@ final class LogisticsUiApi
         }
         if ($method === 'GET' && $path === '/trips') {
             return $this->response($this->trips->getTrips($actor, Api::pagination($query)));
+        }
+        // Reuse the read-only service, including company scoping and permission checks.
+        if ($method === 'GET' && $path === '/trip-lines') {
+            return $this->response($this->tripLines->getTripLines($actor, Api::pagination($query, ['trip_id'])));
+        }
+        if ($method === 'GET' && preg_match('#\A/trip-lines/([0-9]+)\z#D', $path, $match)) {
+            if ($query !== []) {
+                throw new AppError('VALIDATION_ERROR', 'Unsupported filter or invalid query value.');
+            }
+            return $this->response($this->tripLines->getTripLine($actor, $this->optionalId($match[1], 'id')));
+        }
+        // Read the selected order for the planner; Sales still owns its rules and permissions.
+        if ($method === 'GET' && preg_match('#\A/sales-orders/([^/]+)\z#D', $path, $match)) {
+            if ($query !== []) {
+                throw new AppError('VALIDATION_ERROR', 'Unsupported filter or invalid query value.');
+            }
+            return $this->response($this->orders->get($actor, rawurldecode($match[1])));
         }
         if ($method === 'GET' && $path === '/sales-orders') {
             $page = Api::pagination($query, ['search']);

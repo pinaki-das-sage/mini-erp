@@ -326,18 +326,17 @@ paths:
       summary: List Drivers eligible for Trip assignment
       description: >
         Returns active same-company Drivers with a valid active linked Foundation
-        account (when linked), no other active Draft/Dispatched Trip assignment,
-        and a licence expiry on or after the business date represented by
-        planned_departure_at. Licence eligibility is evaluated for the requested
-        departure date, not the current date.
+        account (when linked) and no other active Draft/Dispatched Trip assignment.
+        Driver availability does not depend on the planned departure date.
       operationId: listEligibleDrivers
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PageSize'
         - name: planned_departure_at
           in: query
-          required: true
-          description: ISO-8601 departure timestamp including its UTC offset.
+          required: false
+          deprecated: true
+          description: Accepted for compatibility; ignored when determining driver availability.
           schema:
             type: string
             format: date-time
@@ -351,7 +350,7 @@ paths:
             minimum: 1
       responses:
         '200':
-          description: Eligible Drivers for the planned departure date
+          description: Active Drivers available for Trip assignment
           content:
             application/json:
               schema:
@@ -523,7 +522,7 @@ paths:
         Order line becomes a TripLine. In the same transaction, Trip assignment
         changes the Sales Order from SUBMITTED to IN_PROGRESS. Line weight and
         load are derived from Inventory, never supplied by the client. The
-        selected Driver's licence must be valid on the planned departure date.
+        selected Driver must be active and available for assignment.
       operationId: createTrip
       requestBody:
         required: true
@@ -608,7 +607,7 @@ paths:
     post:
       tags: ["Logistics - Trips"]
       summary: Update a Draft trip's Vehicle, Driver and planned departure
-      description: The selected Driver's licence must be valid on the resulting planned departure date.
+      description: The selected Driver must be active and available for assignment.
       operationId: updateTrip
       requestBody:
         required: true

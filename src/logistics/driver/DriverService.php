@@ -50,7 +50,7 @@ class DriverService
     public function getEligibleDrivers(
         Actor $actor,
         array $pagination,
-        string $plannedDepartureAt,
+        ?string $plannedDepartureAt = null,
         ?int $excludeTripId = null
     ): array
     {
@@ -58,14 +58,12 @@ class DriverService
         if ($excludeTripId !== null) {
             $this->validator->validateId($excludeTripId);
         }
-        $departureDate = (new \MiniErp\logistics\trip\TripValidator())
-            ->departureDate($plannedDepartureAt);
+        // Departure is accepted for compatibility; availability is independent of its date.
         return [
             'items' => $this->repository->findEligible(
                 $actor->companyId,
                 $pagination['offset'],
                 $pagination['page_size'],
-                $departureDate,
                 $excludeTripId,
             ),
             'page' => $pagination['page'],
