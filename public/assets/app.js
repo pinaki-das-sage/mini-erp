@@ -311,8 +311,8 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
       textCell(row, getField(vehicle, 'VEHICLE_CODE', 'vehicle_code'));
       textCell(row, getField(vehicle, 'REGISTRATION_NUMBER', 'registration_number'));
       textCell(row, getField(vehicle, 'DESCRIPTION', 'description'));
-      textCell(row, formatKilograms(getField(vehicle, 'CAPACITY', 'capacity_kg')));
-      textCell(row, activeLabel(getField(vehicle, 'isactive', 'ISACTIVE', 'active')));
+      textCell(row, formatKilograms(getField(vehicle, 'CAPACITY', 'capacity')));
+      textCell(row, activeLabel(getField(vehicle, 'is_active', 'ISACTIVE', 'active')));
       textCell(row, getField(vehicle, 'assignment_status') === 'ASSIGNED' ? 'Assigned to active Trip' : 'Available');
       const actionsCell = document.createElement('td');
       actionsCell.className = 'logistics-actions';
@@ -320,7 +320,7 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
         actionsCell.append(makeButton('Edit', 'button-secondary', () => openVehicleDialog('update', vehicle.id)));
       }
       if (capabilities.vehicles.delete) {
-        actionsCell.append(makeButton('Delete / Deactivate', 'button-danger', () => deleteVehicle(vehicle)));
+        actionsCell.append(makeButton('Delete', 'button-danger', () => deleteVehicle(vehicle)));
       }
       if (actionsCell.children.length === 0) actionsCell.textContent = '-';
       row.append(actionsCell);
@@ -438,7 +438,7 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
       const option = document.createElement('option');
       option.value = String(id);
       option.textContent = type === 'Vehicle'
-        ? `${getField(item, 'vehicle_code')} | ${getField(item, 'registration_number')} | ${formatKilograms(getField(item, 'capacity_kg'))} KG`
+        ? `${getField(item, 'vehicle_code')} | ${getField(item, 'registration_number')} | ${formatKilograms(getField(item, 'capacity'))} KG`
         : `${getField(item, 'driver_code')} | ${getField(item, 'first_name')} ${getField(item, 'last_name')} | Licence expires ${getField(item, 'licence_expiry')}`;
       option.selected = selectedId !== null && String(id) === String(selectedId);
       select.append(option);
@@ -905,8 +905,8 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
     vehicleForm.elements.vehicle_code.value = vehicle?.vehicle_code ?? '';
     vehicleForm.elements.registration_number.value = vehicle?.registration_number ?? '';
     vehicleForm.elements.description.value = vehicle?.description ?? '';
-    vehicleForm.elements.capacity_kg.value = vehicle?.capacity_kg ?? '';
-    vehicleForm.elements.isactive.value = vehicle?.isactive ?? 'T';
+    vehicleForm.elements.capacity_kg.value = vehicle?.capacity ?? '';
+    vehicleForm.elements.isactive.value = vehicle?.is_active ?? 'T';
   };
 
   const openVehicleDialog = async (mode, vehicleId = null) => {
@@ -941,8 +941,8 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
       vehicle_code: Number(vehicleForm.elements.vehicle_code.value),
       registration_number: vehicleForm.elements.registration_number.value.trim(),
       description: vehicleForm.elements.description.value.trim() || null,
-      capacity_kg: vehicleForm.elements.capacity_kg.value,
-      isactive: vehicleForm.elements.isactive.value,
+      capacity: vehicleForm.elements.capacity_kg.value,
+      is_active: vehicleForm.elements.isactive.value,
     };
     vehicleSubmit.disabled = true;
     try {
@@ -962,9 +962,9 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
   });
 
   const deleteVehicle = async (vehicle) => {
-    if (!window.confirm(`Delete or deactivate Vehicle ${vehicle.vehicle_code} (${vehicle.registration_number})? Vehicles with Trip history are deactivated. Continue?`)) return;
+    if (!window.confirm(`Delete Vehicle ${vehicle.vehicle_code} (${vehicle.registration_number})? Vehicles with Trip history must be deactivated from Edit instead.`)) return;
     const button = [...document.querySelectorAll('#vehicles-table-body button')].find((item) => {
-      return item.textContent === 'Delete / Deactivate'
+      return item.textContent === 'Delete'
         && item.closest('tr')?.firstElementChild?.textContent === String(vehicle.vehicle_code);
     });
     const actionRow = button?.closest('tr');
@@ -976,9 +976,7 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
         throw new Error('The server returned an unexpected Vehicle delete response. Refresh and check its state.');
       }
       if (await loadList('vehicles')) {
-        setListMessage('vehicles', result.deleted
-          ? `Vehicle ${vehicle.vehicle_code} was deleted.`
-          : `Vehicle ${vehicle.vehicle_code} has Trip history and was deactivated.`);
+        setListMessage('vehicles', `Vehicle ${vehicle.vehicle_code} was deleted.`);
       }
     } catch (error) {
       setListMessage('vehicles', errorMessage(error), true);

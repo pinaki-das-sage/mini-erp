@@ -23,10 +23,12 @@ tags:
   - name: "Logistics - Drivers"
   - name: "Logistics - Trips"
   - name: Metadata
+  - name: Logistics - Trip Lines
+    description: Read saved trip lines, related trip/Sales/product data and current stock balances.
 
 x-tagGroups:
   - name: Common
-    tags: [Authentication, Metadata]
+    tags: [ Authentication, Metadata ]
   - name: Sales
     tags:
       - "Sales - Customers"
@@ -39,6 +41,7 @@ x-tagGroups:
       - "Logistics - Vehicles"
       - "Logistics - Drivers"
       - "Logistics - Trips"
+      - Logistics - Trip Lines
 
 security:
   - bearerAuth: []
@@ -46,7 +49,7 @@ security:
 paths:
   /auth/login:
     post:
-      tags: [Authentication]
+      tags: [ Authentication ]
       summary: Login to Mini ERP
       description: Authenticate a user and generate an access token.
       operationId: login
@@ -57,7 +60,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [company, username, password]
+              required: [ company, username, password ]
               properties:
                 company:
                   type: string
@@ -87,7 +90,7 @@ paths:
 
   /auth/me:
     get:
-      tags: [Authentication]
+      tags: [ Authentication ]
       summary: Get the current user
       description: Verify the bearer token and return the caller's identity, roles and permissions.
       operationId: getCurrentUser
@@ -107,7 +110,7 @@ paths:
 
   /meta/permissions:
     get:
-      tags: [Metadata]
+      tags: [ Metadata ]
       summary: List registered permissions
       operationId: getPermissions
       responses:
@@ -120,7 +123,7 @@ paths:
 
   /meta/enums:
     get:
-      tags: [Metadata]
+      tags: [ Metadata ]
       summary: Get API enumeration values
       operationId: getEnums
       responses:
@@ -133,7 +136,7 @@ paths:
 
   /meta/contract:
     get:
-      tags: [Metadata]
+      tags: [ Metadata ]
       summary: Get API contract metadata
       operationId: getContract
       responses:
@@ -144,36 +147,107 @@ paths:
               schema:
                 $ref: '#/components/schemas/GenericSuccess'
 
-    parameters:
-      - $ref: '#/components/parameters/Id'
+  /logistics/vehicles:
     post:
-      tags: ["Logistics - Vehicles"]
-      summary: Delete or deactivate a vehicle
-      description: Vehicles with Trip history are deactivated; Vehicles assigned to an active Trip cannot be deleted or deactivated.
-      operationId: deleteVehicle
+      tags:
+        - Logistics - Vehicles
+      summary: Create a vehicle
+      operationId: createVehicle
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              maxProperties: 0
+              allOf:
+                - $ref: '#/components/schemas/Command'
+                - type: object
+                  required: [ vehicle_code, registration_number, capacity ]
+                  properties:
+                    vehicle_code:
+                      type: integer
+                      minimum: 1
+                      example: 307
+                    registration_number:
+                      type: string
+                      maxLength: 40
+                      example: KA01AB1234
+                    capacity:
+                      $ref: '#/components/schemas/PositiveKilograms'
+                    description:
+                      type: [ string, 'null' ]
+                      maxLength: 255
+                    is_active:
+                      type: string
+                      default: "T"
       responses:
-        '200':
-          description: Vehicle deleted or deactivated
+        '201':
+          description: Vehicle created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VehicleDeleteEnvelope'
-        '404':
-          $ref: '#/components/responses/NotFound'
+                $ref: '#/components/schemas/VehicleEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+    get:
+      tags:
+        - Logistics - Vehicles
+      summary: List vehicles
+      operationId: listVehicles
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: active
+          in: query
+          schema:
+            type: boolean
+        - name: assignment_status
+          in: query
+          schema:
+            type: string
+            enum: [ AVAILABLE, ASSIGNED ]
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paged vehicle list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehicleListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /logistics/vehicles/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags:
+        - Logistics - Vehicles
+      summary: Get a vehicle
+      operationId: getVehicle
+      responses:
+        '200':
+          description: Vehicle details and availability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehicleEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /logistics/drivers:
     post:
-      tags: ["Logistics - Drivers"]
+      tags: [ "Logistics - Drivers" ]
       summary: Create a driver profile
       operationId: createDriver
       requestBody:
@@ -183,13 +257,13 @@ paths:
             schema:
               allOf:
                 - type: object
-                  required: [driver_code, first_name, last_name, licence_number, licence_expiry]
+                  required: [ driver_code, first_name, last_name, licence_number, licence_expiry ]
                   properties:
                     driver_code:
                       type: string
                       maxLength: 30
                     user_id:
-                      type: [integer, 'null']
+                      type: [ integer, 'null' ]
                       minimum: 1
                     first_name:
                       type: string
@@ -198,7 +272,7 @@ paths:
                       type: string
                       maxLength: 100
                     phone:
-                      type: [string, 'null']
+                      type: [ string, 'null' ]
                       maxLength: 30
                     licence_number:
                       type: string
@@ -208,7 +282,7 @@ paths:
                       format: date
                     isactive:
                       type: string
-                      enum: ['T', 'F']
+                      enum: [ 'T', 'F' ]
                       default: 'T'
       responses:
         '201':
@@ -325,13 +399,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [driver_code, first_name, last_name, licence_number, licence_expiry]
+              required: [ driver_code, first_name, last_name, licence_number, licence_expiry ]
               properties:
                 driver_code:
                   type: string
                   maxLength: 30
                 user_id:
-                  type: [integer, 'null']
+                  type: [ integer, 'null' ]
                   minimum: 1
                 first_name:
                   type: string
@@ -340,7 +414,7 @@ paths:
                   type: string
                   maxLength: 100
                 phone:
-                  type: [string, 'null']
+                  type: [ string, 'null' ]
                   maxLength: 30
                 licence_number:
                   type: string
@@ -350,7 +424,7 @@ paths:
                   format: date
                 isactive:
                   type: string
-                  enum: ['T', 'F']
+                  enum: [ 'T', 'F' ]
       responses:
         '200':
           description: Driver updated
@@ -375,9 +449,7 @@ paths:
       tags: ["Logistics - Drivers"]
       summary: Delete or deactivate a driver profile
       description: >
-        A driver never referenced by a Trip may be deleted. A driver with
-        historical Trip references is deactivated. A driver assigned to an
-        active Trip cannot be deleted or deactivated.
+        A driver never referenced by a Trip may be deleted. A driver with historical Trip references is deactivated. A driver assigned to an active Trip cannot be deleted or deactivated.
       operationId: deleteDriver
       requestBody:
         required: true
@@ -545,7 +617,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [vehicle_id, driver_id, planned_departure_at]
+              required: [ vehicle_id, driver_id, planned_departure_at ]
               properties:
                 vehicle_id:
                   type: integer
@@ -589,7 +661,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [reason]
+              required: [ reason ]
               properties:
                 reason:
                   type: string
@@ -1158,6 +1230,117 @@ paths:
         "200": { $ref: "#/components/responses/EligibleOrders" }
         default: { $ref: "#/components/responses/Error" }
       x-implementation-status: integration-pending
+  /logistics/vehicles/{id}/update:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags:
+        - Logistics - Vehicles
+      summary: Update a vehicle
+      operationId: updateVehicle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Command'
+                - type: object
+                  properties:
+                    vehicle_code:
+                      type: integer
+                      minimum: 1
+                    registration_number:
+                      type: string
+                      maxLength: 40
+                    capacity:
+                      $ref: '#/components/schemas/PositiveKilograms'
+                    description:
+                      type: [ string, 'null' ]
+                      maxLength: 255
+                    is_active:
+                      type: string
+                      enum: [ 'T', 'F' ]
+      responses:
+        '200':
+          description: Vehicle updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehicleEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /logistics/vehicles/{id}/delete:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags:
+        - Logistics - Vehicles
+      summary: Delete a never-used vehicle
+      operationId: deleteVehicle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Command'
+      responses:
+        '200':
+          description: Vehicle deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccess'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /logistics/trip-lines:
+    get:
+      tags:
+        - Logistics - Trip Lines
+      summary: List saved company trip lines
+      operationId: listPlanningTripLines
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: trip_id
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Shared envelope with enriched trip-line items, page and page_size
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanningTripLineListEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /logistics/trip-lines/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags:
+        - Logistics - Trip Lines
+      summary: Get a saved company trip line
+      operationId: getPlanningTripLine
+      responses:
+        '200':
+          description: Trip line details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanningTripLineEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
 components:
   securitySchemes:
@@ -1257,7 +1440,7 @@ components:
   schemas:
     Command:
       type: object
-      required: [action_reference]
+      required: [ action_reference ]
       properties:
         action_reference:
           type: string
@@ -1270,7 +1453,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/Command'
         - type: object
-          required: [expected_version]
+          required: [ expected_version ]
           properties:
             expected_version:
               type: integer
@@ -1285,8 +1468,8 @@ components:
 
     PositiveKilograms:
       type: string
-      description: Positive decimal kilogram value with at most three fractional digits.
-      pattern: '^(?=.*[1-9])[0-9]+(\.[0-9]{1,3})?$'
+      description: Positive decimal kilogram value with at most nine integer digits and three fractional digits.
+      pattern: '^(?=.*[1-9])[0-9]{1,9}(\.[0-9]{1,3})?$'
       example: '30.000'
 
     LoginResponse:
@@ -1296,9 +1479,9 @@ components:
           type: boolean
           example: true
         operation_id:
-          type: [string, 'null']
+          type: [ string, 'null' ]
         current_version:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         result:
           type: object
           properties:
@@ -1316,7 +1499,7 @@ components:
             must_change_password:
               type: boolean
         error:
-          type: [object, 'null']
+          type: [ object, 'null' ]
 
     GenericSuccess:
       type: object
@@ -1325,12 +1508,12 @@ components:
           type: boolean
           example: true
         operation_id:
-          type: [string, 'null']
+          type: [ string, 'null' ]
         current_version:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         result: {}
         error:
-          type: [object, 'null']
+          type: [ object, 'null' ]
 
     VehicleCapacity:
       type: string
@@ -1339,7 +1522,7 @@ components:
 
     Vehicle:
       type: object
-      required: [id, vehicle_code, registration_number, capacity_kg, isactive, assignment_status]
+      required: [id, vehicle_code, registration_number, capacity, is_active]
       properties:
         id:
           type: integer
@@ -1351,11 +1534,15 @@ components:
           type: string
           maxLength: 40
         description:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           maxLength: 255
-        capacity_kg:
-          $ref: '#/components/schemas/VehicleCapacity'
-        isactive:
+        capacity:
+          type: number
+          minimum: 0.001
+          maximum: 999999999.999
+          multipleOf: 0.001
+          description: Capacity in kilograms; returned from the Vehicle service as a JSON number.
+        is_active:
           type: string
           enum: ['T', 'F']
         assignment_status:
@@ -1364,7 +1551,7 @@ components:
 
     Driver:
       type: object
-      required: [id, driver_code, first_name, last_name, licence_number, licence_expiry, isactive]
+      required: [ id, driver_code, first_name, last_name, licence_number, licence_expiry, isactive ]
       properties:
         id:
           type: integer
@@ -1373,7 +1560,7 @@ components:
           type: string
           maxLength: 30
         user_id:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
           minimum: 1
         first_name:
           type: string
@@ -1382,7 +1569,7 @@ components:
           type: string
           maxLength: 100
         phone:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           maxLength: 30
         licence_number:
           type: string
@@ -1392,7 +1579,7 @@ components:
           format: date
         isactive:
           type: string
-          enum: ['T', 'F']
+          enum: [ 'T', 'F' ]
 
     DriverUser:
       type: object
@@ -1431,34 +1618,34 @@ components:
           format: date-time
         status:
           type: string
-          enum: [DRAFT, DISPATCHED, DELIVERED, CANCELLED]
+          enum: [ DRAFT, DISPATCHED, DELIVERED, CANCELLED ]
         sales_order_id:
           type: integer
           minimum: 1
         assigned_at:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         assigned_by:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
           description: Numeric ME_USERS.ID.
         cancelled_at:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         cancelled_by:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         cancellation_reason:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           maxLength: 500
         dispatched_at:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         dispatched_by:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         delivered_at:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         delivered_by:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         planned_load_kg:
           type: number
           description: SUM(ME_LOG_TRIP_LINES.LINE_LOAD) in kilograms.
@@ -1511,7 +1698,7 @@ components:
           properties:
             result:
               type: object
-              required: [items, page, page_size]
+              required: [ items, page, page_size ]
               properties:
                 items:
                   type: array
@@ -1529,7 +1716,7 @@ components:
           properties:
             result:
               type: object
-              required: [items, page, page_size]
+              required: [ items, page, page_size ]
               properties:
                 items:
                   type: array
@@ -1565,7 +1752,7 @@ components:
           properties:
             result:
               type: object
-              required: [items, page, page_size]
+              required: [ items, page, page_size ]
               properties:
                 items:
                   type: array
@@ -1578,24 +1765,24 @@ components:
 
     IdentityResponse:
       type: object
-      required: [success, operation_id, current_version, result, error]
+      required: [ success, operation_id, current_version, result, error ]
       properties:
         success:
           type: boolean
         operation_id:
-          type: [string, 'null']
+          type: [ string, 'null' ]
         current_version:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         result:
           type: object
-          required: [id, username, company_id, company_name, roles, is_admin, must_change_password, permissions]
+          required: [ id, username, company_id, company_name, roles, is_admin, must_change_password, permissions ]
           properties:
             id:
-              type: [string, integer]
+              type: [ string, integer ]
             username:
               type: string
             company_id:
-              type: [string, integer]
+              type: [ string, integer ]
             company_name:
               type: string
             roles:
@@ -1611,7 +1798,7 @@ components:
               items:
                 type: string
         error:
-          type: [object, 'null']
+          type: [ object, 'null' ]
 
     ErrorResponse:
       type: object
@@ -1620,11 +1807,11 @@ components:
           type: boolean
           example: false
         operation_id:
-          type: [string, 'null']
+          type: [ string, 'null' ]
         current_version:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         result:
-          type: [object, 'null']
+          type: [ object, 'null' ]
         error:
           type: object
           properties:
@@ -2132,12 +2319,7 @@ components:
       allOf:
         - { $ref: "#/components/schemas/OrderFields" }
       required: [ expected_version ]
-      description: Draft only. Quote source, Customer, Warehouse, shipping address and payment terms remain locked.
-        Omitted header fields and omitted lines are preserved. When lines is supplied, it is the complete intended
-        Order line set in display order; keep line_id to edit/reorder a saved line, omit line_id to add a line,
-        and omit a saved line from the collection to remove it. Product, description, quantity and price are
-        editable independently of the unchanged Quote. At least one line is required. Totals are calculated
-        server-side and the parent version increments once. Use the latest GET response for saved line IDs/version.
+      description: Draft only. Quote source, Customer, Warehouse, shipping address and payment terms remain locked. Omitted header fields and omitted lines are preserved. When lines is supplied, it is the complete intended Order line set in display order; keep line_id to edit/reorder a saved line, omit line_id to add a line, and omit a saved line from the collection to remove it. Product, description, quantity and price are editable independently of the unchanged Quote. At least one line is required. Totals are calculated server-side and the parent version increments once. Use the latest GET response for saved line IDs/version.
       properties:
         action_reference: { $ref: "#/components/schemas/ActionReference" }
         expected_version: { type: integer, minimum: 1, maximum: 9999999999 }
@@ -2158,15 +2340,12 @@ components:
         source_line_id:
           type: [ string, "null" ]
           pattern: "^[1-9][0-9]{0,14}$"
-          description: Optional unchanged origin echo for an existing line. Server-managed; cannot be reassigned.
-            New lines have null origin. Replacing a Product clears its Quote-line origin; other edits retain it.
+          description: Optional unchanged origin echo for an existing line. Server-managed; cannot be reassigned. New lines have null origin. Replacing a Product clears its Quote-line origin; other edits retain it.
         product_id: { type: string, pattern: "^[1-9][0-9]{0,9}$" }
         description: { type: string, maxLength: 200 }
         quantity: { $ref: "#/components/schemas/SalesQuantity" }
         unit_price: { $ref: "#/components/schemas/SalesUnitPrice" }
-      description: Editable Draft Order line. Lines may differ from the source Quote; prices and quantities
-        use exact decimal strings. Product existence/company is enforced by the database reference; active
-        Product/Warehouse validation and all stock reservations are performed by Inventory on Submit.
+      description: Editable Draft Order line. Lines may differ from the source Quote; prices and quantities use exact decimal strings. Product existence/company is enforced by the database reference; active Product/Warehouse validation and all stock reservations are performed by Inventory on Submit.
     OrderSummary:
       type: object
       allOf:
@@ -2206,11 +2385,7 @@ components:
                   - move_to_draft
                   - delete
               readOnly: true
-              description: Requires the corresponding registered Sales permission and current business eligibility. Draft
-                may allow edit, submit and delete. Submitted may allow move_to_draft only with no valid Trip
-                assignment and an eligible linked Draft Invoice (or no Invoice on an older Order); the action
-                deletes that Draft Invoice and releases all reservations atomically.
-                In Progress and Closed are read-only to Sales users.
+              description: Requires the corresponding registered Sales permission and current business eligibility. Draft may allow edit, submit and delete. Submitted may allow move_to_draft only with no valid Trip assignment and an eligible linked Draft Invoice (or no Invoice on an older Order); the action deletes that Draft Invoice and releases all reservations atomically. In Progress and Closed are read-only to Sales users.
           required:
             - order_number
             - status
@@ -2354,8 +2529,7 @@ components:
           type: string
           minLength: 1
           maxLength: 40
-          description: "Existing line: retain its ID. New line: omit. Remove a line by omitting it from the complete
-            collection."
+          description: "Existing line: retain its ID. New line: omit. Remove a line by omitting it from the complete collection."
         product_id: { type: string, pattern: "^[1-9][0-9]{0,9}$", description: "Inventory product ID as a numeric string, scoped to the signed-in company and selected warehouse." }
         quantity: { $ref: "#/components/schemas/SalesQuantity" }
         unit_price: { $ref: "#/components/schemas/SalesUnitPrice" }
@@ -2383,9 +2557,7 @@ components:
         - { $ref: "#/components/schemas/SalesDocumentNumber" }
         - { type: "null" }
       default: null
-      description: "Optional: Submitted Quote for Order; Submitted / In Progress / Closed Order for Invoice.
-        Omit/null on create for standalone; omit on update to retain, null to clear. Revalidate on save and
-        submit."
+      description: "Optional: Submitted Quote for Order; Submitted / In Progress / Closed Order for Invoice. Omit/null on create for standalone; omit on update to retain, null to clear. Revalidate on save and submit."
     InvoiceCreateDocumentLines:
       type: object
       properties:
@@ -2421,13 +2593,11 @@ components:
         due_date:
           type: string
           format: date
-          description: Default Invoice Date + 0/15/30 days from terms; on/after Invoice Date. Rederive after date/terms
-            changes unless explicitly supplied.
+          description: Default Invoice Date + 0/15/30 days from terms; on/after Invoice Date. Rederive after date/terms changes unless explicitly supplied.
         notes: { $ref: "#/components/schemas/QuoteFields/properties/notes" }
         source_order_number:
           $ref: "#/components/schemas/SalesDocumentNumber"
-          description: Immutable same-company Sales Order source. Creation requires Submitted; existing linked
-            Orders may progress to In Progress or Closed. The source cannot be cleared or replaced.
+          description: Immutable same-company Sales Order source. Creation requires Submitted; existing linked Orders may progress to In Progress or Closed. The source cannot be cleared or replaced.
     InvoiceCreateRequest:
       type: object
       properties:
@@ -2450,9 +2620,7 @@ components:
       additionalProperties: false
     InvoiceActionRequest:
       type: object
-      description: Use the latest Invoice current_version as expected_version. action_reference is optional;
-        omit it for normal actions or supply it to replay identical retries. Without a reference, a repeated
-        action is checked against the current version and state rather than replaying a previous success.
+      description: Use the latest Invoice current_version as expected_version. action_reference is optional; omit it for normal actions or supply it to replay identical retries. Without a reference, a repeated action is checked against the current version and state rather than replaying a previous success.
       properties:
         expected_version: { $ref: "#/components/schemas/SalesDocumentActionRequest/properties/expected_version" }
         action_reference: { $ref: "#/components/schemas/ActionReference" }
@@ -2517,17 +2685,7 @@ components:
           then: { properties: { available_actions: { items: { not: { const: move_to_draft } } } } }
         - if: { required: [ payment_status ], properties: { payment_status: { const: Paid } } }
           then: { properties: { available_actions: { maxItems: 0 } } }
-      required:
-        [
-          source_order_number,
-          customer_code,
-          warehouse_id,
-          invoice_date,
-          due_date,
-          payment_terms,
-          notes,
-          shipping_address
-        ]
+      required: [ source_order_number, customer_code, warehouse_id, invoice_date, due_date, payment_terms, notes, shipping_address ]
     Invoice:
       type: object
       allOf:
@@ -2579,16 +2737,7 @@ components:
         payment_reference: { $ref: "#/components/schemas/PaymentCreateRequest/properties/payment_reference", readOnly: true }
         created_by: { type: string, maxLength: 40, readOnly: true, minLength: 1 }
         created_at: { type: string, format: date-time, readOnly: true }
-      required:
-        [
-          payment_number,
-          invoice_number,
-          payment_amount,
-          payment_date,
-          payment_reference,
-          created_by,
-          created_at
-        ]
+      required: [ payment_number, invoice_number, payment_amount, payment_date, payment_reference, created_by, created_at ]
     PaymentInvoiceSnapshot:
       type: object
       allOf:
@@ -2720,8 +2869,7 @@ components:
         status: { type: string, enum: [ Submitted ] }
         current_version: { type: integer, minimum: 1, maximum: 9999999999 }
         document_total: { $ref: "#/components/schemas/SalesAmount" }
-      required: [ order_number, customer_code, customer_name, warehouse_id, order_date, shipping_address,
-        payment_terms, notes, status, current_version, document_total ]
+      required: [ order_number, customer_code, customer_name, warehouse_id, order_date, shipping_address, payment_terms, notes, status, current_version, document_total ]
     EligibleOrderListResponse:
       allOf:
         - { $ref: "#/components/schemas/PagedSuccess" }
@@ -2739,9 +2887,7 @@ components:
         trip_reference:
           type: [ string, "null" ]
           readOnly: true
-          description: Public reference to the current Logistics Trip; maps to the agreed Logistics identifier for
-            TRIP_ID. Every line of the Order belongs to the same current Trip. Clear all on cancellation;
-            replace together on whole-Order reassignment. Logistics owns assignment history.
+          description: Public reference to the current Logistics Trip; maps to the agreed Logistics identifier for TRIP_ID. Every line of the Order belongs to the same current Trip. Clear all on cancellation; replace together on whole-Order reassignment. Logistics owns assignment history.
         trip_assigned: { type: boolean, readOnly: true }
         trip_status:
           type: [ string, "null" ]
@@ -2773,8 +2919,7 @@ components:
         - { $ref: "#/components/schemas/OrderTripFields" }
     DatabaseCustomerRow:
       type: object
-      description: Database row after migrations 001-008. Storage documentation only; this schema does not add
-        fields to API requests or responses.
+      description: Database row after migrations 001-008. Storage documentation only; this schema does not add fields to API requests or responses.
       x-database-table: ME_OE_CUSTOMERS
       x-database-columns:
         CUSTOMER_CODE:
@@ -2981,8 +3126,7 @@ components:
         - AMOUNT_CUSTOMER_OWES_US >= 0
     DatabaseSalesDocumentRow:
       type: object
-      description: Database row after migrations 001-008. Storage documentation only; this schema does not add
-        fields to API requests or responses.
+      description: Database row after migrations 001-008. Storage documentation only; this schema does not add fields to API requests or responses.
       x-database-table: ME_OE_DOCUMENTS
       x-database-columns:
         RECORD#:
@@ -3048,13 +3192,10 @@ components:
       x-database-constraints:
         - CONSTRAINT ME_OE_DOC_PK PRIMARY KEY (CNY#, RECORD#)
         - CONSTRAINT ME_OE_DOC_COMPANY_FK FOREIGN KEY (CNY#) REFERENCES ME_COMPANY (ID)
-        - CONSTRAINT ME_OE_DOC_CUSTOMER_FK FOREIGN KEY (CNY#, CUSTOMER_RECORD#) REFERENCES ME_OE_CUSTOMERS (CNY#,
-          RECORD#)
+        - CONSTRAINT ME_OE_DOC_CUSTOMER_FK FOREIGN KEY (CNY#, CUSTOMER_RECORD#) REFERENCES ME_OE_CUSTOMERS (CNY#, RECORD#)
         - CONSTRAINT ME_OE_DOC_NUMBER_UK UNIQUE (CNY#, DOCUMENT_TYPE, DOCUMENT_NUMBER)
         - CONSTRAINT ME_OE_DOC_TYPE_CK CHECK ( DOCUMENT_TYPE IN ('SALES_QUOTE', 'SALES_ORDER', 'SALES_INVOICE') )
-        - CONSTRAINT ME_OE_DOC_STATUS_CK CHECK ( (DOCUMENT_TYPE IN ('SALES_QUOTE', 'SALES_INVOICE') AND STATUS IN
-          ('DRAFT', 'SUBMITTED')) OR (DOCUMENT_TYPE = 'SALES_ORDER' AND STATUS IN ('DRAFT', 'SUBMITTED',
-          'IN_PROGRESS', 'CLOSED')) )
+        - CONSTRAINT ME_OE_DOC_STATUS_CK CHECK ( (DOCUMENT_TYPE IN ('SALES_QUOTE', 'SALES_INVOICE') AND STATUS IN ('DRAFT', 'SUBMITTED')) OR (DOCUMENT_TYPE = 'SALES_ORDER' AND STATUS IN ('DRAFT', 'SUBMITTED', 'IN_PROGRESS', 'CLOSED')) )
       properties:
         RECORD#:
           type: integer
@@ -3202,8 +3343,7 @@ components:
             - CUSTOMER_RECORD#
     DatabaseSalesDocumentLineRow:
       type: object
-      description: Database row after migrations 001-008. Storage documentation only; this schema does not add
-        fields to API requests or responses.
+      description: Database row after migrations 001-008. Storage documentation only; this schema does not add fields to API requests or responses.
       x-database-table: ME_OE_DOCUMENT_LINES
       x-database-columns:
         RECORD#:
@@ -3255,10 +3395,8 @@ components:
       x-database-constraints:
         - CONSTRAINT ME_OE_LINE_PK PRIMARY KEY (CNY#, RECORD#)
         - CONSTRAINT ME_OE_LINE_COMPANY_FK FOREIGN KEY (CNY#) REFERENCES ME_COMPANY (ID)
-        - CONSTRAINT ME_OE_LINE_DOCUMENT_FK FOREIGN KEY (CNY#, DOCUMENT_RECORD#) REFERENCES ME_OE_DOCUMENTS (CNY#,
-          RECORD#)
-        - CONSTRAINT ME_OE_LINE_SOURCE_FK FOREIGN KEY (CNY#, SOURCE_LINE_RECORD#) REFERENCES ME_OE_DOCUMENT_LINES
-          (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_LINE_DOCUMENT_FK FOREIGN KEY (CNY#, DOCUMENT_RECORD#) REFERENCES ME_OE_DOCUMENTS (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_LINE_SOURCE_FK FOREIGN KEY (CNY#, SOURCE_LINE_RECORD#) REFERENCES ME_OE_DOCUMENT_LINES (CNY#, RECORD#)
         - CONSTRAINT ME_OE_LINE_POSITION_UK UNIQUE (CNY#, DOCUMENT_RECORD#, LINE_NUMBER)
         - CONSTRAINT ME_OE_LINE_QTY_CK CHECK (QUANTITY > 0 AND QUANTITY = TRUNC(QUANTITY))
         - CONSTRAINT ME_OE_LINE_PRICE_CK CHECK (UNIT_PRICE >= 0)
@@ -3366,8 +3504,7 @@ components:
             - SOURCE_LINE_RECORD#
     DatabaseSalesSourceLinkRow:
       type: object
-      description: Database row after migrations 001-008. Storage documentation only; this schema does not add
-        fields to API requests or responses.
+      description: Database row after migrations 001-008. Storage documentation only; this schema does not add fields to API requests or responses.
       x-database-table: ME_OE_SOURCE_LINKS
       x-database-columns:
         RECORD#:
@@ -3397,10 +3534,8 @@ components:
         - CONSTRAINT ME_OE_LINK_COMPANY_FK FOREIGN KEY (CNY#) REFERENCES ME_COMPANY (ID)
         - CONSTRAINT ME_OE_LINK_SOURCE_UK UNIQUE (CNY#, SOURCE_DOCUMENT_RECORD#)
         - CONSTRAINT ME_OE_LINK_TARGET_UK UNIQUE (CNY#, TARGET_DOCUMENT_RECORD#)
-        - CONSTRAINT ME_OE_LINK_SOURCE_FK FOREIGN KEY (CNY#, SOURCE_DOCUMENT_RECORD#) REFERENCES ME_OE_DOCUMENTS
-          (CNY#, RECORD#)
-        - CONSTRAINT ME_OE_LINK_TARGET_FK FOREIGN KEY (CNY#, TARGET_DOCUMENT_RECORD#) REFERENCES ME_OE_DOCUMENTS
-          (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_LINK_SOURCE_FK FOREIGN KEY (CNY#, SOURCE_DOCUMENT_RECORD#) REFERENCES ME_OE_DOCUMENTS (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_LINK_TARGET_FK FOREIGN KEY (CNY#, TARGET_DOCUMENT_RECORD#) REFERENCES ME_OE_DOCUMENTS (CNY#, RECORD#)
       properties:
         RECORD#:
           type: integer
@@ -3444,8 +3579,7 @@ components:
       additionalProperties: false
     DatabaseSalesPaymentRow:
       type: object
-      description: Database row after migrations 001-008. Storage documentation only; this schema does not add
-        fields to API requests or responses.
+      description: Database row after migrations 001-008. Storage documentation only; this schema does not add fields to API requests or responses.
       x-database-table: ME_OE_PAYMENTS
       x-database-columns:
         RECORD#:
@@ -3485,10 +3619,8 @@ components:
       x-database-constraints:
         - CONSTRAINT ME_OE_PAY_PK PRIMARY KEY (CNY#, RECORD#)
         - CONSTRAINT ME_OE_PAY_COMPANY_FK FOREIGN KEY (CNY#) REFERENCES ME_COMPANY (ID)
-        - CONSTRAINT ME_OE_PAY_INVOICE_FK FOREIGN KEY (CNY#, INVOICE_RECORD#) REFERENCES ME_OE_DOCUMENTS (CNY#,
-          RECORD#)
-        - CONSTRAINT ME_OE_PAY_ACTION_FK FOREIGN KEY (CNY#, ACTION_REFERENCE) REFERENCES ME_ACTIONS (COMPANY_ID,
-          ACTION_REFERENCE)
+        - CONSTRAINT ME_OE_PAY_INVOICE_FK FOREIGN KEY (CNY#, INVOICE_RECORD#) REFERENCES ME_OE_DOCUMENTS (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_PAY_ACTION_FK FOREIGN KEY (CNY#, ACTION_REFERENCE) REFERENCES ME_ACTIONS (COMPANY_ID, ACTION_REFERENCE)
         - CONSTRAINT ME_OE_PAY_NUMBER_UK UNIQUE (CNY#, PAYMENT_NUMBER)
         - CONSTRAINT ME_OE_PAY_ACTION_UK UNIQUE (CNY#, ACTION_REFERENCE)
         - CONSTRAINT ME_OE_PAY_AMOUNT_CK CHECK (PAYMENT_AMOUNT > 0)
@@ -3573,6 +3705,201 @@ components:
         description: { $ref: "#/components/schemas/SalesLineInput/properties/description" }
         quantity: { $ref: "#/components/schemas/SalesQuantity" }
         unit_price: { $ref: "#/components/schemas/SalesUnitPrice" }
+    PlanningTripLineEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccess'
+        - type: object
+          properties:
+            result:
+              $ref: '#/components/schemas/PlanningTripLine'
+    PlanningTripLine:
+      type: object
+      description: >
+        Saved line snapshot with current related details. For cancelled trips (X), only trip details are expanded; sales_line and product are null. Snapshot source IDs, quantities and weights remain available at the top level.
+      required: [ id, trip_id, sales_line_id, product_id, quantity, total_weight, line_load, created_at, updated_at, trip, sales_line, product ]
+      properties:
+        id:
+          type: integer
+        trip_id:
+          type: integer
+        sales_line_id:
+          type: integer
+        product_id:
+          type: integer
+        quantity:
+          type: integer
+        total_weight:
+          type: number
+          format: double
+          description: Full line weight in KG derived from Inventory unit grams and Sales quantity.
+        line_load:
+          type: number
+          format: double
+          description: Same full line KG weight, used for vehicle capacity checks.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: [ string, 'null' ]
+          format: date-time
+        trip:
+          anyOf:
+            - $ref: '#/components/schemas/TripLineTripDetails'
+            - type: 'null'
+        sales_line:
+          description: Null for cancelled/missing trips or when the saved line does not belong to the trip's Sales Order.
+          anyOf:
+            - $ref: '#/components/schemas/TripLineSalesDetails'
+            - type: 'null'
+        product:
+          description: Follows sales_line.product_id; null when the trip is cancelled or the Sales line/product cannot be resolved.
+          anyOf:
+            - $ref: '#/components/schemas/TripLineProductDetails'
+            - type: 'null'
+    TripLineProductDetails:
+      type: object
+      description: Inventory product reached through the matching Sales line; warehouse and SKU codes remain strings.
+      properties:
+        id:
+          type: integer
+        product_name:
+          type: string
+        sku:
+          type: string
+        warehouse_id:
+          type: string
+        unit_label:
+          type: string
+        unit_weight_grams:
+          type: number
+          format: double
+        is_active:
+          type: string
+        when_created:
+          type: string
+          format: date-time
+        when_updated:
+          type: [ string, 'null' ]
+          format: date-time
+        stock_balance:
+          description: Current company/product balance, not historical stock at delivery; null if no balance row exists.
+          anyOf:
+            - $ref: '#/components/schemas/TripLineStockBalance'
+            - type: 'null'
+    TripLineStockBalance:
+      type: object
+      required: [ product_id, on_hand, reserved, available, when_updated ]
+      properties:
+        product_id:
+          type: integer
+        on_hand:
+          type: integer
+        reserved:
+          type: integer
+        available:
+          type: integer
+          description: Database-calculated on_hand minus reserved.
+        when_updated:
+          type: string
+          format: date-time
+    TripLineSalesDetails:
+      type: object
+      description: Sales line matched by company, the trip's sales_order_id and the saved sales_line_id.
+      properties:
+        id:
+          type: integer
+        document_record_id:
+          type: integer
+        line_number:
+          type: integer
+        product_id:
+          type: integer
+        description:
+          type: [ string, 'null' ]
+        quantity:
+          type: integer
+        unit_price:
+          type: number
+          format: double
+        source_line_record_id:
+          type: [ integer, 'null' ]
+        trip_id:
+          type: [ integer, 'null' ]
+        logistics_trip_line_id:
+          type: [ integer, 'null' ]
+        trip_status:
+          type: [ string, 'null' ]
+        whencreated:
+          type: string
+          format: date-time
+        whenmodified:
+          type: string
+          format: date-time
+    TripLineTripDetails:
+      type: object
+      description: Parent trip details; creator, updater and company data are excluded.
+      properties:
+        id:
+          type: integer
+        trip_code:
+          type: integer
+        vehicle_id:
+          type: integer
+        driver_id:
+          type: integer
+        sales_order_id:
+          type: integer
+        status:
+          type: string
+          enum: [ D, S, C, X ]
+        planned_departure_at:
+          type: string
+          format: date-time
+        assigned_at:
+          type: string
+          format: date-time
+        assigned_by:
+          type: [ integer, 'null' ]
+        cancelled_at:
+          type: [ string, 'null' ]
+          format: date-time
+        cancelled_by:
+          type: [ integer, 'null' ]
+        cancellation_reason:
+          type: [ string, 'null' ]
+        dispatched_at:
+          type: [ string, 'null' ]
+          format: date-time
+        dispatched_by:
+          type: [ integer, 'null' ]
+        delivered_at:
+          type: [ string, 'null' ]
+          format: date-time
+        delivered_by:
+          type: [ integer, 'null' ]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: [ string, 'null' ]
+          format: date-time
+    PlanningTripLineListEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccess'
+        - type: object
+          properties:
+            result:
+              type: object
+              required: [ items, page, page_size ]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/PlanningTripLine'
+                page:
+                  type: integer
+                page_size:
+                  type: integer
 
   responses:
     BadRequest:
@@ -3687,8 +4014,7 @@ components:
       headers: { WWW-Authenticate: { description: Present for HTTP 401., schema: { type: string } } }
       content: { application/json: { schema: { $ref: "#/components/schemas/SalesErrorResponse" } } }
     Customer:
-      description: Saved Customer with generated numeric id, immutable customer_code and calculated balance. No
-        Customer revision is currently defined.
+      description: Saved Customer with generated numeric id, immutable customer_code and calculated balance. No Customer revision is currently defined.
       content: { application/json: { schema: { $ref: "#/components/schemas/CustomerResponse" } } }
     CustomerList:
       description: Paged records.

@@ -62,13 +62,19 @@ final class LogisticsUiApi
             ]);
         }
         if ($method === 'GET' && $path === '/vehicles') {
-            return $this->response($this->vehicles->getVehicles($actor, Api::pagination($query)));
+            return $this->response($this->vehicles->getVehicles(
+                $actor,
+                Api::pagination($query, ['active', 'assignment_status', 'search'])
+            ));
         }
         if ($method === 'GET' && $path === '/eligible-vehicles') {
+            $pagination = Api::pagination($query, ['exclude_trip_id']);
+            $excludeTripId = $this->optionalId($pagination['filters']['exclude_trip_id'] ?? null, 'exclude_trip_id');
+            $pagination['filters'] = [];
             return $this->response($this->vehicles->getEligibleVehicles(
                 $actor,
-                Api::pagination($query, ['exclude_trip_id']),
-                $this->optionalId($query['exclude_trip_id'] ?? null, 'exclude_trip_id'),
+                $pagination,
+                $excludeTripId,
             ));
         }
         if ($method === 'GET' && $path === '/drivers') {
@@ -119,7 +125,7 @@ final class LogisticsUiApi
                     throw new AppError('VALIDATION_ERROR', 'Unsupported filter or invalid query value.');
                 }
                 return $this->response(match ($resource) {
-                    'vehicles' => $this->vehicles->getVehicle($actor, $id),
+                    'vehicles' => $this->vehicles->getVehicleById($actor, $id),
                     'drivers' => $this->drivers->getDriver($actor, $id),
                     default => $this->trips->getTrip($actor, $id),
                 });
@@ -128,7 +134,7 @@ final class LogisticsUiApi
                 return $this->response($this->vehicles->updateVehicle($actor, $id, $input));
             }
             if ($method === 'POST' && $resource === 'vehicles' && $action === 'delete') {
-                return $this->response($this->vehicles->deleteVehicle($actor, $id));
+                return $this->response($this->vehicles->deleteVehicle($actor, $id, $input));
             }
             if ($method === 'POST' && $resource === 'drivers' && $action === 'update') {
                 return $this->response($this->drivers->updateDriver($actor, $id, $input));

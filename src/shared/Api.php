@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace MiniErp\shared;
@@ -18,19 +19,39 @@ final class Api
     public function __construct(private readonly Connection $connection, Config $config, private readonly string $clientAddress = 'unknown')
     {
         $this->tokens = new TokenService($connection, $config->apiTokenTtl());
-        $this->register('GET', '/note', 'shared.note', 'read',
-            fn (Actor $actor): array => (new NeutralNote($connection))->read($actor));
-        $this->register('POST', '/note', 'shared.note', 'update',
-            fn (Actor $actor, array $input): array => (new NeutralNote($connection))->update(
-                $actor, self::string($input, 'action_reference'), self::string($input, 'text'), self::integer($input, 'expected_version'),
-            ));
+        $this->register(
+            'GET',
+            '/note',
+            'shared.note',
+            'read',
+            fn(Actor $actor): array => (new NeutralNote($connection))->read($actor)
+        );
+        $this->register(
+            'POST',
+            '/note',
+            'shared.note',
+            'update',
+            fn(Actor $actor, array $input): array => (new NeutralNote($connection))->update(
+                $actor,
+                self::string($input, 'action_reference'),
+                self::string($input, 'text'),
+                self::integer($input, 'expected_version'),
+            )
+        );
         $users = new UserService($connection);
-        $this->register('GET', '/users', 'shared.user', 'read',
+        $this->register(
+            'GET',
+            '/users',
+            'shared.user',
+            'read',
             static function (Actor $actor, array $input, array $params, array $query) use ($users): array {
                 $page = self::pagination($query);
-                $items = array_map(static fn (array $row): array => [
-                    'id' => $row['ID'], 'username' => $row['USERNAME'], 'display_name' => $row['DISPLAY_NAME'],
-                    'is_admin' => (int) $row['IS_ADMIN'] === 1, 'active' => (int) $row['ACTIVE'] === 1,
+                $items = array_map(static fn(array $row): array => [
+                    'id' => $row['ID'],
+                    'username' => $row['USERNAME'],
+                    'display_name' => $row['DISPLAY_NAME'],
+                    'is_admin' => (int) $row['IS_ADMIN'] === 1,
+                    'active' => (int) $row['ACTIVE'] === 1,
                     'current_version' => (int) $row['VERSION'],
                 ], $users->listUsers($actor, $page['offset'], $page['page_size']));
                 return ['items' => $items,
@@ -44,11 +65,22 @@ final class Api
         $this->register('POST', '/users/{id}/update', 'shared.user', 'update',
             static function (Actor $actor, array $input, array $params) use ($users): array {
                 $version = self::integer($input, 'expected_version');
-                $users->update($actor, $params['id'], self::string($input, 'display_name'),
-                    self::boolean($input, 'is_admin'), self::boolean($input, 'active'), $version);
+                $users->update(
+                    $actor,
+                    $params['id'],
+                    self::string($input, 'display_name'),
+                    self::boolean($input, 'is_admin'),
+                    self::boolean($input, 'active'),
+                    $version
+                );
                 return ['id' => $params['id'], 'current_version' => $version + 1];
-            });
-        $this->register('POST', '/users/{id}/permissions', 'shared.user', 'permissions',
+            }
+        );
+        $this->register(
+            'POST',
+            '/users/{id}/permissions',
+            'shared.user',
+            'permissions',
             static function (Actor $actor, array $input, array $params) use ($users): array {
                 $version = self::integer($input, 'expected_version');
                 if (!isset($input['grants']) || !is_array($input['grants']) || !array_is_list($input['grants'])) {
@@ -56,13 +88,19 @@ final class Api
                 }
                 $users->savePermissions($actor, $params['id'], $input['grants'], $version);
                 return ['id' => $params['id'], 'current_version' => $version + 1];
-            });
-        $this->register('POST', '/users/{id}/reset-password', 'shared.user', 'reset_password',
+            }
+        );
+        $this->register(
+            'POST',
+            '/users/{id}/reset-password',
+            'shared.user',
+            'reset_password',
             static function (Actor $actor, array $input, array $params) use ($users): array {
                 $version = self::integer($input, 'expected_version');
                 $users->resetPassword($actor, $params['id'], self::string($input, 'password'), $version);
                 return ['id' => $params['id'], 'current_version' => $version + 1];
-            });
+            }
+        );
         foreach (['inventory', 'purchasing', 'sales', 'logistics'] as $module) {
             $file = dirname(__DIR__) . '/' . $module . '/api.php';
             if (is_file($file)) {
@@ -81,7 +119,8 @@ final class Api
         if (!in_array($method, ['GET', 'POST', 'PUT', 'DELETE'], true)
             || !preg_match('#\A/(?:[a-z][a-z0-9-]*|\{[a-z][a-z0-9_]*\})(?:/(?:[a-z][a-z0-9-]*|\{[a-z][a-z0-9_]*\}))*\z#', $path)
             || $path === '/auth' || str_starts_with($path, '/auth/')
-            || $object === '' || $operation === '' || !in_array($status, [200, 201], true)) {
+            || $object === '' || $operation === '' || !in_array($status, [200, 201], true)
+        ) {
             throw new \InvalidArgumentException('Routes require a valid method/path, explicit permission and a 200/201 success status.');
         }
         foreach ($this->routes as $route) {
@@ -120,7 +159,10 @@ final class Api
                     throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'API writes require Content-Type: application/json.', 415);
                 }
                 return $this->response(200, $this->tokens->login(
-                    self::string($input, 'username'), self::string($input, 'password'), self::string($input, 'company'), $this->clientAddress,
+                    self::string($input, 'username'),
+                    self::string($input, 'password'),
+                    self::string($input, 'company'),
+                    $this->clientAddress,
                 ));
             }
             $token = self::bearer($headers);
@@ -129,10 +171,16 @@ final class Api
                 throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'API writes require Content-Type: application/json.', 415);
             }
             if ($method === 'GET' && $path === '/api/v1/auth/me') {
-                return $this->response(200, ['id' => $actor->id, 'username' => $actor->username,
-                    'company_id' => $actor->companyId, 'company_name' => $actor->companyName, 'roles' => $actor->roles,
-                    'is_admin' => $actor->isAdmin, 'must_change_password' => $actor->mustChangePassword,
-                    'permissions' => (new Authorization($this->connection))->permissions($actor)]);
+                return $this->response(200, [
+                    'id' => $actor->id,
+                    'username' => $actor->username,
+                    'company_id' => $actor->companyId,
+                    'company_name' => $actor->companyName,
+                    'roles' => $actor->roles,
+                    'is_admin' => $actor->isAdmin,
+                    'must_change_password' => $actor->mustChangePassword,
+                    'permissions' => (new Authorization($this->connection))->permissions($actor)
+                ]);
             }
             if ($method === 'POST' && $path === '/api/v1/auth/logout') {
                 $this->tokens->revoke($token);
@@ -140,7 +188,9 @@ final class Api
             }
             if ($method === 'POST' && $path === '/api/v1/auth/change-password') {
                 (new UserService($this->connection))->changePassword(
-                    $actor, self::string($input, 'current_password'), self::string($input, 'new_password'),
+                    $actor,
+                    self::string($input, 'current_password'),
+                    self::string($input, 'new_password'),
                 );
                 return $this->response(200, ['password_changed' => true, 'login_required' => true]);
             }
@@ -149,7 +199,13 @@ final class Api
             }
             foreach ($this->routes as $route) {
                 if ($route['method'] === $method && preg_match($route['pattern'], substr($path, strlen('/api/v1')), $params)) {
-                    (new Authorization($this->connection))->requirePermission($actor, $route['object'], $route['operation']);
+                    $operation = $route['operation'] instanceof \Closure
+                        ? ($route['operation'])($input)
+                        : $route['operation'];
+                    if (!is_string($operation) || $operation === '') {
+                        throw new \LogicException('Route permission resolver must return an operation name.');
+                    }
+                    (new Authorization($this->connection))->requirePermission($actor, $route['object'], $operation);
                     $params = array_filter($params, 'is_string', ARRAY_FILTER_USE_KEY);
                     $result = ($route['handler'])($actor, $input, $params, $query);
                     if (!is_array($result)) {
@@ -226,8 +282,10 @@ final class Api
 
     public static function bearer(#[\SensitiveParameter] array $headers): string
     {
-        if (!is_string($headers['authorization'] ?? null)
-            || !preg_match('/\A(?i:Bearer) ([a-f0-9]{64})\z/', $headers['authorization'], $match)) {
+        if (
+            !is_string($headers['authorization'] ?? null)
+            || !preg_match('/\A(?i:Bearer) ([a-f0-9]{64})\z/', $headers['authorization'], $match)
+        ) {
             throw new AppError('UNAUTHENTICATED', 'Supply an API bearer token.', 401);
         }
         return $match[1];

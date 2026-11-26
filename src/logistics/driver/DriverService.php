@@ -130,7 +130,7 @@ class DriverService
         );
     }
 
-    // POST /logistics/drivers/{id}/update
+    // POST /logistics/drivers/{id}
     public function updateDriver(Actor $actor, int $id, array $input): array
     {   
         $authorization = new Authorization($this->connection);
@@ -180,7 +180,7 @@ class DriverService
                 : $this->repository->delete($actor->companyId, $id)
         );
 
-        return ['id' => $id, 'deleted' => true];
+        return [];
     }
 
     private function actorId(Actor $actor): int

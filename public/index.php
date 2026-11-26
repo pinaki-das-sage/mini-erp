@@ -7,7 +7,13 @@ use MiniErp\shared\Kernel;
 ini_set('display_errors', '0');
 set_exception_handler(static function (Throwable $error): void {
     $reference = bin2hex(random_bytes(8));
-    error_log('mini-erp unhandled_error request=' . $reference . ' type=' . get_class($error));
+    // Log the failure location without logging credentials, tokens or request arguments.
+    error_log('mini-erp unhandled_error ' . json_encode([
+        'request' => $reference,
+        'type' => get_class($error),
+        'file' => $error->getFile(),
+        'line' => $error->getLine(),
+    ], JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR));
     http_response_code($error instanceof AppError ? $error->status : 500);
     header('Content-Type: application/json; charset=UTF-8');
     header('Cache-Control: no-store');

@@ -1,19 +1,101 @@
 <?php
 
+// Enforce declared scalar types instead of silently coercing values in calls from this file.
 declare(strict_types=1);
 
+// Imports let us use short class names instead of fully qualified names below.
 use MiniErp\shared\Api;
+use MiniErp\shared\AppError;
 use MiniErp\shared\database\Connection;
 use MiniErp\shared\security\Actor;
 use MiniErp\logistics\vehicle\VehicleService;
 use MiniErp\logistics\driver\DriverService;
 use MiniErp\logistics\trip\TripService;
+use MiniErp\logistics\tripline\TripLineService;
+use MiniErp\logistics\tripline\TripLineValidator;
 
+/**
+ * The application loads this file and calls the returned function to register routes.
+ * Api is the router; Connection is the shared Oracle connection. void means no return value.
+ * static means this callback has no $this object.
+ *
+ * Every route handler receives:
+ * - actor: authenticated identity/company, provided by the framework.
+ * - input: parsed JSON object as an array (not input[body]).
+ * - params: URL placeholders, e.g. id from /vehicles/{id}.
+ * - query: URL query parameters, e.g. page, page_size, active and search.
+ */
 return static function (Api $api, Connection $connection): void {
-    
     $drivers = new DriverService($connection);
-    $trips = new TripService($connection);
+    // Construct the business service using the same connection as the framework.
+    $vehicles = new VehicleService($connection);
+    // Reusable URL-ID validator: unlike an integer cast, filter_var rejects malformed IDs.
+    $vehicleId = static function (array $params): int {
+        $id = filter_var($params['id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        // Strict comparison distinguishes validation failure from a successful integer result.
+        if ($id === false) {
+            throw new AppError('VALIDATION_ERROR', 'Vehicle ID must be a positive integer.', 400);
+        }
+        return $id;
+    };
 
+    // register(method, path, permission object, operation, handler). Api supplies /api/v1.
+    // This route reads a paginated list; it does not modify records.
+    $api->register(
+        'GET',
+        '/logistics/vehicles',
+        'logistics.vehicles',
+        'read',
+        static function (Actor $actor, array $input, array $params, array $query) use ($vehicles): array {
+            // use ($vehicles) captures the outer service for this anonymous function.
+            // pagination() validates page/size, calculates offset and permits only these filters.
+            return $vehicles->getVehicles($actor, Api::pagination($query, ['active', 'assignment_status', 'search']));
+        }
+    );
+
+    // {id} is the generated database ID, not the vehicle's business code.
+    $api->register(
+        'GET',
+        '/logistics/vehicles/{id}',
+        'logistics.vehicles',
+        'read',
+        static function (Actor $actor, array $input, array $params, array $query) use ($vehicles, $vehicleId): array {
+            // Validate the URL value before passing a typed int to the service.
+            return $vehicles->getVehicleById($actor, $vehicleId($params));
+        }
+    );
+
+    // Each write route requires its own permission before invoking the service.
+    $api->register(
+        'POST',
+        '/logistics/vehicles',
+        'logistics.vehicles',
+        'create',
+        static function (Actor $actor, array $input, array $params, array $query) use ($vehicles): array {
+            return $vehicles->createVehicle($actor, $input);
+        },
+        201
+    );
+
+    $api->register(
+        'POST',
+        '/logistics/vehicles/{id}/update',
+        'logistics.vehicles',
+        'update',
+        static function (Actor $actor, array $input, array $params, array $query) use ($vehicles, $vehicleId): array {
+            return $vehicles->updateVehicle($actor, $vehicleId($params), $input);
+        }
+    );
+
+    $api->register(
+        'POST',
+        '/logistics/vehicles/{id}/delete',
+        'logistics.vehicles',
+        'delete',
+        static function (Actor $actor, array $input, array $params, array $query) use ($vehicles, $vehicleId): array {
+            return $vehicles->deleteVehicle($actor, $vehicleId($params), $input);
+        }
+    );
 
     $api->register(
         'GET',
@@ -29,7 +111,7 @@ return static function (Api $api, Connection $connection): void {
             $pagination = Api::pagination($query);
             return $drivers->getDrivers($actor, $pagination);
         }
-    );  
+    );
 
     $api->register(
         'GET',
@@ -96,7 +178,7 @@ return static function (Api $api, Connection $connection): void {
 
     $api->register(
         'POST',
-        '/logistics/drivers/{id}/update',
+        '/logistics/drivers/{id}',
         'logistics.drivers',
         'update',
         static function (
@@ -125,6 +207,21 @@ return static function (Api $api, Connection $connection): void {
             return $drivers->deleteDriver($actor, $id);
         }
     );
+    $api->register(
+        'POST',
+        '/logistics/drivers/{id}/update',
+        'logistics.drivers',
+        'update',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($drivers): array {
+            $id = (int) $params['id'];
+            return $drivers->updateDriver($actor, $id, $input);
+        }
+    );
 
     $api->register(
         'GET',
@@ -142,6 +239,15 @@ return static function (Api $api, Connection $connection): void {
         }
     );
 
+    // Resolve Trips only when requested, so login still works before its service is merged.
+    $trips = null;
+    $tripService = static function () use ($connection, &$trips): TripService {
+        if (!class_exists(TripService::class)) {
+            throw new AppError('DEPENDENCY_UNAVAILABLE', 'Merge the Trip service implementation first.', 503);
+        }
+        return $trips ??= new TripService($connection);
+    };
+
     $api->register(
         'GET',
         '/logistics/trips',
@@ -152,9 +258,9 @@ return static function (Api $api, Connection $connection): void {
             array $input,
             array $params,
             array $query
-        ) use ($trips): array {
+        ) use ($tripService): array {
             $pagination = Api::pagination($query);
-            return $trips->getTrips($actor, $pagination);
+            return $tripService()->getTrips($actor, $pagination);
         }
     );
 
@@ -168,9 +274,9 @@ return static function (Api $api, Connection $connection): void {
             array $input,
             array $params,
             array $query
-        ) use ($trips): array {
+        ) use ($tripService): array {
             $id = (int) $params['id'];
-            return $trips->getTrip($actor, $id);
+            return $tripService()->getTrip($actor, $id);
         }
     );
 
@@ -184,8 +290,8 @@ return static function (Api $api, Connection $connection): void {
             array $input,
             array $params,
             array $query
-        ) use ($trips): array {
-            return $trips->createTrip($actor, $input);
+        ) use ($tripService): array {
+            return $tripService()->createTrip($actor, $input);
         },
         201
     );
@@ -200,9 +306,9 @@ return static function (Api $api, Connection $connection): void {
             array $input,
             array $params,
             array $query
-        ) use ($trips): array {
+        ) use ($tripService): array {
             $id = (int) $params['id'];
-            return $trips->updateTrip($actor, $id, $input);
+            return $tripService()->updateTrip($actor, $id, $input);
         }
     );
 
@@ -216,9 +322,9 @@ return static function (Api $api, Connection $connection): void {
             array $input,
             array $params,
             array $query
-        ) use ($trips): array {
+        ) use ($tripService): array {
             $id = (int) $params['id'];
-            return $trips->cancelTrip($actor, $id, $input);
+            return $tripService()->cancelTrip($actor, $id, $input);
         }
     );
 
@@ -232,9 +338,9 @@ return static function (Api $api, Connection $connection): void {
             array $input,
             array $params,
             array $query
-        ) use ($trips): array {
+        ) use ($tripService): array {
             $id = (int) $params['id'];
-            return $trips->dispatchTrip($actor, $id, $input);
+            return $tripService()->dispatchTrip($actor, $id, $input);
         }
     );
 
@@ -248,9 +354,31 @@ return static function (Api $api, Connection $connection): void {
             array $input,
             array $params,
             array $query
-        ) use ($trips): array {
+        ) use ($tripService): array {
             $id = (int) $params['id'];
-            return $trips->deliverTrip($actor, $id, $input);
+            return $tripService()->deliverTrip($actor, $id, $input);
+        }
+    );
+
+    // Read-only trip-line routes; trip creation and lifecycle belong to the trip module.
+    $tripLines = new TripLineService($connection);
+    $tripLineValidator = new TripLineValidator();
+    $api->register(
+        'GET',
+        '/logistics/trip-lines',
+        'logistics.trip_lines',
+        'read',
+        static function (Actor $actor, array $input, array $params, array $query) use ($tripLines): array {
+            return $tripLines->getTripLines($actor, Api::pagination($query, ['trip_id']));
+        }
+    );
+    $api->register(
+        'GET',
+        '/logistics/trip-lines/{id}',
+        'logistics.trip_lines',
+        'read',
+        static function (Actor $actor, array $input, array $params, array $query) use ($tripLines, $tripLineValidator): array {
+            return $tripLines->getTripLine($actor, $tripLineValidator->id($params['id']));
         }
     );
 };
