@@ -10,6 +10,7 @@ use MiniErp\shared\database\Connection;
 use MiniErp\shared\security\Actor;
 use MiniErp\logistics\vehicle\VehicleService;
 use MiniErp\logistics\driver\DriverService;
+use MiniErp\logistics\trip\TripService;
 use MiniErp\logistics\tripline\TripLineService;
 use MiniErp\logistics\tripline\TripLineValidator;
 
@@ -140,7 +141,8 @@ return static function (Api $api, Connection $connection): void {
             array $query
         ) use ($drivers): array {
             return $drivers->createDriver($actor, $input);
-        }
+        },
+        201
     );
 
     $api->register(
@@ -174,6 +176,162 @@ return static function (Api $api, Connection $connection): void {
             return $drivers->deleteDriver($actor, $id);
         }
     );
+    $api->register(
+        'POST',
+        '/logistics/drivers/{id}/update',
+        'logistics.drivers',
+        'update',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($drivers): array {
+            $id = (int) $params['id'];
+            return $drivers->updateDriver($actor, $id, $input);
+        }
+    );
+
+    $api->register(
+        'GET',
+        '/logistics/driver-users',
+        'logistics.drivers',
+        'read',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($drivers): array {
+            if (!method_exists($drivers, 'getEligibleUsers')) {
+                throw new AppError('DEPENDENCY_UNAVAILABLE', 'Merge the driver-user lookup implementation first.', 503);
+            }
+            $pagination = Api::pagination($query, ['search']);
+            return $drivers->getEligibleUsers($actor, $pagination);
+        }
+    );
+
+    // Resolve Trips only when requested, so login still works before its service is merged.
+    $trips = null;
+    $tripService = static function () use ($connection, &$trips): TripService {
+        if (!class_exists(TripService::class)) {
+            throw new AppError('DEPENDENCY_UNAVAILABLE', 'Merge the Trip service implementation first.', 503);
+        }
+        return $trips ??= new TripService($connection);
+    };
+
+    $api->register(
+        'GET',
+        '/logistics/trips',
+        'logistics.trips',
+        'read',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($tripService): array {
+            $pagination = Api::pagination($query);
+            return $tripService()->getTrips($actor, $pagination);
+        }
+    );
+
+    $api->register(
+        'GET',
+        '/logistics/trips/{id}',
+        'logistics.trips',
+        'read',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($tripService): array {
+            $id = (int) $params['id'];
+            return $tripService()->getTrip($actor, $id);
+        }
+    );
+
+    $api->register(
+        'POST',
+        '/logistics/trips',
+        'logistics.trips',
+        'create',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($tripService): array {
+            return $tripService()->createTrip($actor, $input);
+        },
+        201
+    );
+
+    $api->register(
+        'POST',
+        '/logistics/trips/{id}/update',
+        'logistics.trips',
+        'update',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($tripService): array {
+            $id = (int) $params['id'];
+            return $tripService()->updateTrip($actor, $id, $input);
+        }
+    );
+
+    $api->register(
+        'POST',
+        '/logistics/trips/{id}/cancel',
+        'logistics.trips',
+        'update',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($tripService): array {
+            $id = (int) $params['id'];
+            return $tripService()->cancelTrip($actor, $id, $input);
+        }
+    );
+
+    $api->register(
+        'POST',
+        '/logistics/trips/{id}/dispatch',
+        'logistics.trips',
+        'update',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($tripService): array {
+            $id = (int) $params['id'];
+            return $tripService()->dispatchTrip($actor, $id, $input);
+        }
+    );
+
+    $api->register(
+        'POST',
+        '/logistics/trips/{id}/deliver',
+        'logistics.trips',
+        'update',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($tripService): array {
+            $id = (int) $params['id'];
+            return $tripService()->deliverTrip($actor, $id, $input);
+        }
+    );
+
     // Read-only trip-line routes; trip creation and lifecycle belong to the trip module.
     $tripLines = new TripLineService($connection);
     $tripLineValidator = new TripLineValidator();
