@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace MiniErp\shared;
 
+use MiniErp\logistics\LogisticsUiApi;
 use MiniErp\shared\database\Connection;
 use MiniErp\shared\database\DatabaseError;
 use MiniErp\shared\database\MigrationRunner;
@@ -39,6 +40,22 @@ final class Kernel
                     Api::bearer($headers);
                 }
                 return (new Api($this->db(), $this->config, $this->clientAddress))->handle($method, $path, $input, $headers, $query);
+            }
+            // Keep the browser session bridge separate from bearer-only /api/v1.
+            if (str_starts_with($path, '/ui-api/logistics')) {
+                $actor = $this->actor();
+                if ($method !== 'GET') {
+                    Security::verifyCsrf($this->session, $headers['x-csrf-token'] ?? null);
+                    if (strtolower(trim(explode(';', $headers['content-type'] ?? '')[0])) !== 'application/json') {
+                        throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'Logistics UI writes require Content-Type: application/json.', 415);
+                    }
+                }
+                $operation = substr($path, strlen('/ui-api/logistics'));
+                $response = (new LogisticsUiApi($this->db()))->dispatch($actor, $method, $operation, $input, $query);
+                return $this->json($response['status'], [
+                    'success' => true, 'operation_id' => null, 'current_version' => null,
+                    'result' => $response['result'], 'error' => null,
+                ]);
             }
             if (str_starts_with($path, '/api/') && isset($headers['authorization'])) {
                 throw new AppError('UNAUTHENTICATED', 'Bearer clients must use /api/v1 endpoints.', 401);

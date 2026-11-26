@@ -10,25 +10,10 @@ use MiniErp\logistics\driver\DriverService;
 use MiniErp\logistics\trip\TripService;
 
 return static function (Api $api, Connection $connection): void {
-    $vehicles = new VehicleService($connection);
+    
     $drivers = new DriverService($connection);
     $trips = new TripService($connection);
 
-    $api->register(
-        'GET',
-        '/logistics/vehicles',
-        'logistics.vehicles',
-        'read',
-        static function (
-            Actor $actor,
-            array $input,
-            array $params,
-            array $query
-        ) use ($vehicles): array {
-            $pagination = Api::pagination($query);
-            return $vehicles->getVehicles($actor, $pagination);
-        }
-    );
 
     $api->register(
         'GET',

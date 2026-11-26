@@ -1,9 +1,9 @@
 openapi: 3.1.0
 
 info:
-  title: Mini ERP Logistics API
+  title: Mini ERP API
   description: >
-    OpenAPI contract for the Mini ERP Logistics module. This document describes
+    OpenAPI contract for the Mini ERP Sales and Logistics modules. This document describes
     API routes and payloads. It does not implement the backend. Confirm the
     deployed application base URL, credentials, and permission names with the team.
   version: 1.0.0
@@ -14,10 +14,31 @@ servers:
 
 tags:
   - name: Authentication
-  - name: Vehicles
-  - name: Drivers
-  - name: Trips
+  - name: "Sales - Customers"
+  - name: "Sales - Sales Quotes"
+  - name: "Sales - Sales Orders"
+  - name: "Sales - Sales Invoices"
+  - name: "Sales - Customer Payments"
+  - name: "Logistics - Vehicles"
+  - name: "Logistics - Drivers"
+  - name: "Logistics - Trips"
   - name: Metadata
+
+x-tagGroups:
+  - name: Common
+    tags: [Authentication, Metadata]
+  - name: Sales
+    tags:
+      - "Sales - Customers"
+      - "Sales - Sales Quotes"
+      - "Sales - Sales Orders"
+      - "Sales - Sales Invoices"
+      - "Sales - Customer Payments"
+  - name: Logistics
+    tags:
+      - "Logistics - Vehicles"
+      - "Logistics - Drivers"
+      - "Logistics - Trips"
 
 security:
   - bearerAuth: []
@@ -123,156 +144,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/GenericSuccess'
 
-  /logistics/vehicles:
-    post:
-      tags: [Vehicles]
-      summary: Create a vehicle
-      operationId: createVehicle
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              allOf:
-                - $ref: '#/components/schemas/Command'
-                - type: object
-                  required: [vehicle_code, registration_number, capacity_kg]
-                  properties:
-                    vehicle_code:
-                      type: integer
-                      minimum: 1
-                      example: 30
-                    registration_number:
-                      type: string
-                      maxLength: 40
-                      example: KA01AB1234
-                    capacity_kg:
-                      $ref: '#/components/schemas/PositiveKilograms'
-                    description:
-                      type: [string, 'null']
-                      maxLength: 255
-                    active:
-                      type: boolean
-                      default: true
-      responses:
-        '201':
-          description: Vehicle created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VehicleEnvelope'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/Conflict'
-    get:
-      tags: [Vehicles]
-      summary: List vehicles
-      operationId: listVehicles
-      parameters:
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/PageSize'
-        - name: active
-          in: query
-          schema:
-            type: boolean
-        - name: assignment_status
-          in: query
-          schema:
-            type: string
-            enum: [AVAILABLE, ASSIGNED]
-        - name: search
-          in: query
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Paged vehicle list
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VehicleListEnvelope'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-
-  /logistics/vehicles/{id}:
     parameters:
       - $ref: '#/components/parameters/Id'
-    get:
-      tags: [Vehicles]
-      summary: Get a vehicle
-      operationId: getVehicle
-      responses:
-        '200':
-          description: Vehicle details and availability
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VehicleEnvelope'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    patch:
-      tags: [Vehicles]
-      summary: Update a vehicle
-      operationId: updateVehicle
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              allOf:
-                - $ref: '#/components/schemas/VersionedCommand'
-                - type: object
-                  properties:
-                    vehicle_code:
-                      type: integer
-                      minimum: 1
-                    registration_number:
-                      type: string
-                      maxLength: 40
-                    capacity_kg:
-                      $ref: '#/components/schemas/PositiveKilograms'
-                    description:
-                      type: [string, 'null']
-                      maxLength: 255
-                    active:
-                      type: boolean
-      responses:
-        '200':
-          description: Vehicle updated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VehicleEnvelope'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-    delete:
-      tags: [Vehicles]
-      summary: Delete a never-used vehicle
+    post:
+      tags: ["Logistics - Vehicles"]
+      summary: Delete or deactivate a vehicle
+      description: Vehicles with Trip history are deactivated; Vehicles assigned to an active Trip cannot be deleted or deactivated.
       operationId: deleteVehicle
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/VersionedCommand'
+              type: object
+              additionalProperties: false
+              maxProperties: 0
       responses:
         '200':
-          description: Vehicle deleted
+          description: Vehicle deleted or deactivated
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GenericSuccess'
+                $ref: '#/components/schemas/VehicleDeleteEnvelope'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -280,7 +173,7 @@ paths:
 
   /logistics/drivers:
     post:
-      tags: [Drivers]
+      tags: ["Logistics - Drivers"]
       summary: Create a driver profile
       operationId: createDriver
       requestBody:
@@ -333,7 +226,7 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
     get:
-      tags: [Drivers]
+      tags: ["Logistics - Drivers"]
       summary: List drivers
       operationId: listDrivers
       parameters:
@@ -357,7 +250,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     get:
-      tags: [Drivers]
+      tags: ["Logistics - Drivers"]
       summary: Get a driver
       operationId: getDriver
       responses:
@@ -378,7 +271,7 @@ paths:
 
   /logistics/drivers/{id}/update:
     post:
-      tags: [Drivers]
+      tags: ["Logistics - Drivers"]
       summary: Update a driver profile
       operationId: updateDriver
       parameters:
@@ -436,7 +329,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     post:
-      tags: [Drivers]
+      tags: ["Logistics - Drivers"]
       summary: Delete or deactivate a driver profile
       description: >
         A driver never referenced by a Trip may be deleted. A driver with
@@ -473,7 +366,7 @@ paths:
 
   /logistics/driver-users:
     get:
-      tags: [Drivers]
+      tags: ["Logistics - Drivers"]
       summary: List eligible same-company driver user accounts
       operationId: listEligibleDriverUsers
       parameters:
@@ -497,12 +390,13 @@ paths:
 
   /logistics/trips:
     post:
-      tags: [Trips]
+      tags: ["Logistics - Trips"]
       summary: Create a Draft Trip from one complete Submitted Sales Order
       description: >
         One whole Submitted Sales Order becomes one Draft Trip and every Sales
-        Order line becomes a TripLine. Draft creation leaves Sales Submitted.
-        Line weight and load are derived from Inventory, never supplied by the client.
+        Order line becomes a TripLine. In the same transaction, Trip assignment
+        changes the Sales Order from SUBMITTED to IN_PROGRESS. Line weight and
+        load are derived from Inventory, never supplied by the client.
       operationId: createTrip
       requestBody:
         required: true
@@ -511,12 +405,12 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [order_number, trip_reference, vehicle_id, driver_id, planned_departure_at]
+              required: [order_number, trip_code, vehicle_id, driver_id, planned_departure_at]
               properties:
                 order_number:
                   type: string
                   example: SO-1001
-                trip_reference:
+                trip_code:
                   type: integer
                   minimum: 1
                   example: 1001
@@ -546,7 +440,7 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
     get:
-      tags: [Trips]
+      tags: ["Logistics - Trips"]
       summary: List trips
       operationId: listTrips
       parameters:
@@ -568,7 +462,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     get:
-      tags: [Trips]
+      tags: ["Logistics - Trips"]
       summary: Get a trip
       operationId: getTrip
       responses:
@@ -585,7 +479,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     post:
-      tags: [Trips]
+      tags: ["Logistics - Trips"]
       summary: Update a Draft trip's Vehicle, Driver and planned departure
       operationId: updateTrip
       requestBody:
@@ -625,9 +519,12 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     post:
-      tags: [Trips]
+      tags: ["Logistics - Trips"]
       summary: Cancel a Draft trip
-      description: Notifies Sales in the same transaction; the Sales Order must be Submitted and stays Submitted.
+      description: >
+        Requires a Draft Trip and a Sales Order already in IN_PROGRESS.
+        A required cancellation reason is saved. In the same transaction the
+        Sales Order returns from IN_PROGRESS to SUBMITTED and the Draft assignment is released.
       operationId: cancelTrip
       requestBody:
         required: true
@@ -659,12 +556,13 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     post:
-      tags: [Trips]
+      tags: ["Logistics - Trips"]
       summary: Dispatch a Draft trip
       description: >
         Draft -> Dispatched. Consumes the Inventory reservations, records the
-        dispatch with Sales (Submitted -> In Progress) in one transaction
-        shared by Logistics, Inventory and Sales.
+        dispatch with Sales in one transaction shared by Logistics, Inventory
+        and Sales. The Sales Order must already be IN_PROGRESS and remains
+        IN_PROGRESS; dispatch does not perform SUBMITTED -> IN_PROGRESS.
       operationId: dispatchTrip
       requestBody:
         required: true
@@ -697,12 +595,13 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     post:
-      tags: [Trips]
+      tags: ["Logistics - Trips"]
       summary: Complete delivery of a Dispatched trip
       description: >
-        Dispatched -> Delivered. Notifies Sales through recordDelivery() in
-        the same transaction (In Progress -> Closed). No invoice is created
-        during delivery.
+        Dispatched -> Delivered. Notifies Sales through the existing
+        recordDelivery() fulfillment path in the same transaction. The Order
+        remains IN_PROGRESS through dispatch and is closed by the existing
+        successful-delivery closure logic. No invoice is created during delivery.
       operationId: deliverTrip
       requestBody:
         required: true
@@ -731,12 +630,486 @@ paths:
         '503':
           $ref: '#/components/responses/Unavailable'
 
+  /sales/customers:
+    post:
+      tags: [ "Sales - Customers" ]
+      summary: Create a Customer
+      operationId: createCustomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomerCreateRequest" }
+            example:
+              customer_name: Example Traders
+              billing_address_line_1: 12 Market Road
+              city: Bengaluru
+              country: India
+      responses: { "201": { $ref: "#/components/responses/Customer" }, default: { $ref: "#/components/responses/CustomerQuoteError" } }
+    get:
+      tags: [ "Sales - Customers" ]
+      summary: List Customers
+      operationId: listCustomers
+      parameters:
+        - { $ref: "#/components/parameters/Search" }
+        - { $ref: "#/components/parameters/CustomerActive" }
+        - { $ref: "#/components/parameters/SalesPage" }
+        - { $ref: "#/components/parameters/PageSize" }
+      responses:
+        "200": { $ref: "#/components/responses/CustomerList" }
+        default: { $ref: "#/components/responses/CustomerQuoteError" }
+
+  /sales/customers/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/CustomerRecordIdPath" }
+    get:
+      tags: [ "Sales - Customers" ]
+      summary: Get a Customer
+      operationId: getCustomer
+      responses: { "200": { $ref: "#/components/responses/Customer" }, default: { $ref: "#/components/responses/CustomerQuoteError" } }
+
+  /sales/customers/{id}/update:
+    parameters:
+      - { $ref: "#/components/parameters/CustomerRecordIdPath" }
+    post:
+      tags: [ "Sales - Customers" ]
+      summary: Update or activate/deactivate a Customer using POST
+      operationId: updateCustomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomerUpdateRequest" }
+            example:
+              is_active: "F"
+              billing_address_line_1: BTM Layout 2nd Stage
+      responses: { "200": { $ref: "#/components/responses/Customer" }, default: { $ref: "#/components/responses/CustomerQuoteError" } }
+
+  /sales/quotes:
+    post:
+      tags: [ "Sales - Sales Quotes" ]
+      summary: Create a Draft Quote
+      operationId: createQuote
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuoteCreateRequest" }
+            example:
+              customer_code: CUST-0023
+              warehouse_id: W01
+              quote_date: "2026-11-24"
+              valid_until: "2026-11-24"
+              requested_delivery_date: "2026-11-24"
+              shipping_address: 12 Market Road, Bengaluru, India
+              payment_terms: DUE_ON_RECEIPT
+              notes: Test quote
+              lines:
+                - product_id: "163"
+                  quantity: "10"
+                  unit_price: "9818.00"
+                  description: Test product
+      responses: { "201": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/CustomerQuoteError" } }
+      x-implementation-status: implemented
+    get:
+      tags: [ "Sales - Sales Quotes" ]
+      summary: List Sales Quotes
+      operationId: listQuotes
+      parameters:
+        - { $ref: "#/components/parameters/CustomerCode" }
+        - { $ref: "#/components/parameters/WarehouseId" }
+        - { $ref: "#/components/parameters/DraftSubmittedStatus" }
+        - { $ref: "#/components/parameters/FromDate" }
+        - { $ref: "#/components/parameters/ToDate" }
+        - { $ref: "#/components/parameters/SalesPage" }
+        - { $ref: "#/components/parameters/PageSize" }
+      responses:
+        "200": { $ref: "#/components/responses/QuoteList" }
+        default: { $ref: "#/components/responses/CustomerQuoteError" }
+      x-implementation-status: implemented
+
+  /sales/quotes/{quote_number}:
+    parameters:
+      - { $ref: "#/components/parameters/QuoteNumber" }
+    get:
+      tags: [ "Sales - Sales Quotes" ]
+      summary: Get a Quote
+      operationId: getQuote
+      responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/CustomerQuoteError" } }
+      x-implementation-status: implemented
+
+  /sales/quotes/{quote_number}/update:
+    parameters:
+      - { $ref: "#/components/parameters/QuoteNumber" }
+    post:
+      tags: [ "Sales - Sales Quotes" ]
+      summary: Update a Draft Quote using POST
+      operationId: updateQuote
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuoteUpdateRequest" }
+            example:
+              expected_version: 1
+              lines:
+                - line_id: "121"
+                  product_id: "163"
+                  quantity: "85"
+                  unit_price: "574511253.54"
+                  description: Test product Sagar
+      responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/CustomerQuoteError" } }
+      x-implementation-status: implemented
+
+  /sales/quotes/{quote_number}/submit:
+    parameters:
+      - { $ref: "#/components/parameters/QuoteNumber" }
+    post:
+      tags: [ "Sales - Sales Quotes" ]
+      summary: Submit a saved Draft Quote
+      operationId: submitQuote
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
+      responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/CustomerQuoteError" } }
+      x-implementation-status: implemented
+
+  /sales/quotes/{quote_number}/move-to-draft:
+    parameters:
+      - { $ref: "#/components/parameters/QuoteNumber" }
+    post:
+      tags: [ "Sales - Sales Quotes" ]
+      summary: Return an eligible Submitted Quote to Draft
+      operationId: moveQuoteToDraft
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
+      responses: { "200": { $ref: "#/components/responses/Quote" }, default: { $ref: "#/components/responses/CustomerQuoteError" } }
+      x-implementation-status: implemented
+
+  /sales/quotes/{quote_number}/delete:
+    parameters:
+      - { $ref: "#/components/parameters/QuoteNumber" }
+    post:
+      tags: [ "Sales - Sales Quotes" ]
+      summary: Delete an eligible Draft Quote
+      operationId: deleteQuote
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/QuoteActionRequest" } } }
+      responses:
+        "200": { $ref: "#/components/responses/QuoteDeleted" }
+        default: { $ref: "#/components/responses/CustomerQuoteError" }
+      x-implementation-status: implemented
+
+  /sales/orders:
+    post:
+      tags: [ "Sales - Sales Orders" ]
+      summary: Create a Draft Order
+      operationId: createOrder
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/OrderCreateRequest" } } }
+      responses: { "201": { $ref: "#/components/responses/Order" }, default: { $ref: "#/components/responses/Error" } }
+      x-implementation-status: implemented
+    get:
+      tags: [ "Sales - Sales Orders" ]
+      summary: List Sales Orders
+      operationId: listOrders
+      parameters:
+        - name: search
+          in: query
+          description: Case-insensitive match against Order number, Customer code, or Customer name.
+          schema:
+            type: string
+            maxLength: 100
+        - { $ref: "#/components/parameters/CustomerCode" }
+        - { $ref: "#/components/parameters/WarehouseId" }
+        - { $ref: "#/components/parameters/DocumentStatus" }
+        - { $ref: "#/components/parameters/FromDate" }
+        - { $ref: "#/components/parameters/ToDate" }
+        - { $ref: "#/components/parameters/SalesPage" }
+        - { $ref: "#/components/parameters/PageSize" }
+      responses:
+        "200": { $ref: "#/components/responses/OrderList" }
+        default: { $ref: "#/components/responses/Error" }
+      x-implementation-status: implemented
+
+  /sales/orders/eligible-quotes:
+    get:
+      tags: [ "Sales - Sales Orders" ]
+      summary: List eligible Quote sources
+      operationId: listOrderQuoteSources
+      parameters:
+        - { $ref: "#/components/parameters/CustomerCode" }
+        - { $ref: "#/components/parameters/WarehouseId" }
+        - { $ref: "#/components/parameters/FromDate" }
+        - { $ref: "#/components/parameters/ToDate" }
+        - { $ref: "#/components/parameters/SalesPage" }
+        - { $ref: "#/components/parameters/PageSize" }
+      responses:
+        "200": { $ref: "#/components/responses/QuoteList" }
+        default: { $ref: "#/components/responses/Error" }
+      x-implementation-status: implemented
+
+  /sales/orders/{order_number}:
+    parameters:
+      - { $ref: "#/components/parameters/OrderNumber" }
+    get:
+      tags: [ "Sales - Sales Orders" ]
+      summary: Get an Order
+      operationId: getOrder
+      responses: { "200": { $ref: "#/components/responses/Order" }, default: { $ref: "#/components/responses/Error" } }
+      x-implementation-status: implemented
+      x-integration-status: Submit-time Invoice creation is connected; Logistics event writers require team integration.
+
+  /sales/orders/{order_number}/update:
+    parameters:
+      - { $ref: "#/components/parameters/OrderNumber" }
+    post:
+      tags: [ "Sales - Sales Orders" ]
+      summary: Update a Draft Order
+      operationId: updateOrder
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/OrderUpdateRequest" } } }
+      responses: { "200": { $ref: "#/components/responses/Order" }, default: { $ref: "#/components/responses/Error" } }
+      x-implementation-status: implemented
+
+  /sales/orders/{order_number}/submit:
+    parameters:
+      - { $ref: "#/components/parameters/OrderNumber" }
+    post:
+      tags: [ "Sales - Sales Orders" ]
+      summary: Submit a saved Draft Order
+      operationId: submitOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrderActionRequest" }
+            example: { expected_version: 1 }
+      responses:
+        "200": { $ref: "#/components/responses/Order" }
+        "409": { $ref: "#/components/responses/InventoryConflict" }
+        "503": { $ref: "#/components/responses/InventoryUnavailable" }
+        default: { $ref: "#/components/responses/Error" }
+      x-implementation-status: implemented
+      x-integration-status: Real provider wired; live Oracle concurrency/rollback and permission acceptance remain pending.
+
+  /sales/orders/{order_number}/move-to-draft:
+    parameters:
+      - { $ref: "#/components/parameters/OrderNumber" }
+    post:
+      tags: [ "Sales - Sales Orders" ]
+      summary: Return an eligible Submitted Order to Draft
+      operationId: moveOrderToDraft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrderActionRequest" }
+            example: { expected_version: 2 }
+      responses:
+        "200": { $ref: "#/components/responses/Order" }
+        "503": { $ref: "#/components/responses/InventoryUnavailable" }
+        default: { $ref: "#/components/responses/Error" }
+      x-implementation-status: implemented
+      x-integration-status: Saved-field return guard connected; real Logistics synchronization/races still require verification.
+
+  /sales/orders/{order_number}/delete:
+    parameters:
+      - { $ref: "#/components/parameters/OrderNumber" }
+    post:
+      tags: [ "Sales - Sales Orders" ]
+      summary: Delete an eligible Draft Order
+      operationId: deleteOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ expected_version ]
+              properties:
+                expected_version: { type: integer, minimum: 1, maximum: 9999999999 }
+                action_reference: { $ref: "#/components/schemas/ActionReference" }
+              additionalProperties: false
+            example:
+              expected_version: 1
+      responses:
+        "200": { $ref: "#/components/responses/OrderDeleted" }
+        default: { $ref: "#/components/responses/Error" }
+      x-implementation-status: implemented
+
+  /sales/invoices:
+    post:
+      tags: [ "Sales - Sales Invoices" ]
+      summary: Create a Draft Invoice from a Submitted Sales Order
+      operationId: createInvoice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InvoiceCreateRequest" }
+            example:
+              source_order_number: SO-000000000000001
+      responses: { "201": { $ref: "#/components/responses/Invoice" }, default: { $ref: "#/components/responses/Error" } }
+      x-implementation-status: integration-pending
+    get:
+      tags: [ "Sales - Sales Invoices" ]
+      summary: List Sales Invoices
+      operationId: listInvoices
+      parameters:
+        - { $ref: "#/components/parameters/CustomerCode" }
+        - { $ref: "#/components/parameters/WarehouseId" }
+        - { $ref: "#/components/parameters/DraftSubmittedStatus" }
+        - { $ref: "#/components/parameters/FromDate" }
+        - { $ref: "#/components/parameters/ToDate" }
+        - { $ref: "#/components/parameters/SalesPage" }
+        - { $ref: "#/components/parameters/PageSize" }
+        - { $ref: "#/components/parameters/PaymentStatus" }
+      responses:
+        "200": { $ref: "#/components/responses/InvoiceList" }
+        default: { $ref: "#/components/responses/Error" }
+      x-implementation-status: integration-pending
+
+  /sales/invoices/{invoice_number}:
+    parameters:
+      - { $ref: "#/components/parameters/InvoiceNumber" }
+    get:
+      tags: [ "Sales - Sales Invoices" ]
+      summary: Get a Invoice
+      operationId: getInvoice
+      responses: { "200": { $ref: "#/components/responses/Invoice" }, default: { $ref: "#/components/responses/Error" } }
+      x-implementation-status: integration-pending
+
+  /sales/invoices/{invoice_number}/update:
+    parameters:
+      - { $ref: "#/components/parameters/InvoiceNumber" }
+    post:
+      tags: [ "Sales - Sales Invoices" ]
+      summary: Update a Draft Invoice
+      operationId: updateInvoice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InvoiceUpdateRequest" }
+            example:
+              expected_version: 1
+              invoice_date: "2026-11-25"
+              due_date: "2026-11-25"
+              notes: Payment due on receipt.
+      responses: { "200": { $ref: "#/components/responses/Invoice" }, default: { $ref: "#/components/responses/Error" } }
+      x-implementation-status: integration-pending
+
+  /sales/invoices/{invoice_number}/submit:
+    parameters:
+      - { $ref: "#/components/parameters/InvoiceNumber" }
+    post:
+      tags: [ "Sales - Sales Invoices" ]
+      summary: Submit a saved Draft Invoice
+      operationId: submitInvoice
+      requestBody: { $ref: "#/components/requestBodies/InvoiceAction" }
+      responses: { "200": { $ref: "#/components/responses/Invoice" }, default: { $ref: "#/components/responses/Error" } }
+      x-implementation-status: integration-pending
+
+  /sales/invoices/{invoice_number}/move-to-draft:
+    parameters:
+      - { $ref: "#/components/parameters/InvoiceNumber" }
+    post:
+      tags: [ "Sales - Sales Invoices" ]
+      summary: Return an eligible Submitted Invoice to Draft
+      operationId: moveInvoiceToDraft
+      requestBody: { $ref: "#/components/requestBodies/InvoiceAction" }
+      responses: { "200": { $ref: "#/components/responses/Invoice" }, default: { $ref: "#/components/responses/Error" } }
+      x-implementation-status: integration-pending
+
+  /sales/invoices/{invoice_number}/delete:
+    parameters:
+      - { $ref: "#/components/parameters/InvoiceNumber" }
+    post:
+      tags: [ "Sales - Sales Invoices" ]
+      summary: Delete an eligible Draft Invoice
+      operationId: deleteInvoice
+      requestBody: { $ref: "#/components/requestBodies/InvoiceAction" }
+      responses:
+        "200": { $ref: "#/components/responses/InvoiceDeleted" }
+        default: { $ref: "#/components/responses/Error" }
+      x-implementation-status: integration-pending
+
+  /sales/invoices/{invoice_number}/payments:
+    parameters:
+      - { $ref: "#/components/parameters/InvoiceNumber" }
+    post:
+      tags: [ "Sales - Customer Payments" ]
+      summary: Record a partial or full payment
+      operationId: recordInvoicePayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PaymentCreateRequest" }
+            examples:
+              template:
+                summary: Editable template
+                description: Replace the reference strings, date and amount. Use the latest Submitted Invoice
+                  current_version as expected_version and its actual number in the path. Payment Date must
+                  be on/after Invoice Date and not after the business date. This template is not ready to execute unchanged.
+                value:
+                  expected_version: 1
+                  payment_amount: "0.01"
+                  payment_date: YYYY-MM-DD
+                  payment_reference: string
+              partialPayment:
+                summary: Filled partial-payment example
+                description: For an illustrative Submitted Invoice at version 2 with 20.50 due, this payment
+                  produces version 3, total paid 7.25 and amount due 13.25. Replace the date with a valid
+                  date for your Invoice, use its actual current version, and use a new reference for each new payment.
+                value:
+                  expected_version: 2
+                  payment_amount: "7.25"
+                  payment_date: "2026-11-25"
+                  payment_reference: TEST-BANK-001
+      responses: { "201": { $ref: "#/components/responses/Payment" }, default: { $ref: "#/components/responses/Error" } }
+      x-implementation-status: integration-pending
+    get:
+      tags: [ "Sales - Customer Payments" ]
+      summary: List payment history
+      operationId: listInvoicePayments
+      parameters:
+        - { $ref: "#/components/parameters/SalesPage" }
+        - { $ref: "#/components/parameters/PageSize" }
+      responses:
+        "200": { $ref: "#/components/responses/PaymentHistory" }
+        default: { $ref: "#/components/responses/Error" }
+      x-implementation-status: integration-pending
+
+  /sales/invoices/eligible-orders:
+    get:
+      tags: [ "Sales - Sales Invoices" ]
+      summary: List eligible Sales Order sources
+      operationId: listInvoiceOrderSources
+      parameters:
+        - { $ref: "#/components/parameters/CustomerCode" }
+        - { $ref: "#/components/parameters/WarehouseId" }
+        - { $ref: "#/components/parameters/FromDate" }
+        - { $ref: "#/components/parameters/ToDate" }
+        - { $ref: "#/components/parameters/SalesPage" }
+        - { $ref: "#/components/parameters/PageSize" }
+      responses:
+        "200": { $ref: "#/components/responses/EligibleOrders" }
+        default: { $ref: "#/components/responses/Error" }
+      x-implementation-status: integration-pending
+
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: Paste only result.access_token from login. Swagger adds the Bearer prefix.
 
   parameters:
     Id:
@@ -761,6 +1134,69 @@ components:
         minimum: 1
         maximum: 100
         default: 25
+    SalesPage: { name: page, in: query, schema: { type: integer, minimum: 1, maximum: 1000000, default: 1 } }
+    CustomerCode: { name: customer_code, in: query, schema: { $ref: "#/components/schemas/CustomerCode" } }
+    WarehouseId: { name: warehouse_id, in: query, schema: { type: string, minLength: 1, maxLength: 20 } }
+    DocumentStatus:
+      name: status
+      in: query
+      schema: { type: string, enum: [ Draft, Submitted, In Progress, Closed ] }
+    FromDate: { name: from_date, in: query, schema: { type: string, format: date } }
+    ToDate: { name: to_date, in: query, schema: { type: string, format: date } }
+    InvoiceNumber:
+      name: invoice_number
+      in: path
+      required: true
+      description: Saved Invoice Number returned by create/list/get Invoice, for example SI-000000000000003.
+        Enter your actual Invoice Number here; it is part of the URL, not a request-body field.
+      schema: { $ref: "#/components/schemas/SalesDocumentNumber" }
+    DraftSubmittedStatus: { name: status, in: query, schema: { type: string, enum: [ Draft, Submitted ] } }
+    Search:
+      {
+        name: search,
+        in: query,
+        description: Search Customer Code or Customer Name.,
+        schema: { type: string, maxLength: 100 }
+      }
+    CustomerActive:
+      name: is_active
+      in: query
+      description: T for active Customers or F for inactive Customers. Omit for both; use T for new selections.
+      schema: { $ref: "#/components/schemas/CustomerDetails/properties/is_active" }
+    PaymentStatus:
+      name: payment_status
+      in: query
+      schema: { type: string, enum: [ Unpaid, Partially Paid, Paid ] }
+    DocumentType: { name: type, in: query, schema: { type: string, enum: [ Quote, Order, Invoice ] } }
+    CustomerRecordIdPath:
+      name: id
+      in: path
+      required: true
+      description: Generated numeric Customer record ID. Lookup is scoped to the signed-in company.
+      schema: { $ref: "#/components/schemas/CustomerRecordId" }
+      example: 1
+    QuoteNumber:
+      name: quote_number
+      in: path
+      required: true
+      description: Quote DOCUMENT_NUMBER in ME_OE_DOCUMENTS, not the internal record ID.
+      schema: { $ref: "#/components/schemas/SalesDocumentNumber" }
+    OrderNumber:
+      name: order_number
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/SalesDocumentNumber" }
+
+  requestBodies:
+    InvoiceAction:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/InvoiceActionRequest" }
+          example: { expected_version: 2 }
+    SalesDocumentAction:
+      required: true
+      content: { application/json: { schema: { $ref: "#/components/schemas/SalesDocumentActionRequest" } } }
 
   schemas:
     Command:
@@ -840,9 +1276,14 @@ components:
         error:
           type: [object, 'null']
 
+    VehicleCapacity:
+      type: string
+      pattern: '^(?=.*[1-9])[0-9]{1,9}(?:\.[0-9]{1,3})?$'
+      example: '30.000'
+
     Vehicle:
       type: object
-      required: [id, vehicle_code, registration_number, capacity_kg, active, assignment_status, current_version]
+      required: [id, vehicle_code, registration_number, capacity_kg, isactive, assignment_status]
       properties:
         id:
           type: integer
@@ -857,17 +1298,13 @@ components:
           type: [string, 'null']
           maxLength: 255
         capacity_kg:
-          $ref: '#/components/schemas/PositiveKilograms'
-        active:
-          type: boolean
+          $ref: '#/components/schemas/VehicleCapacity'
+        isactive:
+          type: string
+          enum: ['T', 'F']
         assignment_status:
           type: string
           enum: [AVAILABLE, ASSIGNED]
-        active_trip_id:
-          type: [integer, 'null']
-        current_version:
-          type: integer
-          minimum: 1
 
     Driver:
       type: object
@@ -903,12 +1340,12 @@ components:
 
     Trip:
       type: object
-      required: [id, trip_reference, vehicle_id, driver_id, planned_departure_at, status, sales_order_id, assigned_at, assigned_by, cancelled_at, cancelled_by, cancellation_reason, dispatched_at, dispatched_by, delivered_at, delivered_by, planned_load_kg, capacity_kg, remaining_capacity_kg]
+      required: [id, trip_code, vehicle_id, driver_id, planned_departure_at, status, sales_order_id, assigned_at, assigned_by, cancelled_at, cancelled_by, cancellation_reason, dispatched_at, dispatched_by, delivered_at, delivered_by, planned_load_kg, capacity_kg, remaining_capacity_kg]
       properties:
         id:
           type: integer
           minimum: 1
-        trip_reference:
+        trip_code:
           type: integer
           minimum: 1
         vehicle_id:
@@ -965,6 +1402,19 @@ components:
           properties:
             result:
               $ref: '#/components/schemas/Vehicle'
+
+    VehicleDeleteEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccess'
+        - type: object
+          properties:
+            result:
+              type: object
+              required: [id, deleted, deactivated]
+              properties:
+                id: { type: integer, minimum: 1 }
+                deleted: { type: boolean }
+                deactivated: { type: boolean }
 
     DriverEnvelope:
       allOf:
@@ -1100,6 +1550,1940 @@ components:
             correlation_id:
               type: string
 
+    SalesErrorResponse:
+      type: object
+      required: [ success, operation_id, current_version, result, error ]
+      properties:
+        success: { type: boolean, const: false }
+        operation_id: { type: "null" }
+        current_version: { type: "null" }
+        result: { type: "null" }
+        error:
+          type: object
+          required: [ code, message ]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            request_id: { type: string }
+            field: { type: string }
+            line_number:
+              type: integer
+              minimum: 1
+              description: Affected display line number for a line validation error.
+    CustomerRecordId: { type: integer, minimum: 1, maximum: 999999999999999, example: 1 }
+    CustomerCode:
+      type: string
+      maxLength: 20
+      minLength: 1
+      pattern: "^[A-Za-z0-9-]+$"
+      example: CUST-001
+      description: Entered business code, case-sensitive and unique within company; preserves entered case and is immutable after creation.
+    CustomerDetails:
+      type: object
+      properties:
+        customer_name: { type: string, maxLength: 100, minLength: 1 }
+        contact_name: { type: string, maxLength: 100 }
+        email_address: { type: string, maxLength: 254, anyOf: [ { const: "" }, { format: email } ] }
+        phone_number: { type: string, maxLength: 25, pattern: "^[0-9 +()\\-]*$" }
+        billing_address_line_1: { type: string, maxLength: 150, minLength: 1 }
+        billing_address_line_2: { type: string, maxLength: 150 }
+        city: { type: string, maxLength: 80, minLength: 1 }
+        state_province: { type: string, maxLength: 80 }
+        postal_code: { type: string, maxLength: 20 }
+        country: { type: string, maxLength: 80, minLength: 1 }
+        payment_terms: { type: string, enum: [ DUE_ON_RECEIPT, NET_15, NET_30 ] }
+        notes: { type: string, maxLength: 500 }
+        is_active:
+          type: string
+          minLength: 1
+          maxLength: 1
+          enum: [ "T", "F" ]
+          description: T means active; F means inactive. Stored as IS_ACTIVE. Use an empty string to clear optional text
+            fields, not this flag.
+    ActionReference: { type: string, minLength: 1, maxLength: 100, pattern: "^[A-Za-z0-9_-]+$" }
+    CustomerCreateRequest:
+      type: object
+      allOf:
+        - { $ref: "#/components/schemas/CustomerDetails" }
+        - type: object
+          properties:
+            is_active: { $ref: "#/components/schemas/CustomerDetails/properties/is_active", default: "T" }
+            payment_terms: { $ref: "#/components/schemas/CustomerDetails/properties/payment_terms", default: NET_30 }
+      required: [ customer_name, billing_address_line_1, city, country ]
+      unevaluatedProperties: false
+    CustomerUpdateRequest:
+      type: object
+      allOf:
+        - { $ref: "#/components/schemas/CustomerDetails" }
+      minProperties: 1
+      unevaluatedProperties: false
+      description: Omitted fields retain values; empty string clears optional text. Supply at least one editable
+        field. Generated id, Customer Code and calculated balance cannot be changed. is_active
+        deactivates/reactivates. Customer updates use no revision token; the last committed change to each
+        supplied field wins.
+    Customer:
+      type: object
+      description: Customer stored in ME_OE_CUSTOMERS after migration 004. API id maps to RECORD#; company context
+        maps to CNY#. Optional null database text is returned as an empty string. The read-only balance maps to
+        AMOUNT_CUSTOMER_OWES_US.
+      x-database-table: ME_OE_CUSTOMERS
+      x-database-schema:
+        $ref: "#/components/schemas/DatabaseCustomerRow"
+      x-database-columns:
+        CUSTOMER_CODE:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+        CUSTOMER_NAME:
+          type: VARCHAR2(100 CHAR)
+          nullable: false
+        IS_ACTIVE:
+          type: CHAR(1)
+          nullable: false
+          default: T
+        CONTACT_NAME:
+          type: VARCHAR2(100 CHAR)
+          nullable: true
+        EMAIL_ADDRESS:
+          type: VARCHAR2(254 CHAR)
+          nullable: true
+        PHONE_NUMBER:
+          type: VARCHAR2(25 CHAR)
+          nullable: true
+        BILLING_ADDRESS_LINE_1:
+          type: VARCHAR2(150 CHAR)
+          nullable: false
+        BILLING_ADDRESS_LINE_2:
+          type: VARCHAR2(150 CHAR)
+          nullable: true
+        CITY:
+          type: VARCHAR2(80 CHAR)
+          nullable: false
+        STATE_PROVINCE:
+          type: VARCHAR2(80 CHAR)
+          nullable: true
+        POSTAL_CODE:
+          type: VARCHAR2(20 CHAR)
+          nullable: true
+        COUNTRY:
+          type: VARCHAR2(80 CHAR)
+          nullable: false
+        PAYMENT_TERMS:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+          default: NET_30
+        NOTES:
+          type: VARCHAR2(500 CHAR)
+          nullable: true
+        RECORD#:
+          type: NUMBER(15)
+          nullable: false
+          default: AS
+          identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: NUMBER(10)
+          nullable: false
+        AMOUNT_CUSTOMER_OWES_US:
+          type: NUMBER(18,2)
+          nullable: false
+          default: 0
+        WHENCREATED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+      x-database-primary-key:
+        - CNY#
+        - RECORD#
+      x-database-unique-constraints:
+        - - CNY#
+          - CUSTOMER_CODE
+      x-database-field-mapping:
+        id: RECORD#
+        company_context: CNY#
+        customer_code: CUSTOMER_CODE
+        customer_name: CUSTOMER_NAME
+        contact_name: CONTACT_NAME
+        email_address: EMAIL_ADDRESS
+        phone_number: PHONE_NUMBER
+        billing_address_line_1: BILLING_ADDRESS_LINE_1
+        billing_address_line_2: BILLING_ADDRESS_LINE_2
+        city: CITY
+        state_province: STATE_PROVINCE
+        postal_code: POSTAL_CODE
+        country: COUNTRY
+        payment_terms: PAYMENT_TERMS
+        notes: NOTES
+        is_active: IS_ACTIVE
+        amount_customer_owes_us: AMOUNT_CUSTOMER_OWES_US
+      x-database-internal-fields:
+        - WHENCREATED
+        - WHENMODIFIED
+      allOf:
+        - { $ref: "#/components/schemas/CustomerDetails" }
+        - type: object
+          properties:
+            id: { $ref: "#/components/schemas/CustomerRecordId", readOnly: true }
+            customer_code: { $ref: "#/components/schemas/CustomerCode" }
+            amount_customer_owes_us:
+              type: string
+              readOnly: true
+              pattern: "^[0-9]{1,16}\\.[0-9]{2}$"
+              default: "0.00"
+              description: Read-only balance stored as AMOUNT_CUSTOMER_OWES_US NUMBER(18,2), returned as an exact
+                decimal string. Invoice and Payment services must maintain it transactionally; Customer metadata requests cannot change it.
+      required:
+        [
+          id,
+          customer_code,
+          customer_name,
+          is_active,
+          contact_name,
+          email_address,
+          phone_number,
+          billing_address_line_1,
+          billing_address_line_2,
+          city,
+          state_province,
+          postal_code,
+          country,
+          payment_terms,
+          notes,
+          amount_customer_owes_us
+        ]
+    CustomerResponse:
+      allOf:
+        - { $ref: "#/components/schemas/ApiSuccess" }
+        - properties:
+            operation_id: { type: [ string, "null" ] }
+            current_version: { type: "null" }
+            result: { $ref: "#/components/schemas/Customer" }
+    CustomerListResponse:
+      allOf:
+        - { $ref: "#/components/schemas/PagedSuccess" }
+        - properties: { result: { properties: { items: { items: { $ref: "#/components/schemas/Customer" } } } } }
+    SalesDocumentNumber: { type: string, minLength: 1, maxLength: 20, pattern: "^[A-Za-z0-9_-]+$" }
+    SalesQuantity:
+      type: string
+      pattern: ^(?=[0-9]*[1-9])[0-9]{1,9}$
+      description: Positive whole-number quantity, with at most 9 digits; send as a decimal string without a
+        fractional part.
+    SalesUnitPrice: { type: string, pattern: "^[0-9]{1,10}(?:\\.[0-9]{1,2})?$" }
+    SalesAmount: { type: string, pattern: "^[0-9]{1,16}\\.[0-9]{2}$", readOnly: true }
+    SalesLineInput:
+      type: object
+      required: [ item_code, description, quantity, unit_price ]
+      properties:
+        line_id:
+          type: string
+          minLength: 1
+          maxLength: 40
+          description: "Existing line: retain its ID. New line: omit. Remove a line by omitting it from the complete
+            collection."
+        item_code: { type: string, minLength: 1, maxLength: 30 }
+        quantity: { $ref: "#/components/schemas/SalesQuantity" }
+        unit_price: { $ref: "#/components/schemas/SalesUnitPrice" }
+        description: { type: string, minLength: 1, maxLength: 200 }
+    SalesLine:
+      x-database-table: ME_OE_DOCUMENT_LINES
+      x-database-schema:
+        $ref: "#/components/schemas/DatabaseSalesDocumentLineRow"
+      x-database-field-mapping:
+        line_id: RECORD# serialized as a decimal string
+        line_number: LINE_NUMBER
+        item_code: ITEM_CODE
+        description: DESCRIPTION
+        quantity: QUANTITY serialized as a whole-number string
+        unit_price: UNIT_PRICE serialized as an exact decimal string
+        warehouse_id: Parent ME_OE_DOCUMENTS.WAREHOUSE_ID
+      x-database-derived-fields:
+        - line_amount
+      x-database-internal-fields:
+        - CNY#
+        - DOCUMENT_RECORD#
+        - WHENCREATED
+        - WHENMODIFIED
+      type: object
+      allOf:
+        - { $ref: "#/components/schemas/SalesLineInput" }
+        - type: object
+          required: [ line_number, warehouse_id, line_amount ]
+          properties:
+            line_number: { type: integer, minimum: 1, readOnly: true }
+            warehouse_id: { type: string, minLength: 1, maxLength: 20, readOnly: true }
+            line_amount: { $ref: "#/components/schemas/SalesAmount" }
+      required: [ line_id ]
+    QuoteFields:
+      type: object
+      properties:
+        customer_code: { $ref: "#/components/schemas/CustomerCode" }
+        warehouse_id: { type: string, minLength: 1, maxLength: 20 }
+        quote_date: { type: string, format: date }
+        valid_until: { type: [ string, "null" ], format: date }
+        requested_delivery_date: { type: [ string, "null" ], format: date }
+        shipping_address: { type: string, minLength: 1, maxLength: 500 }
+        payment_terms: { $ref: "#/components/schemas/CustomerDetails/properties/payment_terms" }
+        notes: { type: string, maxLength: 500 }
+    QuoteCreateRequest:
+      type: object
+      allOf:
+        - { $ref: "#/components/schemas/QuoteFields" }
+        - type: object
+          properties:
+            lines:
+              type: array
+              minItems: 1
+              items:
+                $ref: "#/components/schemas/QuoteLineInput"
+                not: { required: [ line_id ] }
+                unevaluatedProperties: false
+      required: [ customer_code, warehouse_id, lines ]
+      unevaluatedProperties: false
+    QuoteUpdateRequest:
+      type: object
+      allOf:
+        - { $ref: "#/components/schemas/QuoteFields" }
+        - type: object
+          properties:
+            expected_version: { type: integer, minimum: 1, maximum: 9999999999 }
+            lines:
+              type: array
+              minItems: 1
+              description: Optional complete intended line collection. Omit to preserve saved lines; null and an empty array are invalid.
+              items: { $ref: "#/components/schemas/QuoteLineInput", unevaluatedProperties: false }
+      required: [ expected_version ]
+      unevaluatedProperties: false
+    QuoteActionRequest:
+      type: object
+      required: [ expected_version ]
+      properties:
+        expected_version: { type: integer, minimum: 1, maximum: 9999999999 }
+      additionalProperties: false
+    OrderActionRequest:
+      type: object
+      required: [ expected_version ]
+      properties:
+        expected_version: { type: integer, minimum: 1, maximum: 9999999999 }
+        action_reference: { $ref: "#/components/schemas/ActionReference" }
+      additionalProperties: false
+    SalesDocumentActionRequest:
+      type: object
+      required: [ action_reference, expected_version ]
+      properties:
+        action_reference: { $ref: "#/components/schemas/ActionReference" }
+        expected_version: { type: integer, minimum: 1, maximum: 9999999999 }
+      additionalProperties: false
+    QuoteSummary:
+      type: object
+      allOf:
+        - { $ref: "#/components/schemas/QuoteFields" }
+        - type: object
+          required: [ quote_number, customer_name, status, document_total, current_version, available_actions ]
+          properties:
+            customer_name: { type: string, minLength: 1, maxLength: 100, readOnly: true }
+            quote_number: { $ref: "#/components/schemas/SalesDocumentNumber", readOnly: true }
+            status: { type: string, enum: [ Draft, Submitted ], readOnly: true }
+            document_total: { $ref: "#/components/schemas/SalesAmount" }
+            current_version: { type: integer, minimum: 1, maximum: 9999999999, readOnly: true }
+            available_actions:
+              type: array
+              uniqueItems: true
+              items: { type: string, enum: [ edit, submit, move_to_draft, delete ] }
+              readOnly: true
+      required:
+        [
+          customer_code,
+          warehouse_id,
+          quote_date,
+          valid_until,
+          requested_delivery_date,
+          shipping_address,
+          payment_terms,
+          notes
+        ]
+    Quote:
+      x-database-table: ME_OE_DOCUMENTS
+      x-database-schema:
+        $ref: "#/components/schemas/DatabaseSalesDocumentRow"
+      x-database-field-mapping:
+        company_context: CNY#
+        customer_code: Resolve ME_OE_CUSTOMERS.CUSTOMER_CODE within CNY# to CUSTOMER_RECORD#
+        warehouse_id: WAREHOUSE_ID
+        payment_terms: PAYMENT_TERMS
+        notes: NOTES
+        current_version: VERSION
+        expected_version: VERSION
+        status:
+          Draft: DRAFT
+          Submitted: SUBMITTED
+          In Progress: IN_PROGRESS
+          Closed: CLOSED
+        quote_number: DOCUMENT_NUMBER
+        quote_date: DOCUMENT_DATE
+        valid_until: VALID_UNTIL
+        requested_delivery_date: REQUESTED_DELIVERY_DATE
+        shipping_address: SHIPPING_ADDRESS
+      x-database-internal-fields:
+        - RECORD#
+        - WHENCREATED
+        - WHENMODIFIED
+      x-database-document-type: SALES_QUOTE
+      x-database-derived-fields:
+        - document_total
+        - available_actions
+      type: object
+      allOf:
+        - { $ref: "#/components/schemas/QuoteSummary" }
+        - type: object
+          required: [ lines ]
+          properties: { lines: { type: array, minItems: 1, items: { $ref: "#/components/schemas/SalesLine" } } }
+    QuoteResponse:
+      allOf:
+        - { $ref: "#/components/schemas/ApiSuccess" }
+        - properties:
+            operation_id: { type: [ string, "null" ] }
+            current_version: { type: integer, minimum: 1, maximum: 9999999999 }
+            result: { $ref: "#/components/schemas/Quote" }
+    QuoteListResponse:
+      allOf:
+        - { $ref: "#/components/schemas/PagedSuccess" }
+        - properties: { result: { properties: { items: { items: { $ref: "#/components/schemas/QuoteSummary" } } } } }
+    QuoteDeleteResponse:
+      allOf:
+        - { $ref: "#/components/schemas/ApiSuccess" }
+        - properties:
+            operation_id: { type: [ string, "null" ] }
+            current_version: { type: "null" }
+            result:
+              type: object
+              required: [ quote_number, deleted ]
+              properties:
+                quote_number: { $ref: "#/components/schemas/SalesDocumentNumber" }
+                deleted: { type: boolean, const: true }
+    SalesSourceNumber:
+      x-database-table: ME_OE_SOURCE_LINKS
+      x-database-schema:
+        $ref: "#/components/schemas/DatabaseSalesSourceLinkRow"
+      x-database-mapping: Resolve the same-company source DOCUMENT_NUMBER to SOURCE_DOCUMENT_RECORD#;
+        TARGET_DOCUMENT_RECORD# identifies the current target. No link row represents a standalone document. Unique
+        source and target constraints enforce one-to-one links.
+      anyOf:
+        - { $ref: "#/components/schemas/SalesDocumentNumber" }
+        - { type: "null" }
+      default: null
+      description: "Legacy nullable storage representation. Current Order and Invoice fields require non-null
+        sources and prohibit clearing or replacing them. Revalidate on save and submit."
+    SalesSourceLineInput:
+      type: object
+      allOf:
+        - { $ref: "#/components/schemas/SalesLineInput" }
+        - { type: object, properties: { source_line_id: { type: string, minLength: 1, maxLength: 40 } } }
+      description: Linked lines must match all source lines once, in source order; additions, changes and removals
+        are forbidden.
+    SalesSourceLine:
+      x-database-field-mapping:
+        source_line_id: SOURCE_LINE_RECORD# serialized as a decimal string, or null
+      type: object
+      allOf:
+        - { $ref: "#/components/schemas/SalesLine" }
+        - type: object
+          properties: { source_line_id: { type: [ string, "null" ], minLength: 1, maxLength: 40, readOnly: true } }
+          required: [ source_line_id ]
+    OrderFields:
+      type: object
+      properties:
+        source_quote_number:
+          $ref: "#/components/schemas/SalesDocumentNumber"
+          description: Required Submitted Quote on creation. Immutable thereafter; omit on update to retain.
+        customer_code: { $ref: "#/components/schemas/CustomerCode" }
+        warehouse_id: { $ref: "#/components/schemas/QuoteFields/properties/warehouse_id" }
+        order_date:
+          type: string
+          format: date
+          description: Defaults to current business date on create; must be on or after source Quote Date.
+        requested_delivery_date:
+          type: [ string, "null" ]
+          format: date
+          description: On create, copy the source Quote requested date only if it is on or after Order Date;
+            otherwise leave unset (null). An explicitly supplied non-null date must be on or after Order Date.
+        customer_po_number: { type: string, maxLength: 30 }
+        shipping_address: { $ref: "#/components/schemas/QuoteFields/properties/shipping_address" }
+        payment_terms: { $ref: "#/components/schemas/CustomerDetails/properties/payment_terms" }
+        notes: { $ref: "#/components/schemas/QuoteFields/properties/notes" }
+    OrderCreateRequest:
+      type: object
+      required: [ source_quote_number ]
+      properties:
+        source_quote_number:
+          $ref: "#/components/schemas/SalesDocumentNumber"
+          description: Eligible Submitted Quote whose Customer, Warehouse, address, terms and complete lines will be copied.
+          example: SQ-000000000000044
+        order_date: { $ref: "#/components/schemas/OrderFields/properties/order_date" }
+        requested_delivery_date: { $ref: "#/components/schemas/OrderFields/properties/requested_delivery_date" }
+        customer_po_number: { $ref: "#/components/schemas/OrderFields/properties/customer_po_number" }
+        notes: { $ref: "#/components/schemas/OrderFields/properties/notes" }
+        action_reference: { $ref: "#/components/schemas/ActionReference" }
+      additionalProperties: false
+      example:
+        source_quote_number: SQ-000000000000044
+    OrderUpdateRequest:
+      type: object
+      example:
+        expected_version: 1
+        notes: Updated order notes
+        lines:
+          - line_id: "122"
+            product_id: "163"
+            description: Sagar Testing order update
+            quantity: "12"
+            unit_price: "9818.00"
+      allOf:
+        - { $ref: "#/components/schemas/OrderFields" }
+      required: [ expected_version ]
+      description: Draft only. Quote source, Customer, Warehouse, shipping address and payment terms remain locked.
+        Omitted header fields and omitted lines are preserved. When lines is supplied, it is the complete intended
+        Order line set in display order; keep line_id to edit/reorder a saved line, omit line_id to add a line,
+        and omit a saved line from the collection to remove it. Product, description, quantity and price are
+        editable independently of the unchanged Quote. At least one line is required. Totals are calculated
+        server-side and the parent version increments once. Use the latest GET response for saved line IDs/version.
+      properties:
+        action_reference: { $ref: "#/components/schemas/ActionReference" }
+        expected_version: { type: integer, minimum: 1, maximum: 9999999999 }
+        lines:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/OrderLineInput" }
+      unevaluatedProperties: false
+    OrderLineInput:
+      type: object
+      additionalProperties: false
+      required: [ product_id, description, quantity, unit_price ]
+      properties:
+        line_id:
+          type: string
+          pattern: "^[1-9][0-9]{0,14}$"
+          description: Retain an existing Order line ID to edit/reorder it. Omit for a new line; null is invalid.
+        source_line_id:
+          type: [ string, "null" ]
+          pattern: "^[1-9][0-9]{0,14}$"
+          description: Optional unchanged origin echo for an existing line. Server-managed; cannot be reassigned.
+            New lines have null origin. Replacing a Product clears its Quote-line origin; other edits retain it.
+        product_id: { type: string, pattern: "^[1-9][0-9]{0,9}$" }
+        description: { type: string, maxLength: 200 }
+        quantity: { $ref: "#/components/schemas/SalesQuantity" }
+        unit_price: { $ref: "#/components/schemas/SalesUnitPrice" }
+      description: Editable Draft Order line. Lines may differ from the source Quote; prices and quantities
+        use exact decimal strings. Product existence/company is enforced by the database reference; active
+        Product/Warehouse validation and all stock reservations are performed by Inventory on Submit.
+    OrderSummary:
+      type: object
+      allOf:
+        - $ref: "#/components/schemas/OrderFields"
+        - type: object
+          properties:
+            order_number:
+              $ref: "#/components/schemas/SalesDocumentNumber"
+              readOnly: true
+            invoice_number:
+              $ref: "#/components/schemas/SalesDocumentNumber"
+              readOnly: true
+              description: Draft Invoice number returned by successful Order Submit, including exact retries.
+            status:
+              type: string
+              enum:
+                - Draft
+                - Submitted
+                - In Progress
+                - Closed
+              readOnly: true
+            document_total:
+              $ref: "#/components/schemas/SalesAmount"
+            current_version:
+              type: integer
+              minimum: 1
+              maximum: 9999999999
+              readOnly: true
+            available_actions:
+              type: array
+              uniqueItems: true
+              items:
+                type: string
+                enum:
+                  - edit
+                  - submit
+                  - move_to_draft
+                  - delete
+              readOnly: true
+              description: Requires the corresponding registered Sales permission and current business eligibility. Draft
+                may allow edit, submit and delete. Submitted may allow move_to_draft only with no valid Trip
+                assignment and an eligible linked Draft Invoice (or no Invoice on an older Order); the action
+                deletes that Draft Invoice and releases all reservations atomically.
+                In Progress and Closed are read-only to Sales users.
+          required:
+            - order_number
+            - status
+            - document_total
+            - current_version
+            - available_actions
+        - if:
+            required:
+              - status
+            properties:
+              status:
+                const: Draft
+          then:
+            properties:
+              available_actions:
+                items:
+                  enum:
+                    - edit
+                    - submit
+                    - delete
+        - if:
+            required:
+              - status
+            properties:
+              status:
+                const: Submitted
+          then:
+            properties:
+              available_actions:
+                items:
+                  enum:
+                    - move_to_draft
+        - if:
+            required:
+              - status
+            properties:
+              status:
+                enum:
+                  - In Progress
+                  - Closed
+          then:
+            properties:
+              available_actions:
+                maxItems: 0
+      required:
+        - source_quote_number
+        - customer_code
+        - warehouse_id
+        - order_date
+        - requested_delivery_date
+        - customer_po_number
+        - shipping_address
+        - payment_terms
+        - notes
+    Order:
+      x-database-table: ME_OE_DOCUMENTS
+      x-database-schema:
+        $ref: "#/components/schemas/DatabaseSalesDocumentRow"
+      x-database-field-mapping:
+        company_context: CNY#
+        customer_code: Resolve ME_OE_CUSTOMERS.CUSTOMER_CODE within CNY# to CUSTOMER_RECORD#
+        warehouse_id: WAREHOUSE_ID
+        payment_terms: PAYMENT_TERMS
+        notes: NOTES
+        current_version: VERSION
+        expected_version: VERSION
+        status:
+          Draft: DRAFT
+          Submitted: SUBMITTED
+          In Progress: IN_PROGRESS
+          Closed: CLOSED
+        order_number: DOCUMENT_NUMBER
+        order_date: DOCUMENT_DATE
+        requested_delivery_date: REQUESTED_DELIVERY_DATE
+        customer_po_number: CUSTOMER_PO_NUMBER
+        shipping_address: SHIPPING_ADDRESS
+        source_quote_number: Resolve source DOCUMENT_NUMBER through ME_OE_SOURCE_LINKS for this target document
+      x-database-internal-fields:
+        - RECORD#
+        - WHENCREATED
+        - WHENMODIFIED
+      x-database-document-type: SALES_ORDER
+      x-database-derived-fields:
+        - document_total
+        - available_actions
+      type: object
+      allOf:
+        - { $ref: "#/components/schemas/OrderSummary" }
+        - type: object
+          properties: { lines: { type: array, minItems: 1, items: { $ref: "#/components/schemas/OrderLine" } } }
+          required: [ lines ]
+        - if: { required: [ status ], properties: { status: { const: Closed } } }
+          then:
+            properties:
+              lines: { items: { properties: { trip_assigned: { const: true }, trip_status: { const: Delivered } } } }
+        - if: { required: [ status ], properties: { status: { const: Draft } } }
+          then: { properties: { lines: { items: { properties: { trip_assigned: { const: false } } } } } }
+        - if: { required: [ status ], properties: { status: { const: Submitted } } }
+          then:
+            properties:
+              lines:
+                items: { properties: { trip_status: { enum: [ Draft, Cancelled, null ] } } }
+                anyOf:
+                  - { items: { properties: { trip_assigned: { const: false } } } }
+                  - { items: { properties: { trip_assigned: { const: true }, trip_status: { const: Draft } } } }
+        - if: { required: [ status ], properties: { status: { const: In Progress } } }
+          then:
+            properties:
+              lines:
+                items: { properties: { trip_assigned: { const: true }, trip_status: { const: Dispatched } } }
+                contains: { properties: { trip_assigned: { const: true }, trip_status: { enum: [ Dispatched, Delivered ] } } }
+                not: { items: { properties: { trip_assigned: { const: true }, trip_status: { const: Delivered } } } }
+    OrderResponse:
+      allOf:
+        - { $ref: "#/components/schemas/ApiSuccess" }
+        - properties:
+            operation_id: { type: [ string, "null" ] }
+            current_version: { type: integer, minimum: 1, maximum: 9999999999 }
+            result: { $ref: "#/components/schemas/Order" }
+    OrderListResponse:
+      allOf:
+        - { $ref: "#/components/schemas/PagedSuccess" }
+        - properties: { result: { properties: { items: { items: { $ref: "#/components/schemas/OrderSummary" } } } } }
+    OrderDeleteResponse:
+      allOf:
+        - { $ref: "#/components/schemas/ApiSuccess" }
+        - properties:
+            operation_id: { type: string }
+            current_version: { type: "null" }
+            result:
+              type: object
+              properties:
+                order_number: { $ref: "#/components/schemas/SalesDocumentNumber" }
+                deleted: { type: boolean, const: true }
+              required: [ order_number, deleted ]
+    InvoiceLineInput:
+      type: object
+      required: [ product_id, description, quantity, unit_price ]
+      properties:
+        line_id:
+          type: string
+          minLength: 1
+          maxLength: 40
+          description: "Existing line: retain its ID. New line: omit. Remove a line by omitting it from the complete
+            collection."
+        product_id: { type: string, pattern: "^[1-9][0-9]{0,9}$", description: "Inventory product ID as a numeric string, scoped to the signed-in company and selected warehouse." }
+        quantity: { $ref: "#/components/schemas/SalesQuantity" }
+        unit_price: { $ref: "#/components/schemas/SalesUnitPrice" }
+        description: { type: string, minLength: 1, maxLength: 200 }
+    InvoiceLine:
+      type: object
+      allOf:
+        - { $ref: "#/components/schemas/InvoiceLineInput" }
+        - type: object
+          required: [ line_number, warehouse_id, line_amount ]
+          properties:
+            line_number: { type: integer, minimum: 1, readOnly: true }
+            warehouse_id: { type: string, minLength: 1, maxLength: 20, readOnly: true }
+            line_amount: { $ref: "#/components/schemas/SalesAmount" }
+      required: [ line_id ]
+    InvoiceSourceLine:
+      type: object
+      allOf:
+        - { $ref: "#/components/schemas/InvoiceLine" }
+        - type: object
+          properties: { source_line_id: { type: [ string, "null" ], minLength: 1, maxLength: 40, readOnly: true } }
+          required: [ source_line_id ]
+    InvoiceSourceNumber:
+      anyOf:
+        - { $ref: "#/components/schemas/SalesDocumentNumber" }
+        - { type: "null" }
+      default: null
+      description: "Optional: Submitted Quote for Order; Submitted / In Progress / Closed Order for Invoice.
+        Omit/null on create for standalone; omit on update to retain, null to clear. Revalidate on save and
+        submit."
+    InvoiceCreateDocumentLines:
+      type: object
+      properties:
+        action_reference: { $ref: "#/components/schemas/ActionReference" }
+        lines:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/SalesSourceLineInput"
+            unevaluatedProperties: false
+            not: { required: [ line_id ] }
+    InvoiceUpdateDocumentLines:
+      type: object
+      properties:
+        action_reference: { $ref: "#/components/schemas/ActionReference" }
+        expected_version: { type: integer, minimum: 1, maximum: 9999999999 }
+        lines:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/SalesSourceLineInput", unevaluatedProperties: false }
+    InvoiceFields:
+      type: object
+      properties:
+        customer_code: { $ref: "#/components/schemas/CustomerCode" }
+        warehouse_id: { $ref: "#/components/schemas/OrderFields/properties/warehouse_id" }
+        invoice_date:
+          type: string
+          format: date
+          description: Defaults to current business date; must be on or after source Order Date when linked.
+        payment_terms:
+          $ref: "#/components/schemas/CustomerDetails/properties/payment_terms"
+          description: Copy from source when available, otherwise Customer; inherited values remain locked.
+        due_date:
+          type: string
+          format: date
+          description: Default Invoice Date + 0/15/30 days from terms; on/after Invoice Date. Rederive after date/terms
+            changes unless explicitly supplied.
+        notes: { $ref: "#/components/schemas/QuoteFields/properties/notes" }
+        source_order_number:
+          $ref: "#/components/schemas/SalesDocumentNumber"
+          description: Immutable same-company Sales Order source. Creation requires Submitted; existing linked
+            Orders may progress to In Progress or Closed. The source cannot be cleared or replaced.
+    InvoiceCreateRequest:
+      type: object
+      properties:
+        source_order_number:
+          $ref: "#/components/schemas/SalesDocumentNumber"
+          description: Same-company Submitted Sales Order that has no linked Invoice.
+        action_reference: { $ref: "#/components/schemas/ActionReference" }
+      required: [ source_order_number ]
+      additionalProperties: false
+    InvoiceUpdateRequest:
+      type: object
+      description: Update Invoice Date, Due Date and Notes while retaining the immutable Order source and lines.
+      properties:
+        action_reference: { $ref: "#/components/schemas/ActionReference" }
+        expected_version: { $ref: "#/components/schemas/SalesDocumentActionRequest/properties/expected_version" }
+        invoice_date: { $ref: "#/components/schemas/InvoiceFields/properties/invoice_date" }
+        due_date: { $ref: "#/components/schemas/InvoiceFields/properties/due_date" }
+        notes: { $ref: "#/components/schemas/InvoiceFields/properties/notes" }
+      required: [ expected_version ]
+      additionalProperties: false
+    InvoiceActionRequest:
+      type: object
+      description: Use the latest Invoice current_version as expected_version. action_reference is optional;
+        omit it for normal actions or supply it to replay identical retries. Without a reference, a repeated
+        action is checked against the current version and state rather than replaying a previous success.
+      properties:
+        expected_version: { $ref: "#/components/schemas/SalesDocumentActionRequest/properties/expected_version" }
+        action_reference: { $ref: "#/components/schemas/ActionReference" }
+      required: [ expected_version ]
+      additionalProperties: false
+    InvoicePaymentSummary:
+      type: object
+      properties:
+        document_total: { $ref: "#/components/schemas/SalesAmount" }
+        total_paid: { $ref: "#/components/schemas/SalesAmount" }
+        amount_due: { $ref: "#/components/schemas/SalesAmount" }
+        payment_status: { type: [ string, "null" ], enum: [ Unpaid, Partially Paid, Paid, null ], readOnly: true }
+      required: [ document_total, total_paid, amount_due, payment_status ]
+      allOf:
+        - if: { required: [ payment_status ], properties: { payment_status: { const: null } } }
+          then: { properties: { total_paid: { const: "0.00" } } }
+        - if: { required: [ payment_status ], properties: { payment_status: { const: Unpaid } } }
+          then:
+            properties: { total_paid: { const: "0.00" }, amount_due: { pattern: "^(?=[0-9.]*[1-9])[0-9]{1,16}\\.[0-9]{2}$" } }
+        - if: { required: [ payment_status ], properties: { payment_status: { const: Partially Paid } } }
+          then:
+            properties:
+              total_paid: { pattern: "^(?=[0-9.]*[1-9])[0-9]{1,16}\\.[0-9]{2}$" }
+              amount_due: { pattern: "^(?=[0-9.]*[1-9])[0-9]{1,16}\\.[0-9]{2}$" }
+        - if: { required: [ payment_status ], properties: { payment_status: { const: Paid } } }
+          then:
+            properties: { total_paid: { pattern: "^(?=[0-9.]*[1-9])[0-9]{1,16}\\.[0-9]{2}$" }, amount_due: { const: "0.00" } }
+    InvoiceSummary:
+      type: object
+      allOf:
+        - { $ref: "#/components/schemas/InvoiceFields" }
+        - type: object
+          properties:
+            invoice_number: { $ref: "#/components/schemas/SalesDocumentNumber", readOnly: true }
+            status: { type: string, enum: [ Draft, Submitted ], readOnly: true }
+            current_version: { type: integer, minimum: 1, maximum: 9999999999, readOnly: true }
+            available_actions:
+              type: array
+              uniqueItems: true
+              items: { type: string, enum: [ edit, submit, move_to_draft, delete, record_payment ] }
+              readOnly: true
+            shipping_address:
+              type: [ string, "null" ]
+              maxLength: 500
+              readOnly: true
+              description: Preserved source Order address; null is allowed on a standalone Invoice.
+          required: [ invoice_number, status, current_version, available_actions ]
+        - { $ref: "#/components/schemas/InvoicePaymentSummary" }
+        - if: { required: [ status ], properties: { status: { const: Draft } } }
+          then:
+            properties:
+              payment_status: { type: "null" }
+              total_paid: { const: "0.00" }
+              available_actions: { items: { enum: [ edit, submit, delete ] } }
+        - if: { required: [ status ], properties: { status: { const: Submitted } } }
+          then:
+            properties:
+              document_total: { pattern: "^(?=[0-9.]*[1-9])[0-9]{1,16}\\.[0-9]{2}$" }
+              payment_status: { enum: [ Unpaid, Partially Paid, Paid ] }
+              available_actions: { items: { enum: [ move_to_draft, record_payment ] } }
+        - if: { required: [ payment_status ], properties: { payment_status: { enum: [ Partially Paid, Paid ] } } }
+          then: { properties: { available_actions: { items: { not: { const: move_to_draft } } } } }
+        - if: { required: [ payment_status ], properties: { payment_status: { const: Paid } } }
+          then: { properties: { available_actions: { maxItems: 0 } } }
+      required:
+        [
+          source_order_number,
+          customer_code,
+          warehouse_id,
+          invoice_date,
+          due_date,
+          payment_terms,
+          notes,
+          shipping_address
+        ]
+    Invoice:
+      type: object
+      allOf:
+        - { $ref: "#/components/schemas/InvoiceSummary" }
+        - type: object
+          properties: { lines: { type: array, minItems: 1, items: { $ref: "#/components/schemas/InvoiceSourceLine" } } }
+          required: [ lines ]
+    InvoiceResponse:
+      allOf:
+        - { $ref: "#/components/schemas/ApiSuccess" }
+        - properties:
+            operation_id: { type: [ string, "null" ] }
+            current_version: { type: integer, minimum: 1, maximum: 9999999999 }
+            result: { $ref: "#/components/schemas/Invoice" }
+    InvoiceListResponse:
+      allOf:
+        - { $ref: "#/components/schemas/PagedSuccess" }
+        - properties: { result: { properties: { items: { items: { $ref: "#/components/schemas/InvoiceSummary" } } } } }
+    InvoiceDeleteResponse:
+      allOf:
+        - { $ref: "#/components/schemas/ApiSuccess" }
+        - properties:
+            operation_id: { type: string }
+            current_version: { type: "null" }
+            result:
+              type: object
+              properties:
+                invoice_number: { $ref: "#/components/schemas/SalesDocumentNumber" }
+                deleted: { type: boolean, const: true }
+              required: [ invoice_number, deleted ]
+    PaymentAmount: { type: string, pattern: "^(?=[0-9.]*[1-9])[0-9]{1,16}(?:\\.[0-9]{1,2})?$" }
+    PaymentCreateRequest:
+      type: object
+      properties:
+        action_reference: { $ref: "#/components/schemas/ActionReference" }
+        expected_version: { $ref: "#/components/schemas/SalesDocumentActionRequest/properties/expected_version" }
+        payment_amount: { $ref: "#/components/schemas/PaymentAmount" }
+        payment_date: { type: string, format: date }
+        payment_reference: { type: string, minLength: 1, maxLength: 50, pattern: \S }
+      required: [ expected_version, payment_amount, payment_date, payment_reference ]
+      additionalProperties: false
+    PaymentRecord:
+      type: object
+      properties:
+        payment_number: { type: string, minLength: 1, maxLength: 20, readOnly: true }
+        invoice_number: { $ref: "#/components/schemas/SalesDocumentNumber", readOnly: true }
+        payment_amount: { $ref: "#/components/schemas/SalesAmount", pattern: "^(?=[0-9.]*[1-9])[0-9]{1,16}\\.[0-9]{2}$" }
+        payment_date: { $ref: "#/components/schemas/PaymentCreateRequest/properties/payment_date", readOnly: true }
+        payment_reference: { $ref: "#/components/schemas/PaymentCreateRequest/properties/payment_reference", readOnly: true }
+        created_by: { type: string, maxLength: 40, readOnly: true, minLength: 1 }
+        created_at: { type: string, format: date-time, readOnly: true }
+      required:
+        [
+          payment_number,
+          invoice_number,
+          payment_amount,
+          payment_date,
+          payment_reference,
+          created_by,
+          created_at
+        ]
+    PaymentInvoiceSnapshot:
+      type: object
+      allOf:
+        - { $ref: "#/components/schemas/InvoicePaymentSummary" }
+        - type: object
+          properties:
+            invoice_number: { $ref: "#/components/schemas/SalesDocumentNumber", readOnly: true }
+            status: { type: string, const: Submitted, readOnly: true }
+            current_version:
+              $ref: "#/components/schemas/SalesDocumentActionRequest/properties/expected_version"
+              readOnly: true
+          required: [ invoice_number, status, current_version ]
+      properties:
+        document_total: { pattern: "^(?=[0-9.]*[1-9])[0-9]{1,16}\\.[0-9]{2}$" }
+        payment_status: { enum: [ Partially Paid, Paid ] }
+    PaymentCreateResponse:
+      allOf:
+        - { $ref: "#/components/schemas/ApiSuccess" }
+        - properties:
+            operation_id: { type: [ string, "null" ] }
+            current_version: { $ref: "#/components/schemas/SalesDocumentActionRequest/properties/expected_version" }
+            result:
+              type: object
+              properties:
+                payment: { $ref: "#/components/schemas/PaymentRecord" }
+                invoice: { $ref: "#/components/schemas/PaymentInvoiceSnapshot" }
+                current_version:
+                  $ref: "#/components/schemas/SalesDocumentActionRequest/properties/expected_version"
+                  description: Updated Invoice version returned by Payments for the generic API response envelope.
+              required: [ payment, invoice, current_version ]
+    PaymentHistoryResponse:
+      allOf:
+        - { $ref: "#/components/schemas/PagedSuccess" }
+        - properties: { result: { properties: { items: { items: { $ref: "#/components/schemas/PaymentRecord" } } } } }
+    CustomerChoice:
+      type: object
+      required: [ id, customer_code, customer_name ]
+      properties:
+        id: { $ref: "#/components/schemas/CustomerRecordId", readOnly: true }
+        customer_code: { $ref: "#/components/schemas/CustomerCode" }
+        customer_name: { $ref: "#/components/schemas/CustomerDetails/properties/customer_name" }
+    CustomerChoiceListResponse:
+      allOf:
+        - { $ref: "#/components/schemas/PagedSuccess" }
+        - properties: { result: { properties: { items: { items: { $ref: "#/components/schemas/CustomerChoice" } } } } }
+    ItemChoice:
+      type: object
+      required: [ item_code, description ]
+      properties:
+        item_code: { type: string, minLength: 1, maxLength: 30 }
+        description: { type: string, maxLength: 200 }
+    ItemChoiceListResponse:
+      allOf:
+        - { $ref: "#/components/schemas/PagedSuccess" }
+        - properties: { result: { properties: { items: { items: { $ref: "#/components/schemas/ItemChoice" } } } } }
+    WarehouseChoice:
+      type: object
+      required: [ warehouse_id ]
+      properties: { warehouse_id: { type: string, minLength: 1, maxLength: 20 } }
+    WarehouseChoiceListResponse:
+      allOf:
+        - { $ref: "#/components/schemas/PagedSuccess" }
+        - properties: { result: { properties: { items: { items: { $ref: "#/components/schemas/WarehouseChoice" } } } } }
+    DocumentListResponse:
+      allOf:
+        - { $ref: "#/components/schemas/PagedSuccess" }
+        - properties:
+            result:
+              properties:
+                items:
+                  items:
+                    anyOf:
+                      - { $ref: "#/components/schemas/QuoteSummary" }
+                      - { $ref: "#/components/schemas/OrderSummary" }
+                      - { $ref: "#/components/schemas/InvoiceSummary" }
+    ApiSuccess:
+      type: object
+      required: [ success, operation_id, current_version, result, error ]
+      properties:
+        success: { type: boolean, const: true }
+        operation_id: { type: [ string, "null" ] }
+        current_version: { type: [ integer, "null" ], minimum: 1, maximum: 9999999999 }
+        result: {}
+        error: { type: "null" }
+    PagedSuccess:
+      allOf:
+        - { $ref: "#/components/schemas/ApiSuccess" }
+        - properties:
+            operation_id: { type: "null" }
+            current_version: { type: "null" }
+            result:
+              type: object
+              required: [ items, page, page_size ]
+              properties:
+                items: { type: array }
+                page: { type: integer, minimum: 1, maximum: 1000000 }
+                page_size: { type: integer, minimum: 1, maximum: 100 }
+    CreateDocumentLines:
+      type: object
+      properties:
+        action_reference: { $ref: "#/components/schemas/ActionReference" }
+        lines:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/SalesSourceLineInput"
+            unevaluatedProperties: false
+            not: { required: [ line_id ] }
+    UpdateDocumentLines:
+      type: object
+      properties:
+        action_reference: { $ref: "#/components/schemas/ActionReference" }
+        expected_version: { type: integer, minimum: 1, maximum: 9999999999 }
+        lines:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/SalesSourceLineInput", unevaluatedProperties: false }
+    EligibleOrderSummary:
+      type: object
+      properties:
+        order_number: { $ref: "#/components/schemas/SalesDocumentNumber" }
+        customer_code: { $ref: "#/components/schemas/CustomerCode" }
+        customer_name: { type: string }
+        warehouse_id: { $ref: "#/components/schemas/OrderFields/properties/warehouse_id" }
+        order_date: { type: string, format: date }
+        shipping_address: { type: [ string, "null" ] }
+        payment_terms: { $ref: "#/components/schemas/CustomerDetails/properties/payment_terms" }
+        notes: { type: string }
+        status: { type: string, enum: [ Submitted ] }
+        current_version: { type: integer, minimum: 1, maximum: 9999999999 }
+        document_total: { $ref: "#/components/schemas/SalesAmount" }
+      required: [ order_number, customer_code, customer_name, warehouse_id, order_date, shipping_address,
+        payment_terms, notes, status, current_version, document_total ]
+    EligibleOrderListResponse:
+      allOf:
+        - { $ref: "#/components/schemas/PagedSuccess" }
+        - properties: { result: { properties: { items: { items: { $ref: "#/components/schemas/EligibleOrderSummary" } } } } }
+    OrderTripFields:
+      x-database-field-mapping:
+        trip_reference: TRIP_ID translated through the Logistics provider identifier
+        trip_status: TRIP_STATUS
+        trip_assigned: Derived from the current valid Trip assignment
+      x-database-internal-fields:
+        - LOGISTICS_TRIP_LINE_ID
+      type: object
+      required: [ trip_reference, trip_assigned, trip_status ]
+      properties:
+        trip_reference:
+          type: [ string, "null" ]
+          readOnly: true
+          description: Public reference to the current Logistics Trip; maps to the agreed Logistics identifier for
+            TRIP_ID. Every line of the Order belongs to the same current Trip. Clear all on cancellation;
+            replace together on whole-Order reassignment. Logistics owns assignment history.
+        trip_assigned: { type: boolean, readOnly: true }
+        trip_status:
+          type: [ string, "null" ]
+          enum: [ Draft, Dispatched, Delivered, Cancelled, null ]
+          readOnly: true
+      if: { required: [ trip_assigned ], properties: { trip_assigned: { const: true } } }
+      then:
+        properties:
+          trip_reference: { type: string, minLength: 1 }
+          trip_status: { enum: [ Draft, Dispatched, Delivered ] }
+      else: { properties: { trip_reference: { type: "null" }, trip_status: { enum: [ Cancelled, null ] } } }
+    OrderLine:
+      allOf:
+        - type: object
+          required: [ line_id, source_line_id, line_number, product_id, description, quantity, unit_price, line_amount, warehouse_id ]
+          properties:
+            line_id: { type: string, readOnly: true }
+            source_line_id:
+              type: [ string, "null" ]
+              readOnly: true
+              description: Original Quote line, or null for new lines and lines whose Product was replaced.
+            line_number: { type: integer, minimum: 1, readOnly: true }
+            product_id: { type: string, pattern: "^[1-9][0-9]{0,9}$" }
+            description: { type: string, maxLength: 200 }
+            quantity: { $ref: "#/components/schemas/SalesQuantity" }
+            unit_price: { $ref: "#/components/schemas/SalesUnitPrice" }
+            line_amount: { $ref: "#/components/schemas/SalesAmount" }
+            warehouse_id: { type: string, enum: [ W01 ], readOnly: true }
+        - { $ref: "#/components/schemas/OrderTripFields" }
+    DatabaseCustomerRow:
+      type: object
+      description: Database row after migrations 001-008. Storage documentation only; this schema does not add
+        fields to API requests or responses.
+      x-database-table: ME_OE_CUSTOMERS
+      x-database-columns:
+        CUSTOMER_CODE:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+        CUSTOMER_NAME:
+          type: VARCHAR2(100 CHAR)
+          nullable: false
+        IS_ACTIVE:
+          type: CHAR(1)
+          nullable: false
+          default: T
+        CONTACT_NAME:
+          type: VARCHAR2(100 CHAR)
+          nullable: true
+        EMAIL_ADDRESS:
+          type: VARCHAR2(254 CHAR)
+          nullable: true
+        PHONE_NUMBER:
+          type: VARCHAR2(25 CHAR)
+          nullable: true
+        BILLING_ADDRESS_LINE_1:
+          type: VARCHAR2(150 CHAR)
+          nullable: false
+        BILLING_ADDRESS_LINE_2:
+          type: VARCHAR2(150 CHAR)
+          nullable: true
+        CITY:
+          type: VARCHAR2(80 CHAR)
+          nullable: false
+        STATE_PROVINCE:
+          type: VARCHAR2(80 CHAR)
+          nullable: true
+        POSTAL_CODE:
+          type: VARCHAR2(20 CHAR)
+          nullable: true
+        COUNTRY:
+          type: VARCHAR2(80 CHAR)
+          nullable: false
+        PAYMENT_TERMS:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+          default: NET_30
+        NOTES:
+          type: VARCHAR2(500 CHAR)
+          nullable: true
+        RECORD#:
+          type: NUMBER(15)
+          nullable: false
+          default: AS
+          identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: NUMBER(10)
+          nullable: false
+        AMOUNT_CUSTOMER_OWES_US:
+          type: NUMBER(18,2)
+          nullable: false
+          default: 0
+        WHENCREATED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+      x-database-constraints:
+        - CONSTRAINT ME_OE_CUST_PK PRIMARY KEY (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_CUST_COMPANY_FK FOREIGN KEY (CNY#) REFERENCES ME_COMPANY(ID)
+        - CONSTRAINT ME_OE_CUST_CODE_UK UNIQUE (CNY#, CUSTOMER_CODE)
+        - CONSTRAINT ME_OE_CUST_ACTIVE_CK CHECK (IS_ACTIVE IN ('T', 'F'))
+        - CONSTRAINT ME_OE_CUSTOMERS_TERMS_CK CHECK (PAYMENT_TERMS IN ('DUE_ON_RECEIPT', 'NET_15', 'NET_30'))
+        - CONSTRAINT ME_OE_CUST_BALANCE_CK CHECK (AMOUNT_CUSTOMER_OWES_US >= 0)
+      properties:
+        CUSTOMER_CODE:
+          type: string
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20 CHAR)
+        CUSTOMER_NAME:
+          type: string
+          maxLength: 100
+          x-oracle-type: VARCHAR2(100 CHAR)
+        IS_ACTIVE:
+          type: string
+          maxLength: 1
+          enum:
+            - T
+            - F
+          default: T
+          x-oracle-type: CHAR(1)
+        CONTACT_NAME:
+          type:
+            - string
+            - "null"
+          maxLength: 100
+          x-oracle-type: VARCHAR2(100 CHAR)
+        EMAIL_ADDRESS:
+          type:
+            - string
+            - "null"
+          maxLength: 254
+          x-oracle-type: VARCHAR2(254 CHAR)
+        PHONE_NUMBER:
+          type:
+            - string
+            - "null"
+          maxLength: 25
+          x-oracle-type: VARCHAR2(25 CHAR)
+        BILLING_ADDRESS_LINE_1:
+          type: string
+          maxLength: 150
+          x-oracle-type: VARCHAR2(150 CHAR)
+        BILLING_ADDRESS_LINE_2:
+          type:
+            - string
+            - "null"
+          maxLength: 150
+          x-oracle-type: VARCHAR2(150 CHAR)
+        CITY:
+          type: string
+          maxLength: 80
+          x-oracle-type: VARCHAR2(80 CHAR)
+        STATE_PROVINCE:
+          type:
+            - string
+            - "null"
+          maxLength: 80
+          x-oracle-type: VARCHAR2(80 CHAR)
+        POSTAL_CODE:
+          type:
+            - string
+            - "null"
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20 CHAR)
+        COUNTRY:
+          type: string
+          maxLength: 80
+          x-oracle-type: VARCHAR2(80 CHAR)
+        PAYMENT_TERMS:
+          type: string
+          maxLength: 20
+          enum:
+            - DUE_ON_RECEIPT
+            - NET_15
+            - NET_30
+          default: NET_30
+          x-oracle-type: VARCHAR2(20 CHAR)
+        NOTES:
+          type:
+            - string
+            - "null"
+          maxLength: 500
+          x-oracle-type: VARCHAR2(500 CHAR)
+        RECORD#:
+          type: integer
+          minimum: 1
+          maximum: 999999999999999
+          default: AS
+          x-oracle-type: NUMBER(15)
+          x-database-identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: integer
+          minimum: -9999999999
+          maximum: 9999999999
+          x-oracle-type: NUMBER(10)
+        AMOUNT_CUSTOMER_OWES_US:
+          type: string
+          pattern: ^[0-9]{1,16}(?:\.[0-9]{1,2})?$
+          description: Exact nonnegative Oracle decimal serialized as a string; database CHECK constraints apply.
+          default: "0.00"
+          x-oracle-type: NUMBER(18,2)
+        WHENCREATED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+      required:
+        - CUSTOMER_CODE
+        - CUSTOMER_NAME
+        - IS_ACTIVE
+        - CONTACT_NAME
+        - EMAIL_ADDRESS
+        - PHONE_NUMBER
+        - BILLING_ADDRESS_LINE_1
+        - BILLING_ADDRESS_LINE_2
+        - CITY
+        - STATE_PROVINCE
+        - POSTAL_CODE
+        - COUNTRY
+        - PAYMENT_TERMS
+        - NOTES
+        - RECORD#
+        - CNY#
+        - AMOUNT_CUSTOMER_OWES_US
+        - WHENCREATED
+        - WHENMODIFIED
+      additionalProperties: false
+      x-database-checks:
+        - AMOUNT_CUSTOMER_OWES_US >= 0
+    DatabaseSalesDocumentRow:
+      type: object
+      description: Database row after migrations 001-008. Storage documentation only; this schema does not add
+        fields to API requests or responses.
+      x-database-table: ME_OE_DOCUMENTS
+      x-database-columns:
+        RECORD#:
+          type: NUMBER(15)
+          nullable: false
+          default: AS
+          identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: NUMBER(10)
+          nullable: false
+        DOCUMENT_TYPE:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+        DOCUMENT_NUMBER:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+        CUSTOMER_RECORD#:
+          type: NUMBER(15)
+          nullable: false
+        WAREHOUSE_ID:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+        DOCUMENT_DATE:
+          type: DATE
+          nullable: false
+        STATUS:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+          default: DRAFT
+        VALID_UNTIL:
+          type: DATE
+          nullable: true
+        REQUESTED_DELIVERY_DATE:
+          type: DATE
+          nullable: true
+        CUSTOMER_PO_NUMBER:
+          type: VARCHAR2(30 CHAR)
+          nullable: true
+        SHIPPING_ADDRESS:
+          type: VARCHAR2(500 CHAR)
+          nullable: true
+        PAYMENT_TERMS:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+        DUE_DATE:
+          type: DATE
+          nullable: true
+        NOTES:
+          type: VARCHAR2(500 CHAR)
+          nullable: true
+        VERSION:
+          type: NUMBER(10)
+          nullable: false
+          default: 1
+        WHENCREATED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+      x-database-constraints:
+        - CONSTRAINT ME_OE_DOC_PK PRIMARY KEY (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_DOC_COMPANY_FK FOREIGN KEY (CNY#) REFERENCES ME_COMPANY (ID)
+        - CONSTRAINT ME_OE_DOC_CUSTOMER_FK FOREIGN KEY (CNY#, CUSTOMER_RECORD#) REFERENCES ME_OE_CUSTOMERS (CNY#,
+          RECORD#)
+        - CONSTRAINT ME_OE_DOC_NUMBER_UK UNIQUE (CNY#, DOCUMENT_TYPE, DOCUMENT_NUMBER)
+        - CONSTRAINT ME_OE_DOC_TYPE_CK CHECK ( DOCUMENT_TYPE IN ('SALES_QUOTE', 'SALES_ORDER', 'SALES_INVOICE') )
+        - CONSTRAINT ME_OE_DOC_STATUS_CK CHECK ( (DOCUMENT_TYPE IN ('SALES_QUOTE', 'SALES_INVOICE') AND STATUS IN
+          ('DRAFT', 'SUBMITTED')) OR (DOCUMENT_TYPE = 'SALES_ORDER' AND STATUS IN ('DRAFT', 'SUBMITTED',
+          'IN_PROGRESS', 'CLOSED')) )
+      properties:
+        RECORD#:
+          type: integer
+          minimum: 1
+          maximum: 999999999999999
+          default: AS
+          x-oracle-type: NUMBER(15)
+          x-database-identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: integer
+          minimum: -9999999999
+          maximum: 9999999999
+          x-oracle-type: NUMBER(10)
+        DOCUMENT_TYPE:
+          type: string
+          maxLength: 20
+          enum:
+            - SALES_QUOTE
+            - SALES_ORDER
+            - SALES_INVOICE
+          x-oracle-type: VARCHAR2(20 CHAR)
+        DOCUMENT_NUMBER:
+          type: string
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20 CHAR)
+        CUSTOMER_RECORD#:
+          type: integer
+          minimum: -999999999999999
+          maximum: 999999999999999
+          x-oracle-type: NUMBER(15)
+        WAREHOUSE_ID:
+          type: string
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20 CHAR)
+        DOCUMENT_DATE:
+          type: string
+          format: date
+          description: Business date serialized as YYYY-MM-DD.
+          x-oracle-type: DATE
+        STATUS:
+          type: string
+          maxLength: 20
+          enum:
+            - DRAFT
+            - SUBMITTED
+            - IN_PROGRESS
+            - CLOSED
+          default: DRAFT
+          x-oracle-type: VARCHAR2(20 CHAR)
+        VALID_UNTIL:
+          type:
+            - string
+            - "null"
+          format: date
+          description: Business date serialized as YYYY-MM-DD.
+          x-oracle-type: DATE
+        REQUESTED_DELIVERY_DATE:
+          type:
+            - string
+            - "null"
+          format: date
+          description: Business date serialized as YYYY-MM-DD.
+          x-oracle-type: DATE
+        CUSTOMER_PO_NUMBER:
+          type:
+            - string
+            - "null"
+          maxLength: 30
+          x-oracle-type: VARCHAR2(30 CHAR)
+        SHIPPING_ADDRESS:
+          type:
+            - string
+            - "null"
+          maxLength: 500
+          x-oracle-type: VARCHAR2(500 CHAR)
+        PAYMENT_TERMS:
+          type: string
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20 CHAR)
+        DUE_DATE:
+          type:
+            - string
+            - "null"
+          format: date
+          description: Business date serialized as YYYY-MM-DD.
+          x-oracle-type: DATE
+        NOTES:
+          type:
+            - string
+            - "null"
+          maxLength: 500
+          x-oracle-type: VARCHAR2(500 CHAR)
+        VERSION:
+          type: integer
+          minimum: -9999999999
+          maximum: 9999999999
+          default: 1
+          x-oracle-type: NUMBER(10)
+        WHENCREATED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+      required:
+        - RECORD#
+        - CNY#
+        - DOCUMENT_TYPE
+        - DOCUMENT_NUMBER
+        - CUSTOMER_RECORD#
+        - WAREHOUSE_ID
+        - DOCUMENT_DATE
+        - STATUS
+        - VALID_UNTIL
+        - REQUESTED_DELIVERY_DATE
+        - CUSTOMER_PO_NUMBER
+        - SHIPPING_ADDRESS
+        - PAYMENT_TERMS
+        - DUE_DATE
+        - NOTES
+        - VERSION
+        - WHENCREATED
+        - WHENMODIFIED
+      additionalProperties: false
+      x-database-status-by-type:
+        SALES_QUOTE:
+          - DRAFT
+          - SUBMITTED
+        SALES_ORDER:
+          - DRAFT
+          - SUBMITTED
+          - IN_PROGRESS
+          - CLOSED
+        SALES_INVOICE:
+          - DRAFT
+          - SUBMITTED
+      x-database-indexes:
+        - name: ME_OE_DOC_CUSTOMER_IX
+          columns:
+            - CNY#
+            - CUSTOMER_RECORD#
+    DatabaseSalesDocumentLineRow:
+      type: object
+      description: Database row after migrations 001-008. Storage documentation only; this schema does not add
+        fields to API requests or responses.
+      x-database-table: ME_OE_DOCUMENT_LINES
+      x-database-columns:
+        RECORD#:
+          type: NUMBER(15)
+          nullable: false
+          default: AS
+          identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: NUMBER(10)
+          nullable: false
+        DOCUMENT_RECORD#:
+          type: NUMBER(15)
+          nullable: false
+        LINE_NUMBER:
+          type: NUMBER(10)
+          nullable: false
+        ITEM_CODE:
+          type: VARCHAR2(30 CHAR)
+          nullable: false
+        DESCRIPTION:
+          type: VARCHAR2(200 CHAR)
+          nullable: true
+        QUANTITY:
+          type: NUMBER
+          nullable: false
+        UNIT_PRICE:
+          type: NUMBER(12,2)
+          nullable: false
+        SOURCE_LINE_RECORD#:
+          type: NUMBER(15)
+          nullable: true
+        TRIP_ID:
+          type: NUMBER
+          nullable: true
+        LOGISTICS_TRIP_LINE_ID:
+          type: NUMBER
+          nullable: true
+        TRIP_STATUS:
+          type: VARCHAR2(12 CHAR)
+          nullable: true
+        WHENCREATED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+      x-database-constraints:
+        - CONSTRAINT ME_OE_LINE_PK PRIMARY KEY (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_LINE_COMPANY_FK FOREIGN KEY (CNY#) REFERENCES ME_COMPANY (ID)
+        - CONSTRAINT ME_OE_LINE_DOCUMENT_FK FOREIGN KEY (CNY#, DOCUMENT_RECORD#) REFERENCES ME_OE_DOCUMENTS (CNY#,
+          RECORD#)
+        - CONSTRAINT ME_OE_LINE_SOURCE_FK FOREIGN KEY (CNY#, SOURCE_LINE_RECORD#) REFERENCES ME_OE_DOCUMENT_LINES
+          (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_LINE_POSITION_UK UNIQUE (CNY#, DOCUMENT_RECORD#, LINE_NUMBER)
+        - CONSTRAINT ME_OE_LINE_QTY_CK CHECK (QUANTITY > 0 AND QUANTITY = TRUNC(QUANTITY))
+        - CONSTRAINT ME_OE_LINE_PRICE_CK CHECK (UNIT_PRICE >= 0)
+        - CONSTRAINT ME_OE_LINE_NUMBER_CK CHECK (LINE_NUMBER > 0)
+      properties:
+        RECORD#:
+          type: integer
+          minimum: 1
+          maximum: 999999999999999
+          default: AS
+          x-oracle-type: NUMBER(15)
+          x-database-identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: integer
+          minimum: -9999999999
+          maximum: 9999999999
+          x-oracle-type: NUMBER(10)
+        DOCUMENT_RECORD#:
+          type: integer
+          minimum: -999999999999999
+          maximum: 999999999999999
+          x-oracle-type: NUMBER(15)
+        LINE_NUMBER:
+          type: integer
+          minimum: 1
+          maximum: 9999999999
+          x-oracle-type: NUMBER(10)
+        ITEM_CODE:
+          type: string
+          maxLength: 30
+          x-oracle-type: VARCHAR2(30 CHAR)
+        DESCRIPTION:
+          type:
+            - string
+            - "null"
+          maxLength: 200
+          x-oracle-type: VARCHAR2(200 CHAR)
+        QUANTITY:
+          type: integer
+          minimum: 1
+          description: Database permits any positive whole NUMBER; the API applies its documented 9-digit limit.
+          x-oracle-type: NUMBER
+        UNIT_PRICE:
+          type: string
+          pattern: ^[0-9]{1,10}(?:\.[0-9]{1,2})?$
+          description: Exact nonnegative Oracle decimal serialized as a string; database CHECK constraints apply.
+          x-oracle-type: NUMBER(12,2)
+        SOURCE_LINE_RECORD#:
+          type:
+            - integer
+            - "null"
+          minimum: -999999999999999
+          maximum: 999999999999999
+          x-oracle-type: NUMBER(15)
+        TRIP_ID:
+          type:
+            - number
+            - "null"
+          x-oracle-type: NUMBER
+        LOGISTICS_TRIP_LINE_ID:
+          type:
+            - number
+            - "null"
+          x-oracle-type: NUMBER
+        TRIP_STATUS:
+          type:
+            - string
+            - "null"
+          maxLength: 12
+          x-oracle-type: VARCHAR2(12 CHAR)
+        WHENCREATED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+      required:
+        - RECORD#
+        - CNY#
+        - DOCUMENT_RECORD#
+        - LINE_NUMBER
+        - ITEM_CODE
+        - DESCRIPTION
+        - QUANTITY
+        - UNIT_PRICE
+        - SOURCE_LINE_RECORD#
+        - TRIP_ID
+        - LOGISTICS_TRIP_LINE_ID
+        - TRIP_STATUS
+        - WHENCREATED
+        - WHENMODIFIED
+      additionalProperties: false
+      x-database-checks:
+        - QUANTITY > 0 AND QUANTITY = TRUNC(QUANTITY)
+        - UNIT_PRICE >= 0
+        - LINE_NUMBER > 0
+      x-database-indexes:
+        - name: ME_OE_LINE_SOURCE_IX
+          columns:
+            - CNY#
+            - SOURCE_LINE_RECORD#
+    DatabaseSalesSourceLinkRow:
+      type: object
+      description: Database row after migrations 001-008. Storage documentation only; this schema does not add
+        fields to API requests or responses.
+      x-database-table: ME_OE_SOURCE_LINKS
+      x-database-columns:
+        RECORD#:
+          type: NUMBER(15)
+          nullable: false
+          default: AS
+          identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: NUMBER(10)
+          nullable: false
+        SOURCE_DOCUMENT_RECORD#:
+          type: NUMBER(15)
+          nullable: false
+        TARGET_DOCUMENT_RECORD#:
+          type: NUMBER(15)
+          nullable: false
+        WHENCREATED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+      x-database-constraints:
+        - CONSTRAINT ME_OE_LINK_PK PRIMARY KEY (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_LINK_COMPANY_FK FOREIGN KEY (CNY#) REFERENCES ME_COMPANY (ID)
+        - CONSTRAINT ME_OE_LINK_SOURCE_UK UNIQUE (CNY#, SOURCE_DOCUMENT_RECORD#)
+        - CONSTRAINT ME_OE_LINK_TARGET_UK UNIQUE (CNY#, TARGET_DOCUMENT_RECORD#)
+        - CONSTRAINT ME_OE_LINK_SOURCE_FK FOREIGN KEY (CNY#, SOURCE_DOCUMENT_RECORD#) REFERENCES ME_OE_DOCUMENTS
+          (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_LINK_TARGET_FK FOREIGN KEY (CNY#, TARGET_DOCUMENT_RECORD#) REFERENCES ME_OE_DOCUMENTS
+          (CNY#, RECORD#)
+      properties:
+        RECORD#:
+          type: integer
+          minimum: 1
+          maximum: 999999999999999
+          default: AS
+          x-oracle-type: NUMBER(15)
+          x-database-identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: integer
+          minimum: -9999999999
+          maximum: 9999999999
+          x-oracle-type: NUMBER(10)
+        SOURCE_DOCUMENT_RECORD#:
+          type: integer
+          minimum: -999999999999999
+          maximum: 999999999999999
+          x-oracle-type: NUMBER(15)
+        TARGET_DOCUMENT_RECORD#:
+          type: integer
+          minimum: -999999999999999
+          maximum: 999999999999999
+          x-oracle-type: NUMBER(15)
+        WHENCREATED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+      required:
+        - RECORD#
+        - CNY#
+        - SOURCE_DOCUMENT_RECORD#
+        - TARGET_DOCUMENT_RECORD#
+        - WHENCREATED
+        - WHENMODIFIED
+      additionalProperties: false
+    DatabaseSalesPaymentRow:
+      type: object
+      description: Database row after migrations 001-008. Storage documentation only; this schema does not add
+        fields to API requests or responses.
+      x-database-table: ME_OE_PAYMENTS
+      x-database-columns:
+        RECORD#:
+          type: NUMBER(15)
+          nullable: false
+          default: AS
+          identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: NUMBER(10)
+          nullable: false
+        PAYMENT_NUMBER:
+          type: VARCHAR2(20 CHAR)
+          nullable: false
+        INVOICE_RECORD#:
+          type: NUMBER(15)
+          nullable: false
+        PAYMENT_AMOUNT:
+          type: NUMBER(18,2)
+          nullable: false
+        PAYMENT_DATE:
+          type: DATE
+          nullable: false
+        PAYMENT_REFERENCE:
+          type: VARCHAR2(50 CHAR)
+          nullable: false
+        ACTION_REFERENCE:
+          type: VARCHAR2(100)
+          nullable: false
+        WHENCREATED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: TIMESTAMP WITH TIME ZONE
+          nullable: false
+          default: CURRENT_TIMESTAMP
+      x-database-constraints:
+        - CONSTRAINT ME_OE_PAY_PK PRIMARY KEY (CNY#, RECORD#)
+        - CONSTRAINT ME_OE_PAY_COMPANY_FK FOREIGN KEY (CNY#) REFERENCES ME_COMPANY (ID)
+        - CONSTRAINT ME_OE_PAY_INVOICE_FK FOREIGN KEY (CNY#, INVOICE_RECORD#) REFERENCES ME_OE_DOCUMENTS (CNY#,
+          RECORD#)
+        - CONSTRAINT ME_OE_PAY_ACTION_FK FOREIGN KEY (CNY#, ACTION_REFERENCE) REFERENCES ME_ACTIONS (COMPANY_ID,
+          ACTION_REFERENCE)
+        - CONSTRAINT ME_OE_PAY_NUMBER_UK UNIQUE (CNY#, PAYMENT_NUMBER)
+        - CONSTRAINT ME_OE_PAY_ACTION_UK UNIQUE (CNY#, ACTION_REFERENCE)
+        - CONSTRAINT ME_OE_PAY_AMOUNT_CK CHECK (PAYMENT_AMOUNT > 0)
+      properties:
+        RECORD#:
+          type: integer
+          minimum: 1
+          maximum: 999999999999999
+          default: AS
+          x-oracle-type: NUMBER(15)
+          x-database-identity: GENERATED BY DEFAULT AS IDENTITY
+        CNY#:
+          type: integer
+          minimum: -9999999999
+          maximum: 9999999999
+          x-oracle-type: NUMBER(10)
+        PAYMENT_NUMBER:
+          type: string
+          maxLength: 20
+          x-oracle-type: VARCHAR2(20 CHAR)
+        INVOICE_RECORD#:
+          type: integer
+          minimum: -999999999999999
+          maximum: 999999999999999
+          x-oracle-type: NUMBER(15)
+        PAYMENT_AMOUNT:
+          type: string
+          pattern: ^[0-9]{1,16}(?:\.[0-9]{1,2})?$
+          description: Exact nonnegative Oracle decimal serialized as a string; database CHECK constraints apply.
+          x-oracle-type: NUMBER(18,2)
+        PAYMENT_DATE:
+          type: string
+          format: date
+          description: Business date serialized as YYYY-MM-DD.
+          x-oracle-type: DATE
+        PAYMENT_REFERENCE:
+          type: string
+          maxLength: 50
+          x-oracle-type: VARCHAR2(50 CHAR)
+        ACTION_REFERENCE:
+          type: string
+          maxLength: 100
+          x-oracle-type: VARCHAR2(100)
+        WHENCREATED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+        WHENMODIFIED:
+          type: string
+          format: date-time
+          x-oracle-type: TIMESTAMP WITH TIME ZONE
+          x-database-default: CURRENT_TIMESTAMP
+      required:
+        - RECORD#
+        - CNY#
+        - PAYMENT_NUMBER
+        - INVOICE_RECORD#
+        - PAYMENT_AMOUNT
+        - PAYMENT_DATE
+        - PAYMENT_REFERENCE
+        - ACTION_REFERENCE
+        - WHENCREATED
+        - WHENMODIFIED
+      additionalProperties: false
+      x-database-checks:
+        - PAYMENT_AMOUNT > 0
+      x-database-indexes:
+        - name: ME_OE_PAY_INVOICE_IX
+          columns:
+            - CNY#
+            - INVOICE_RECORD#
+    QuoteLineInput:
+      type: object
+      required: [ product_id, description, quantity, unit_price ]
+      properties:
+        line_id: { $ref: "#/components/schemas/SalesLineInput/properties/line_id" }
+        product_id:
+          type: string
+          minLength: 1
+          description: Existing Inventory product ID. Verify the sample ID against the connected Inventory data.
+        description: { $ref: "#/components/schemas/SalesLineInput/properties/description" }
+        quantity: { $ref: "#/components/schemas/SalesQuantity" }
+        unit_price: { $ref: "#/components/schemas/SalesUnitPrice" }
+
   responses:
     BadRequest:
       description: Invalid field, type, range or unknown field
@@ -1143,3 +3527,209 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+    Error:
+      description: |-
+        400 validation; 401 unauthenticated; 403 forbidden; 404 not found; 409 state/source/revision conflict; 415 JSON required; 500 server error; 503 dependency unavailable.
+        Exact business validation messages:
+        - Missing required field: Enter {Field label}.
+        - Overlength: {Field label} must be {limit} characters or fewer.
+        - Customer Code cannot be changed after creation.
+        - Customer Code may contain only letters, numbers and hyphens.
+        - Enter a valid Email Address.
+        - Enter a valid Phone Number.
+        - Enter Country.
+        - Country must be 80 characters or fewer.
+        - Select a valid Is Active value (T or F).
+        - Select valid Payment Terms.
+        - Amount Customer Owes Us is calculated and cannot be edited.
+        - Customer Code already exists. Enter a unique code.
+        - This document has changed. Refresh and try again.
+        - This action reference belongs to a different request.
+        - Enter {Field label}. / {Field label} must be {limit} characters or fewer.
+        - Add at least one item line.
+        - Select a valid {Field label} available to your company.
+        - Selected {Customer / Item / Warehouse} is inactive. Select an active record.
+        - Enter a valid {Date label} in YYYY-MM-DD format.
+        - {Date label} must be on or after {Earlier date label}.
+        - From Date must be on or before To Date.
+        - Line {n}: Select a valid line belonging to this document.
+        - Line {n}: Duplicate line identifier.
+        - Line {n}: Select an active Item available to your company.
+        - Line {n}: Enter Description. / Line {n}: Description must be 200 characters or fewer.
+        - Line {n}: Enter a positive whole Quantity with up to 9 digits.
+        - Line {n}: Enter Unit Price of 0 or more, with up to 10 whole digits and 2 decimal places.
+        - Line {n}: Warehouse must match the document Warehouse.
+        - Line {n}: Line Amount is calculated and cannot be edited.
+        - Document Total is calculated and cannot be edited.
+        - {Line Amount / Document Total} exceeds the allowed numeric limit.
+        - Use the available action to change Document Status.
+        - Only Draft documents can be edited.
+        - Only a saved Draft can be submitted.
+        - Only Submitted documents can move to Draft.
+        - Cannot move to Draft: this document is used as a source by {Document number}.
+        - Only Draft documents with no downstream documents can be deleted.
+        - Selected source is no longer available. Refresh and select another eligible source.
+        - Cannot move to Draft: a payment has been recorded for this Invoice.
+        - Enter Payment Amount. / Enter a valid Payment Amount.
+        - Payment Amount must be greater than 0.
+        - Payment Amount can have at most 2 decimal places.
+        - Payment Amount exceeds the allowed numeric limit.
+        - Payment Amount cannot exceed Amount Due ({current amount due}).
+        - Enter Payment Reference.
+        - Payment Reference must be 50 characters or fewer.
+        - Enter Payment Date.
+        - Enter a valid Payment Date in YYYY-MM-DD format.
+        - Payment Date must be on or after Invoice Date.
+        - Payment Date cannot be in the future.
+        - Submit the Invoice before recording a payment.
+        - This Invoice is fully paid. No further payment can be recorded.
+        - Amount Due has changed to {current amount due}. Review the amount and try again.
+        - {Field label} must match the source document.
+        - Source-linked lines cannot be added, changed or removed.
+        - {Date label} cannot be in the future.
+        - You do not have permission to perform this action.
+        - Invoice Total must be greater than 0.
+        - In Progress and Closed are updated by Logistics and cannot be changed manually.
+        - Cannot move to Draft: this Order is assigned to a Logistics Trip.
+        - Cannot move to Draft: Order is In Progress or Closed.
+        - Invoice must retain its automatically linked Submitted, In Progress or Closed Order.
+        - Selected Order is already used by another Invoice.
+      headers: { WWW-Authenticate: { description: Present for HTTP 401., schema: { type: string } } }
+      content: { application/json: { schema: { $ref: "#/components/schemas/SalesErrorResponse" } } }
+    Customer:
+      description: Saved Customer with generated numeric id, immutable customer_code and calculated balance. No
+        Customer revision is currently defined.
+      content: { application/json: { schema: { $ref: "#/components/schemas/CustomerResponse" } } }
+    CustomerList:
+      description: Paged records.
+      content: { application/json: { schema: { $ref: "#/components/schemas/CustomerListResponse" } } }
+    Quote:
+      description: Saved record, calculated values, permitted actions and revision.
+      content: { application/json: { schema: { $ref: "#/components/schemas/QuoteResponse" } } }
+    QuoteList:
+      description: Paged records.
+      content: { application/json: { schema: { $ref: "#/components/schemas/QuoteListResponse" } } }
+    QuoteDeleted:
+      description: Draft deleted; number never reused.
+      content: { application/json: { schema: { $ref: "#/components/schemas/QuoteDeleteResponse" } } }
+    Order:
+      description: Saved record, calculated values, permitted actions and revision.
+      content: { application/json: { schema: { $ref: "#/components/schemas/OrderResponse" } } }
+    OrderList:
+      description: Paged records.
+      content: { application/json: { schema: { $ref: "#/components/schemas/OrderListResponse" } } }
+    OrderDeleted:
+      description: Draft deleted; number never reused.
+      content: { application/json: { schema: { $ref: "#/components/schemas/OrderDeleteResponse" } } }
+    Invoice:
+      description: Saved record, calculated values, permitted actions and revision.
+      content: { application/json: { schema: { $ref: "#/components/schemas/InvoiceResponse" } } }
+    InvoiceList:
+      description: Paged records.
+      content: { application/json: { schema: { $ref: "#/components/schemas/InvoiceListResponse" } } }
+    InvoiceDeleted:
+      description: Draft deleted; number never reused.
+      content: { application/json: { schema: { $ref: "#/components/schemas/InvoiceDeleteResponse" } } }
+    Payment:
+      description: Payment recorded once; updated Invoice snapshot.
+      content: { application/json: { schema: { $ref: "#/components/schemas/PaymentCreateResponse" } } }
+    PaymentHistory:
+      description: Immutable payment history.
+      content: { application/json: { schema: { $ref: "#/components/schemas/PaymentHistoryResponse" } } }
+    Documents:
+      description: Paged document summaries.
+      content: { application/json: { schema: { $ref: "#/components/schemas/DocumentListResponse" } } }
+    CustomerChoices:
+      description: Same-company Customer choices with is_active T, numeric id and Customer Code.
+      content: { application/json: { schema: { $ref: "#/components/schemas/CustomerChoiceListResponse" } } }
+    ItemChoices:
+      description: Active same-company choices.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ItemChoiceListResponse" } } }
+    WarehouseChoices:
+      description: Active same-company choices.
+      content: { application/json: { schema: { $ref: "#/components/schemas/WarehouseChoiceListResponse" } } }
+    EligibleOrders:
+      description: Submitted Sales Orders without an existing Invoice, scoped to the current company.
+      content: { application/json: { schema: { $ref: "#/components/schemas/EligibleOrderListResponse" } } }
+    InventoryConflict:
+      description: |-
+        No Order status or partial reservation change.
+        - Item {Item Code}: requested {requested}; available {available}. Update Quantity and try again.
+        - Inventory availability changed. Review the available quantities and try again.
+      content: { application/json: { schema: { $ref: "#/components/schemas/SalesErrorResponse" } } }
+    InventoryUnavailable:
+      description: |-
+        No successful action while Inventory availability, reservation or release cannot be confirmed.
+        - Unable to check Inventory availability. Please try again.
+        - Unable to reserve Inventory for this Order. Please try again.
+        Release failures or unknown outcomes must identify the Inventory dependency; reconcile before retrying a different request.
+      content: { application/json: { schema: { $ref: "#/components/schemas/SalesErrorResponse" } } }
+    CustomerQuoteError:
+      description: |-
+        400 validation; 401 unauthenticated; 403 forbidden; 404 not found; 409 state/source/revision conflict; 415 JSON required; 500 server error; 503 dependency unavailable.
+        Exact business validation messages:
+        - Missing required field: Enter {Field label}.
+        - Overlength: {Field label} must be {limit} characters or fewer.
+        - Customer Code cannot be changed after creation.
+        - Customer Code may contain only letters, numbers and hyphens.
+        - Enter a valid Email Address.
+        - Enter a valid Phone Number.
+        - Enter Country.
+        - Country must be 80 characters or fewer.
+        - Select a valid Is Active value (T or F).
+        - Select valid Payment Terms.
+        - Amount Customer Owes Us is calculated and cannot be edited.
+        - Customer Code already exists. Enter a unique code.
+        - This document has changed. Refresh and try again.
+        - This action reference belongs to a different request.
+        - Enter {Field label}. / {Field label} must be {limit} characters or fewer.
+        - Add at least one item line.
+        - Select a valid {Field label} available to your company.
+        - Selected {Customer / Item / Warehouse} is inactive. Select an active record.
+        - Enter a valid {Date label} in YYYY-MM-DD format.
+        - {Date label} must be on or after {Earlier date label}.
+        - From Date must be on or before To Date.
+        - Line {n}: Select a valid line belonging to this document.
+        - Line {n}: Duplicate line identifier.
+        - Line {n}: Select an active Item available to your company.
+        - Line {n}: Enter Description. / Line {n}: Description must be 200 characters or fewer.
+        - Line {n}: Enter a positive whole Quantity with up to 9 digits.
+        - Line {n}: Enter Unit Price of 0 or more, with up to 10 whole digits and 2 decimal places.
+        - Line {n}: Warehouse must match the document Warehouse.
+        - Line {n}: Line Amount is calculated and cannot be edited.
+        - Document Total is calculated and cannot be edited.
+        - {Line Amount / Document Total} exceeds the allowed numeric limit.
+        - Use the available action to change Document Status.
+        - Only Draft documents can be edited.
+        - Only a saved Draft can be submitted.
+        - Only Submitted documents can move to Draft.
+        - Cannot move to Draft: this document is used as a source by {Document number}.
+        - Only Draft documents with no downstream documents can be deleted.
+        - Selected source is no longer available. Refresh and select another source, or leave Source blank.
+        - Cannot move to Draft: a payment has been recorded for this Invoice.
+        - Enter Payment Amount. / Enter a valid Payment Amount.
+        - Payment Amount must be greater than 0.
+        - Payment Amount can have at most 2 decimal places.
+        - Payment Amount exceeds the allowed numeric limit.
+        - Payment Amount cannot exceed Amount Due ({current amount due}).
+        - Enter Payment Reference.
+        - Payment Reference must be 50 characters or fewer.
+        - Enter Payment Date.
+        - Enter a valid Payment Date in YYYY-MM-DD format.
+        - Payment Date must be on or after Invoice Date.
+        - Payment Date cannot be in the future.
+        - Submit the Invoice before recording a payment.
+        - This Invoice is fully paid. No further payment can be recorded.
+        - Amount Due has changed to {current amount due}. Review the amount and try again.
+        - {Field label} must match the source document.
+        - Source-linked lines cannot be added, changed or removed.
+        - {Date label} cannot be in the future.
+        - You do not have permission to perform this action.
+        - Invoice Total must be greater than 0.
+        - In Progress and Closed are updated by Logistics and cannot be changed manually.
+        - Cannot move to Draft: this Order is assigned to a Logistics Trip.
+        - Cannot move to Draft: Order is In Progress or Closed.
+        - Select a Submitted, In Progress or Closed Order, or leave Source blank for a standalone Invoice.
+        - Selected Order is already used by another Invoice.
+      headers: { WWW-Authenticate: { description: Present for HTTP 401., schema: { type: string } } }
+      content: { application/json: { schema: { $ref: "#/components/schemas/SalesErrorResponse" } } }

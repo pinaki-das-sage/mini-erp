@@ -67,10 +67,10 @@ class TripService
 
         return (new TransactionManager($this->connection))->run(
             function (TransactionContext $tx) use ($actor, $actorId, $data, $fulfillment): array {
-                $existingId = $this->repository->findTripIdByReference(
+                $existingId = $this->repository->findTripIdByCode(
                     $tx,
                     $actor->companyId,
-                    $data['trip_reference']
+                    $data['trip_code']
                 );
 
                 if ($existingId !== null) {
@@ -92,7 +92,7 @@ class TripService
                             $data['planned_departure_at']
                         )
                     ) {
-                        throw new AppError('CONFLICT', 'Trip reference already exists for a different assignment.', 409);
+                        throw new AppError('CONFLICT', 'Trip code already exists for a different assignment.', 409);
                     }
 
                     // Trip and Sales assignment commit atomically, so an existing Draft Trip is a completed replay.
@@ -143,7 +143,7 @@ class TripService
                 );
                 $eventInput = [
                     'expected_version' => $this->orderVersion($order),
-                    'event_reference' => $this->eventReference('assignment', $actor->companyId, $data['order_number'], $data['trip_reference']),
+                    'event_reference' => $this->eventReference('assignment', $actor->companyId, $data['order_number'], $data['trip_code']),
                     'trip_id' => (string) $tripId,
                     'lines' => $mapping
                 ];

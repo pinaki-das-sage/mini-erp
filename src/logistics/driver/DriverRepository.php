@@ -33,6 +33,28 @@ class DriverRepository
         ]));
     }
 
+    public function findEligible(int $companyId, int $offset, int $pageSize, ?int $excludeTripId = null): array
+    {
+        $sql = "SELECT D.ID, D.DRIVER_CODE, D.USER_ID, D.FIRST_NAME, D.LAST_NAME, D.PHONE,
+            D.LICENCE_NUMBER, TO_CHAR(D.LICENCE_EXPIRY, 'YYYY-MM-DD') AS LICENCE_EXPIRY, D.ISACTIVE
+            FROM ME_LOG_DRIVERS D
+            WHERE D.COMPANY_ID = :company_id AND D.ISACTIVE = 'T'
+            AND (D.USER_ID IS NULL OR EXISTS (
+                SELECT 1 FROM ME_USERS U WHERE U.COMPANY_ID = D.COMPANY_ID AND U.ID = D.USER_ID AND U.ACTIVE = 1
+            ))
+            AND NOT EXISTS (SELECT 1 FROM ME_LOG_TRIPS T WHERE T.COMPANY_ID = D.COMPANY_ID
+                AND T.DRIVER_ID = D.ID AND T.STATUS IN ('D', 'S')";
+        $parameters = ['company_id' => $companyId];
+        if ($excludeTripId !== null) {
+            $sql .= ' AND T.ID <> :exclude_trip_id';
+            $parameters['exclude_trip_id'] = $excludeTripId;
+        }
+        $sql .= ') ORDER BY D.ID OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY';
+        $parameters['offset'] = $offset;
+        $parameters['page_size'] = $pageSize;
+        return array_map($this->mapRow(...), $this->connection->query($sql, $parameters));
+    }
+
     public function findById(int $companyId, int $id): array
     {
         $sql = 'SELECT ID, DRIVER_CODE, USER_ID, FIRST_NAME, LAST_NAME, PHONE,

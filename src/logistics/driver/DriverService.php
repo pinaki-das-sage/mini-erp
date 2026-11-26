@@ -47,6 +47,21 @@ class DriverService
         ];
     }
 
+    public function getEligibleDrivers(Actor $actor, array $pagination, ?int $excludeTripId = null): array
+    {
+        (new Authorization($this->connection))->requirePermission($actor, 'logistics.drivers', 'read');
+        if ($excludeTripId !== null) {
+            $this->validator->validateId($excludeTripId);
+        }
+        return [
+            'items' => $this->repository->findEligible(
+                $actor->companyId, $pagination['offset'], $pagination['page_size'], $excludeTripId,
+            ),
+            'page' => $pagination['page'],
+            'page_size' => $pagination['page_size'],
+        ];
+    }
+
     // GET /logistics/driver-users
     public function getEligibleUsers(Actor $actor, array $pagination): array
     {
