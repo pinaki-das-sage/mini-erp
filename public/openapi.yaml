@@ -499,67 +499,6 @@ paths:
         default: { $ref: "#/components/responses/Error" }
       x-implementation-status: integration-pending
 
-  /sales/references/customers:
-    get:
-      tags: [ References ]
-      summary: List active Customer choices
-      operationId: listCustomerChoices
-      parameters:
-        - { $ref: "#/components/parameters/Search" }
-        - { $ref: "#/components/parameters/Page" }
-        - { $ref: "#/components/parameters/PageSize" }
-      responses:
-        "200": { $ref: "#/components/responses/CustomerChoices" }
-        default: { $ref: "#/components/responses/Error" }
-      x-implementation-status: planned
-
-  /sales/references/items:
-    get:
-      tags: [ References ]
-      summary: List active Item choices
-      operationId: listItemChoices
-      parameters:
-        - { $ref: "#/components/parameters/Search" }
-        - { $ref: "#/components/parameters/Page" }
-        - { $ref: "#/components/parameters/PageSize" }
-      responses:
-        "200": { $ref: "#/components/responses/ItemChoices" }
-        default: { $ref: "#/components/responses/Error" }
-      x-implementation-status: planned
-
-  /sales/references/warehouses:
-    get:
-      tags: [ References ]
-      summary: List active Warehouse choices
-      operationId: listWarehouseChoices
-      parameters:
-        - { $ref: "#/components/parameters/Search" }
-        - { $ref: "#/components/parameters/Page" }
-        - { $ref: "#/components/parameters/PageSize" }
-      responses:
-        "200": { $ref: "#/components/responses/WarehouseChoices" }
-        default: { $ref: "#/components/responses/Error" }
-      x-implementation-status: planned
-
-  /sales/documents:
-    get:
-      tags: [ All Documents ]
-      summary: List all sales documents
-      operationId: listSalesDocuments
-      parameters:
-        - { $ref: "#/components/parameters/DocumentType" }
-        - { $ref: "#/components/parameters/CustomerCode" }
-        - { $ref: "#/components/parameters/WarehouseId" }
-        - { $ref: "#/components/parameters/DocumentStatus" }
-        - { $ref: "#/components/parameters/FromDate" }
-        - { $ref: "#/components/parameters/ToDate" }
-        - { $ref: "#/components/parameters/Page" }
-        - { $ref: "#/components/parameters/PageSize" }
-        - { $ref: "#/components/parameters/PaymentStatus" }
-      responses:
-        "200": { $ref: "#/components/responses/Documents" }
-        default: { $ref: "#/components/responses/Error" }
-      x-implementation-status: planned
   /sales/invoices/eligible-orders:
     get:
       tags: [ Sales Invoices ]

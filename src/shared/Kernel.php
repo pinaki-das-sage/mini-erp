@@ -57,11 +57,11 @@ final class Kernel
                     "SELECT VERSION, CHECKSUM, STATUS FROM ME_MIGRATIONS WHERE COMPONENT = 'shared'",
                 ), null, 'VERSION');
                 $runner = new MigrationRunner($this->db());
-                $directories = $runner->directories(dirname(__DIR__, 2) . '/database/migrations');
-                if (!isset($directories['shared'])) {
+                $sharedDirectory = dirname(__DIR__, 2) . '/database/migrations/shared';
+                if (!is_dir($sharedDirectory)) {
                     throw new AppError('NOT_READY', 'Shared migration directory is missing.', 503);
                 }
-                $plan = $runner->plan($directories['shared']);
+                $plan = $runner->plan($sharedDirectory);
                 foreach ($plan as $migration) {
                     $current = $applied[$migration['version']] ?? null;
                     if ($current === null || $current['CHECKSUM'] !== $migration['checksum'] || $current['STATUS'] !== 'APPLIED') {
