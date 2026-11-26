@@ -77,6 +77,7 @@ final class OraclePaymentTest extends TestCase
                 public function rollback(): void { $this->inner->rollback(); }
             };
             $finalInput = [...$input, 'action_reference' => $prefix . '-final', 'expected_version' => 3, 'payment_amount' => '13.25'];
+            unset($finalInput['payment_reference']); // Migration 014 must allow Oracle NULL for an omitted reference.
             try {
                 (new PaymentService($fault, $clock))->record($actor, $invoiceNumber, $finalInput);
                 self::fail('Forced audit failure must roll back payment, balance, version and retry result.');
@@ -87,6 +88,10 @@ final class OraclePaymentTest extends TestCase
             self::assertSame([], $observer->query('SELECT ACTION_REFERENCE FROM ME_ACTIONS WHERE COMPANY_ID = :company_id AND ACTION_REFERENCE = :reference',
                 ['company_id' => $actor->companyId, 'reference' => $finalInput['action_reference']]));
             $final = $service->record($actor, $invoiceNumber, $finalInput);
+            self::assertSame('', $final['payment']['payment_reference']);
+            $historyPage = (new PaymentService($observer, $clock))->list($actor, $invoiceNumber, ['page' => '2', 'page_size' => '1']);
+            self::assertSame('0.00', $historyPage['items'][0]['amount_due']);
+            self::assertSame('Paid', $historyPage['items'][0]['payment_status']);
             self::assertSame('Paid', $final['invoice']['payment_status']);
             self::assertSame(4, $final['invoice']['current_version']);
             self::assertSame('0.00', $final['invoice']['amount_due']);

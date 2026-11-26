@@ -16,6 +16,10 @@
 .sales-document .document-line-actions { display: flex; gap: .3rem; }
 .sales-document .document-line-actions button { padding: .45rem .55rem; }
 .sales-document .document-notes { white-space: pre-wrap; overflow-wrap: anywhere; }
+.sales-document .payment-invoices th, .sales-document .payment-invoices td { padding: .7rem .6rem; }
+.sales-document .payment-invoices td:nth-child(1), .sales-document .payment-invoices td:nth-child(2), .sales-document .payment-invoices td:nth-child(3) { white-space: nowrap; }
+.sales-document .payment-invoices .document-toolbar { margin: .25rem 0; gap: .5rem; }
+.sales-document .payment-invoices .button { padding: .5rem .65rem; font-size: .9rem; white-space: nowrap; }
 @media (max-width: 700px) {
     .app-layout > main { width: 100%; box-sizing: border-box; }
 }

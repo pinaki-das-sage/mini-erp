@@ -47,11 +47,11 @@ replay; no Invoice edit grant is required to exercise a granted Payment operatio
 | expected_version | Yes | Positive current Invoice revision |
 | payment_amount | Yes | Decimal string; positive; maximum 16 whole digits and 2 decimals; at most current due |
 | payment_date | Yes | Real YYYY-MM-DD date; on/after Invoice Date and not after business date |
-| payment_reference | Yes | Trimmed nonempty business text, maximum 50 characters |
+| payment_reference | No | Optional trimmed business text, maximum 50 characters; omitted/blank/null is stored as NULL and returned as empty text |
 
 Invoice Number comes from the URL. Reject caller Invoice identity, Payment Number, Company/actor, Total Paid, Amount Due, Customer balance, payment status or any unsupported field in the body. Payment Reference describes the business receipt/transfer; it is not an assumed unique bank transaction ID and is distinct from the action_reference retry key.
 
-Use exact decimals; accept up to two decimals without silently truncating/rounding excess precision. Return saved amounts with exactly two decimals. The server must distinguish the supplied exact missing/nonnumeric/zero/negative/precision/capacity messages instead of returning one generic decimal-helper error. Date comparisons need the configured business clock and saved Invoice Date; JSON Schema date format alone is insufficient. No date/reference omission or amount-only exception is introduced.
+Use exact decimals; accept up to two decimals without silently truncating/rounding excess precision. Return saved amounts with exactly two decimals. The server must distinguish the supplied exact missing/nonnumeric/zero/negative/precision/capacity messages instead of returning one generic decimal-helper error. Date comparisons need the configured business clock and saved Invoice Date; JSON Schema date format alone is insufficient. Payment Date remains required; Payment Reference is optional.
 
 ## Eligibility and transaction order
 
@@ -69,7 +69,13 @@ The Invoice remains Submitted. Partial payment sets Partially Paid; zero remaini
 
 POST returns the standard success envelope with operation_id equal to action_reference and current_version equal to the updated Invoice revision. Result includes the saved payment and an Invoice snapshot (Invoice Number, Submitted status, current revision, Invoice Total, Total Paid, Amount Due, payment status). Reuse InvoicePaymentSummary. A successful recording can only produce Partially Paid or Paid, never Unpaid or a Draft/null stamp. Envelope and snapshot versions must agree in implementation.
 
-Payment history returns Payment Number, Invoice Number, recorded amount/date/reference, authenticated recording user ID (created_by) and server UTC timestamp (created_at). These are read-only. GET supports page/page_size, defaults 1/25 and maximum size 100, ordered by created_at then payment_number. Reject unknown query fields. List envelope operation_id/current_version are null; individual payments have no versions. An existing Draft/unpaid Invoice with no payments returns an empty list; missing/cross-company Invoice returns generic 404.
+Payment history returns Payment Number, Invoice Number, recorded amount/date/reference, amount_due and payment_status immediately after each receipt, authenticated recording user ID (created_by) and server UTC timestamp (created_at). These are read-only. Running balances use exact amounts in recording order, before pagination or receipt-reference filtering; backdated business dates do not reorder receipts. GET supports page/page_size, defaults 1/25 and maximum size 100, ordered by created_at then payment_number. Reject unknown query fields. List envelope operation_id/current_version are null; individual payments have no versions. An existing Draft/unpaid Invoice with no payments returns an empty list; missing/cross-company Invoice returns generic 404. Historical replay snapshots saved before these additional receipt fields may omit them.
+
+The Payments landing page lists same-company Submitted Invoices through the existing Invoice read service,
+with Invoice number, Customer code and payment-status filters, 25 rows per page. Invoice read permission
+is required to browse this list. Payment-history-only readers keep the manual receipt lookup. Row actions
+respect Payment record/read grants; fully paid Invoices do not offer another payment. History hides the
+Recorded by column while retaining actor evidence in storage and API responses.
 
 An identical POST retry returns its original 201 result and snapshot, which may precede later payments. Use existing GET Invoice for the latest totals; do not silently substitute a newer result into the saved retry response. Customer balance remains read-only to API callers and is updated only as part of the receipt transaction.
 
@@ -78,11 +84,13 @@ An identical POST retry returns its original 201 result and snapshot, which may 
 Deploy src/sales/BusinessDate.php, src/sales/payments/PaymentService.php,
 the classes under src/sales/invoices/, the route additions in src/sales/api.php, the nested response
 version fallback in src/shared/Api.php, and public/openapi.yaml. Preserve teammates'
-routes and other shared changes when merging. No migration rerun is required.
+routes and other shared changes when merging. Apply the new Sales migration
+`014_oe_optional_payment_reference.php` before deploying the optional-reference flow. Do not edit or rerun
+historical migration 008. Migration 014 makes PAYMENT_REFERENCE nullable; no history or money data is removed.
 
 1. Login/Authorize; GET a Submitted Invoice with positive due and its latest version.
 2. POST a partial payment using a new action_reference, exact decimal-string amount,
-   valid Payment Date and nonempty business reference. Verify HTTP 201 and matching
+   valid Payment Date and an optional business reference. Verify HTTP 201 and matching
    envelope/Invoice versions, updated due and exactly one balance reduction.
 3. Retry the identical original body/reference/version. Expect the original 201
    snapshot, no extra payment or balance/version/audit change.

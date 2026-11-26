@@ -5,6 +5,7 @@ namespace MiniErp\sales;
 
 use MiniErp\sales\customers\CustomerPages;
 use MiniErp\sales\invoices\InvoicePages;
+use MiniErp\sales\payments\PaymentPages;
 use MiniErp\shared\AppError;
 use MiniErp\shared\WebPath;
 use MiniErp\shared\database\Connection;
@@ -30,6 +31,9 @@ final readonly class SalesPages
                     if ($error->errorCode !== 'FORBIDDEN') { throw $error; }
                 }
             }
+            if ((new PaymentPages($this->connection, $this->paths, $this->csrf))->canOpen($actor)) {
+                $urls['payments'] = $this->paths->url('/modules/sales/payments');
+            }
             return ['status' => 200, 'headers' => ['Content-Type' => 'text/html; charset=UTF-8'],
                 'body' => (new Renderer($this->paths))->render('sales/index.tpl', 'Sales', $this->csrf,
                     ['actor' => $actor, 'salesUrls' => $urls])];
@@ -40,7 +44,7 @@ final readonly class SalesPages
                 return (new DocumentPages($this->connection, $this->paths, $this->csrf, $kind))->handle($method, $path, $actor, $input, $query);
             }
         }
-        foreach (['customers' => CustomerPages::class, 'invoices' => InvoicePages::class] as $section => $class) {
+        foreach (['customers' => CustomerPages::class, 'invoices' => InvoicePages::class, 'payments' => PaymentPages::class] as $section => $class) {
             $base = '/modules/sales/' . $section;
             if ($path === $base || str_starts_with($path, $base . '/')) {
                 return (new $class($this->connection, $this->paths, $this->csrf))->handle($method, $path, $actor, $input, $query);

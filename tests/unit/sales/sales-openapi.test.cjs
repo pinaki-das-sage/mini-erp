@@ -54,11 +54,20 @@ test('Customer contract matches the updated backend without changing login compa
   assert(!schemas.CustomerCreateRequest.required.includes('action_reference'));
   assert(!schemas.CustomerCreateRequest.required.includes('customer_code'));
   assert.equal(schemas.CustomerCreateRequest.allOf[1].properties.customer_code, undefined);
+  assert.equal(schemas.CustomerCreateRequest.allOf[1].properties.action_reference.$ref, '#/components/schemas/ActionReference');
+  assert.equal(schemas.CustomerUpdateRequest.allOf[1].properties.action_reference.$ref, '#/components/schemas/ActionReference');
+  assert.deepEqual(
+    schemas.CustomerUpdateRequest.anyOf.map(branch => branch.required[0]).sort(),
+    Object.keys(schemas.CustomerDetails.properties).sort(),
+  );
   assert.equal(schemas.Customer.allOf[1].properties.customer_code.readOnly, true);
   assert.equal(operation('/sales/customers').requestBody.content['application/json'].example.customer_code, undefined);
   assert(!(schemas.CustomerUpdateRequest.required || []).includes('action_reference'));
   assert.match(schemas.Customer.allOf[1].properties.amount_customer_owes_us.description, /stored/);
-  assert.equal(operation('/auth/login').requestBody.content['application/json'].schema.properties.company.enum, undefined);
+  assert.deepEqual(operation('/auth/login').requestBody.content['application/json'].schema.properties.company.enum, ['SIA-MINI-ERP']);
+  for (const route of ['/sales/customers', '/sales/customers/{id}/update']) {
+    assert.equal(operation(route).requestBody.content['application/json'].example.action_reference, undefined);
+  }
   assert(spec.paths['/sales/customers/{id}/update']);
 });
 
@@ -159,7 +168,7 @@ test('Invoice lifecycle examples require only the current version without changi
 
 test('Payment examples omit optional retry references and responses allow a null operation ID', () => {
   assert.deepEqual(schemas.PaymentCreateRequest.required,
-    ['expected_version', 'payment_amount', 'payment_date', 'payment_reference']);
+    ['expected_version', 'payment_amount', 'payment_date']);
   const content = operation('/sales/invoices/{invoice_number}/payments').requestBody.content['application/json'];
   for (const example of Object.values(content.examples)) assert.equal(example.value.action_reference, undefined);
   assert.deepEqual(schemas.PaymentCreateResponse.allOf[1].properties.operation_id.type, ['string', 'null']);
@@ -181,7 +190,7 @@ test('Sales product references use numeric Inventory IDs with the product_id fie
   assert(schemas.SalesLineInput.required.includes('product_id'));
   assert.equal(schemas.SalesLineInput.properties.item_code, undefined);
   assert.deepEqual(schemas.QuoteFields.properties.warehouse_id.enum, ['W01']);
-  assert.equal(schemas.QuoteCreateRequest.example.lines[0].product_id, '163');
+  assert.equal(operation('/sales/quotes').requestBody.content['application/json'].example.lines[0].product_id, '163');
 });
 
 test('money, phone and payment reference patterns accept actual API values', () => {
@@ -197,9 +206,11 @@ test('money, phone and payment reference patterns accept actual API values', () 
   const payment = new RegExp(schemas.PaymentAmount.pattern);
   assert(payment.test('300.00'));
   assert(!payment.test('0.00'));
-  const reference = new RegExp(schemas.PaymentCreateRequest.properties.payment_reference.pattern);
-  assert(reference.test('BANK-123'));
-  assert(!reference.test('   '));
+  assert(!schemas.PaymentCreateRequest.required.includes('payment_reference'));
+  assert.equal(schemas.PaymentCreateRequest.properties.payment_reference.maxLength, 50);
+  assert.equal(schemas.PaymentCreateRequest.properties.payment_reference.minLength, undefined);
+  assert(schemas.PaymentRecord.properties.amount_due);
+  assert.deepEqual(schemas.PaymentRecord.properties.payment_status.enum, ['Partially Paid', 'Paid']);
   const phone = new RegExp(schemas.CustomerDetails.properties.phone_number.pattern);
   assert(phone.test('+91 (80) 1234-5678'));
   assert(!phone.test('123abc'));

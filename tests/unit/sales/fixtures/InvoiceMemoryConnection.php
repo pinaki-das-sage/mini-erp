@@ -100,6 +100,40 @@ final class InvoiceMemoryConnection implements Connection
         if (str_contains($sql, 'AS ORDER_NUMBER') && str_contains($sql, 'NOT EXISTS')) {
             return [];
         }
+        if (str_contains($sql, 'WITH LINE_TOTALS')) {
+            $rows = [];
+            foreach ($this->documents as $document) {
+                $customer = $this->customers[$document['CUSTOMER_RECORD#']] ?? null;
+                if ($document['CNY#'] !== $company || $document['DOCUMENT_TYPE'] !== 'SALES_INVOICE' || $customer === null || $customer['CNY#'] !== $company) { continue; }
+                $total = 0; $paid = 0; $source = null;
+                foreach ($this->lines as $line) {
+                    if ($line['CNY#'] === $company && $line['DOCUMENT_RECORD#'] === $document['RECORD#']) {
+                        $total = InvoiceMoney::add($total, InvoiceMoney::line($line['SAVED_QUANTITY'], $line['SAVED_PRICE'])['cents']);
+                    }
+                }
+                foreach ($this->payments as $payment) {
+                    if ($payment['CNY#'] === $company && $payment['INVOICE_RECORD#'] === $document['RECORD#']) { $paid += InvoiceMoney::cents($payment['PAYMENT_AMOUNT']); }
+                }
+                foreach ($this->links as $link) {
+                    if ($link['CNY#'] === $company && $link['TARGET_DOCUMENT_RECORD#'] === $document['RECORD#']) { $source = $this->documents[$link['SOURCE_DOCUMENT_RECORD#']]['DOCUMENT_NUMBER']; }
+                }
+                $paymentStatus = $document['STATUS'] === 'DRAFT' ? null : ($paid === 0 ? 'Unpaid' : ($paid === $total ? 'Paid' : 'Partially Paid'));
+                if (isset($p['status']) && $document['STATUS'] !== $p['status'] ||
+                    isset($p['invoice_number']) && $document['DOCUMENT_NUMBER'] !== $p['invoice_number'] ||
+                    isset($p['customer_code']) && $customer['CUSTOMER_CODE'] !== $p['customer_code'] ||
+                    isset($p['warehouse_id']) && $document['WAREHOUSE_ID'] !== $p['warehouse_id'] ||
+                    isset($p['payment_status']) && $paymentStatus !== $p['payment_status'] ||
+                    isset($p['from_date']) && $document['SAVED_DATE'] < $p['from_date'] ||
+                    isset($p['to_date']) && $document['SAVED_DATE'] > $p['to_date']) { continue; }
+                $rows[] = ['INVOICE_NUMBER' => $document['DOCUMENT_NUMBER'], 'STATUS' => $document['STATUS'], 'VERSION' => $document['VERSION'],
+                    'CUSTOMER_CODE' => $customer['CUSTOMER_CODE'], 'WAREHOUSE_ID' => $document['WAREHOUSE_ID'], 'INVOICE_DATE' => $document['SAVED_DATE'],
+                    'DUE_DATE' => $document['SAVED_DUE_DATE'], 'PAYMENT_TERMS' => $document['PAYMENT_TERMS'], 'NOTES' => $document['NOTES'],
+                    'SHIPPING_ADDRESS' => $document['SHIPPING_ADDRESS'], 'SOURCE_ORDER_NUMBER' => $source, 'DOCUMENT_TOTAL' => InvoiceMoney::format($total),
+                    'TOTAL_PAID' => InvoiceMoney::format($paid), 'AMOUNT_DUE' => InvoiceMoney::format($total - $paid), 'PAYMENT_STATUS' => $paymentStatus];
+            }
+            usort($rows, static fn ($a, $b) => [$a['INVOICE_DATE'], $a['INVOICE_NUMBER']] <=> [$b['INVOICE_DATE'], $b['INVOICE_NUMBER']]);
+            return array_slice($rows, $p['offset_rows'], $p['limit_rows']);
+        }
         if (str_contains($sql, 'FROM ME_OE_DOCUMENTS D WHERE')) {
             self::requireLock($sql);
             $rows = array_values(array_filter($this->documents, static fn ($r) => $r['CNY#'] === $company
@@ -134,12 +168,24 @@ final class InvoiceMemoryConnection implements Connection
         if (str_contains($sql, 'FROM ME_OE_PAYMENTS P JOIN ME_ACTIONS A')) {
             $rows = [];
             foreach ($this->payments as $payment) {
-                if ($payment['CNY#'] !== $company || (string) $payment['INVOICE_RECORD#'] !== (string) $p['invoice_id']
-                    || (isset($p['action_reference']) && $payment['ACTION_REFERENCE'] !== $p['action_reference'])) { continue; }
+                if ($payment['CNY#'] !== $company || (string) $payment['INVOICE_RECORD#'] !== (string) $p['invoice_id']) { continue; }
                 $action = $this->actions[$company . ':' . $payment['ACTION_REFERENCE']];
                 $rows[] = [...$payment, 'CREATED_BY' => $action['ACTOR_ID'], 'CREATED_AT' => $action['CREATED_AT']];
             }
             usort($rows, static fn ($a, $b) => [$a['CREATED_AT'], $a['PAYMENT_NUMBER']] <=> [$b['CREATED_AT'], $b['PAYMENT_NUMBER']]);
+            $total = 0; $paid = 0;
+            foreach ($this->lines as $line) {
+                if ($line['CNY#'] === $company && (string) $line['DOCUMENT_RECORD#'] === (string) $p['invoice_id']) {
+                    $total = InvoiceMoney::add($total, InvoiceMoney::line($line['SAVED_QUANTITY'], $line['SAVED_PRICE'])['cents']);
+                }
+            }
+            foreach ($rows as &$row) {
+                $paid += InvoiceMoney::cents($row['PAYMENT_AMOUNT']);
+                $row['AMOUNT_DUE'] = InvoiceMoney::format($total - $paid);
+                $row['PAYMENT_STATUS'] = $paid === $total ? 'Paid' : 'Partially Paid';
+            }
+            unset($row);
+            if (isset($p['action_reference'])) { $rows = array_values(array_filter($rows, static fn ($row) => $row['ACTION_REFERENCE'] === $p['action_reference'])); }
             return isset($p['offset_rows']) ? array_slice($rows, $p['offset_rows'], $p['limit_rows']) : $rows;
         }
         if (str_contains($sql, 'FROM ME_OE_PAYMENTS')) {
@@ -221,7 +267,7 @@ final class InvoiceMemoryConnection implements Connection
             }
             $this->payments[] = ['CNY#' => $company, 'INVOICE_RECORD#' => $p['invoice_id'], 'PAYMENT_NUMBER' => $p['payment_number'],
                 'PAYMENT_AMOUNT' => $p['payment_amount'], 'PAYMENT_DATE' => $p['payment_date'],
-                'PAYMENT_REFERENCE' => $p['payment_reference'], 'ACTION_REFERENCE' => $p['action_reference']];
+                'PAYMENT_REFERENCE' => $p['payment_reference'] === '' ? null : $p['payment_reference'], 'ACTION_REFERENCE' => $p['action_reference']];
         } elseif (str_starts_with($sql, 'DELETE FROM ME_OE_SOURCE_LINKS')) {
             $this->links = array_filter($this->links, static fn ($r) => $r['CNY#'] !== $company || (string) $r['TARGET_DOCUMENT_RECORD#'] !== (string) $p['id']);
         } elseif (str_starts_with($sql, 'INSERT INTO ME_OE_SOURCE_LINKS')) {

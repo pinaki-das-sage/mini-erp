@@ -9,6 +9,7 @@ use MiniErp\shared\Api;
 use MiniErp\shared\AppError;
 use MiniErp\shared\Config;
 use MiniErp\shared\database\DatabaseError;
+use MiniErp\shared\database\Connection;
 use MiniErp\shared\security\Actor;
 use MiniErp\Tests\unit\sales\fixtures\InvoiceMemoryConnection;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -96,6 +97,66 @@ final class PaymentServiceTest extends TestCase
             'INVALID_STATE', 409, 'This Invoice is fully paid. No further payment can be recorded.');
         $this->reject(fn () => $service->record($this->actor(), $invoice['invoice_number'], [...$lastInput, 'payment_reference' => 'CHANGED']),
             'DUPLICATE_ACTION_CONFLICT', 409);
+    }
+
+    public function testMissingBlankAndNullReferencesAreOptionalAndOracleNullsReturnAsEmptyText(): void
+    {
+        foreach ([[], ['payment_reference' => ''], ['payment_reference' => '   '], ['payment_reference' => null]] as $fields) {
+            $db = new InvoiceMemoryConnection(); $invoice = $this->submitted($db);
+            $input = $this->input(); unset($input['payment_reference']);
+            $saved = $this->service($db)->record($this->actor(), $invoice['invoice_number'], [...$input, ...$fields]);
+            self::assertSame('', $saved['payment']['payment_reference']);
+            self::assertNull($db->payments[0]['PAYMENT_REFERENCE']);
+            self::assertSame('admin', $saved['payment']['created_by']);
+            self::assertSame('13.25', $saved['payment']['amount_due']);
+        }
+    }
+
+    public function testHistoricalBalancesAreCalculatedBeforePaginationAndReferenceFiltering(): void
+    {
+        $db = new InvoiceMemoryConnection();
+        $invoice = $this->draft($db, 'large-invoice', ['product_id' => '163', 'description' => 'Invoice', 'quantity' => '1', 'unit_price' => '1000.00']);
+        (new InvoiceService($db))->action($this->actor(), $invoice['invoice_number'], 'submit', ['expected_version' => 1]);
+        $service = $this->service($db);
+        $firstInput = $this->input('first-receipt', '100', 2);
+        $first = $service->record($this->actor(), $invoice['invoice_number'], $firstInput);
+        $second = $service->record($this->actor(), $invoice['invoice_number'], [...$this->input('second-receipt', '200', 3), 'payment_date' => '2026-11-24']);
+        $third = $service->record($this->actor(), $invoice['invoice_number'], $this->input('third-receipt', '700', 4));
+        self::assertSame('900.00', $first['payment']['amount_due']);
+        self::assertSame('700.00', $second['payment']['amount_due']);
+        self::assertSame('0.00', $third['payment']['amount_due']);
+        self::assertSame('Paid', $third['payment']['payment_status']);
+        $page = $service->list($this->actor(), $invoice['invoice_number'], ['page' => '2', 'page_size' => '1']);
+        self::assertSame([$second['payment']], $page['items']);
+        self::assertSame('Partially Paid', $page['items'][0]['payment_status']);
+        $all = $service->list($this->actor(), $invoice['invoice_number'])['items'];
+        self::assertSame(['900.00', '700.00', '0.00'], array_column($all, 'amount_due'));
+        self::assertSame($first, $service->record($this->actor(), $invoice['invoice_number'], $firstInput));
+        self::assertSame('0.00', $db->customers[1]['BALANCE']);
+    }
+
+    public function testRunningTotalsSqlScopesInvoiceAndKeepsFiltersOutsideTheWindow(): void
+    {
+        $memory = new InvoiceMemoryConnection(); $invoice = $this->submitted($memory);
+        $db = $this->createMock(Connection::class);
+        $queries = [];
+        $db->method('query')->willReturnCallback(static function (string $sql, array $binds = []) use ($memory, &$queries): array {
+            if (str_contains($sql, 'SUM(P.PAYMENT_AMOUNT) OVER')) { $queries[] = $sql; }
+            return $memory->query($sql, $binds);
+        });
+        foreach (['begin', 'commit', 'rollback'] as $method) { $db->method($method)->willReturnCallback($memory->$method(...)); }
+        $db->method('execute')->willReturnCallback($memory->execute(...));
+        $service = new PaymentService($db, static fn (): string => '2026-11-25');
+        $service->record($this->actor(), $invoice['invoice_number'], $this->input());
+        $service->list($this->actor(), $invoice['invoice_number'], ['page_size' => '1']);
+        self::assertCount(2, $queries);
+        foreach ($queries as $sql) {
+            self::assertStringContainsString('PARTITION BY P.CNY#, P.INVOICE_RECORD#', $sql);
+            self::assertStringContainsString('ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW', $sql);
+            self::assertStringContainsString('WHERE P.CNY# = :company_id AND P.INVOICE_RECORD# = :invoice_id', $sql);
+        }
+        self::assertStringContainsString(') R WHERE R.ACTION_REFERENCE = :action_reference', $queries[0]);
+        self::assertStringContainsString('OFFSET :offset_rows ROWS', $queries[1]);
     }
 
     public function testOverpaymentAndStaleCompetingRequestCannotRecordExtraMoney(): void
@@ -265,7 +326,7 @@ final class PaymentServiceTest extends TestCase
             [['payment_date' => null], 'Enter Payment Date.'], [['payment_date' => '2026-02-30'], 'Enter a valid Payment Date in YYYY-MM-DD format.'],
             [['payment_date' => '2026-11-23'], 'Payment Date must be on or after Invoice Date.'],
             [['payment_date' => '2026-11-26'], 'Payment Date cannot be in the future.'],
-            [['payment_reference' => '  '], 'Enter Payment Reference.'], [['payment_reference' => str_repeat('x', 51)], 'Payment Reference must be 50 characters or fewer.'],
+            [['payment_reference' => str_repeat('x', 51)], 'Payment Reference must be 50 characters or fewer.'],
             [['payment_number' => 'PAY-OWN'], 'This request contains an unsupported or read-only field.'],
             [['company_id' => 8], 'This request contains an unsupported or read-only field.'],
             [['amount_due' => '1000'], 'This request contains an unsupported or read-only field.']];

@@ -68,7 +68,7 @@ final readonly class PaymentService
             $date = Validation::date($date, 'Payment Date');
             Validation::dateRange($date, $header['SAVED_DATE'], 'Payment Date', 'Invoice Date');
             Validation::notFuture($date, ($this->businessDate)(), 'Payment Date');
-            $reference = Validation::text($input['payment_reference'] ?? '', 'Payment Reference', 50);
+            $reference = Validation::text($input['payment_reference'] ?? '', 'Payment Reference', 50, false);
 
             // Payments on an existing Invoice are allowed even if its Customer is now inactive.
             // This shares the Invoice -> Customer lock order used by submit/return-to-Draft.
@@ -176,18 +176,29 @@ final readonly class PaymentService
     private function rows(TransactionContext $tx, Actor $actor, array $header, ?string $reference = null, ?array $page = null): array
     {
         $binds = ['company_id' => $actor->companyId, 'invoice_id' => $header['RECORD#']];
-        $where = 'P.CNY# = :company_id AND P.INVOICE_RECORD# = :invoice_id';
+        $where = '';
         if ($reference !== null) {
-            $where .= ' AND P.ACTION_REFERENCE = :action_reference';
+            $where = ' WHERE R.ACTION_REFERENCE = :action_reference';
             $binds['action_reference'] = $reference;
         }
-        $sql = 'SELECT P.PAYMENT_NUMBER, TO_CHAR(P.PAYMENT_AMOUNT, ' . InvoiceStore::MONEY . ') AS PAYMENT_AMOUNT,
-            TO_CHAR(P.PAYMENT_DATE, \'YYYY-MM-DD\') AS PAYMENT_DATE, P.PAYMENT_REFERENCE,
-            A.ACTOR_ID AS CREATED_BY,
-            TO_CHAR(A.CREATED_AT AT TIME ZONE \'UTC\', \'YYYY-MM-DD"T"HH24:MI:SS.FF6"Z"\') AS CREATED_AT
-            FROM ME_OE_PAYMENTS P JOIN ME_ACTIONS A
-              ON A.COMPANY_ID = P.CNY# AND A.ACTION_REFERENCE = P.ACTION_REFERENCE
-            WHERE ' . $where . ' ORDER BY A.CREATED_AT, P.PAYMENT_NUMBER';
+        // Compute running totals over all receipts in recording order BEFORE filtering/pagination.
+        // Payment dates may be backdated; recorded receipt order and exact Oracle NUMBER values are authoritative.
+        $sql = 'SELECT R.PAYMENT_NUMBER, TO_CHAR(R.PAYMENT_AMOUNT, ' . InvoiceStore::MONEY . ') AS PAYMENT_AMOUNT,
+            TO_CHAR(R.PAYMENT_DATE, \'YYYY-MM-DD\') AS PAYMENT_DATE, R.PAYMENT_REFERENCE, R.CREATED_BY,
+            TO_CHAR(R.RECORDED_AT AT TIME ZONE \'UTC\', \'YYYY-MM-DD"T"HH24:MI:SS.FF6"Z"\') AS CREATED_AT,
+            TO_CHAR(R.DOCUMENT_TOTAL - R.PAID_TO_DATE, ' . InvoiceStore::MONEY . ') AS AMOUNT_DUE,
+            CASE WHEN R.DOCUMENT_TOTAL = R.PAID_TO_DATE THEN \'Paid\' ELSE \'Partially Paid\' END AS PAYMENT_STATUS
+            FROM (
+                SELECT P.PAYMENT_NUMBER, P.PAYMENT_AMOUNT, P.PAYMENT_DATE, P.PAYMENT_REFERENCE, P.ACTION_REFERENCE,
+                    A.ACTOR_ID AS CREATED_BY, A.CREATED_AT AS RECORDED_AT,
+                    SUM(P.PAYMENT_AMOUNT) OVER (PARTITION BY P.CNY#, P.INVOICE_RECORD#
+                        ORDER BY A.CREATED_AT, P.PAYMENT_NUMBER ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS PAID_TO_DATE,
+                    (SELECT NVL(SUM(ROUND(L.QUANTITY * L.UNIT_PRICE, 2)), 0) FROM ME_OE_DOCUMENT_LINES L
+                        WHERE L.CNY# = P.CNY# AND L.DOCUMENT_RECORD# = P.INVOICE_RECORD#) AS DOCUMENT_TOTAL
+                FROM ME_OE_PAYMENTS P JOIN ME_ACTIONS A
+                  ON A.COMPANY_ID = P.CNY# AND A.ACTION_REFERENCE = P.ACTION_REFERENCE
+                WHERE P.CNY# = :company_id AND P.INVOICE_RECORD# = :invoice_id
+            ) R' . $where . ' ORDER BY R.RECORDED_AT, R.PAYMENT_NUMBER';
         if ($page !== null) {
             $sql .= ' OFFSET :offset_rows ROWS FETCH NEXT :limit_rows ROWS ONLY';
             $binds['offset_rows'] = $page['offset'];
@@ -196,7 +207,9 @@ final readonly class PaymentService
         return array_map(static fn (array $row): array => [
             'payment_number' => $row['PAYMENT_NUMBER'], 'invoice_number' => $header['DOCUMENT_NUMBER'],
             'payment_amount' => InvoiceMoney::format(InvoiceMoney::cents($row['PAYMENT_AMOUNT'])),
-            'payment_date' => $row['PAYMENT_DATE'], 'payment_reference' => $row['PAYMENT_REFERENCE'],
+            'payment_date' => $row['PAYMENT_DATE'], 'payment_reference' => $row['PAYMENT_REFERENCE'] ?? '',
+            'amount_due' => InvoiceMoney::format(InvoiceMoney::cents($row['AMOUNT_DUE'], 'Amount due after payment')),
+            'payment_status' => $row['PAYMENT_STATUS'],
             'created_by' => (string) $row['CREATED_BY'], 'created_at' => $row['CREATED_AT'],
         ], $tx->query($sql, $binds));
     }

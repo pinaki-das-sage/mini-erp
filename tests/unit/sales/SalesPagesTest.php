@@ -6,6 +6,7 @@ namespace MiniErp\Tests\unit\sales;
 use MiniErp\sales\SalesPages;
 use MiniErp\sales\invoices\InvoicePages;
 use MiniErp\sales\invoices\InvoiceService;
+use MiniErp\sales\payments\PaymentService;
 use MiniErp\shared\AppError;
 use MiniErp\shared\Config;
 use MiniErp\shared\Kernel;
@@ -59,13 +60,18 @@ final class SalesPagesTest extends TestCase
         self::assertStringContainsString('href="/training/modules/sales/invoices"', $response['body']);
         self::assertStringContainsString('href="/training/modules/sales/quotes"', $response['body']);
         self::assertStringContainsString('href="/training/modules/sales/orders"', $response['body']);
-        self::assertStringNotContainsString('href="/training/modules/sales/payments"', $response['body']);
+        self::assertStringContainsString('href="/training/modules/sales/payments"', $response['body']);
+        $payments = $kernel->handle('GET', '/training/modules/sales/payments', []);
+        self::assertSame(200, $payments['status']);
+        self::assertStringContainsString('Customer payments', $payments['body']);
+        self::assertSame(404, $kernel->handle('GET', '/training/modules/sales/payments-extra', [])['status']);
         self::assertSame(200, $kernel->handle('GET', '/training/modules/inventory', [])['status']);
         self::assertSame(404, $kernel->handle('GET', '/training/modules/sales/customers-extra', [])['status']);
         $anonymous = [];
         $kernel = new Kernel(Config::fromArray([]), $anonymous);
         self::assertSame(403, $kernel->handle('GET', '/modules/sales/customers', [])['status']);
         self::assertSame(403, $kernel->handle('GET', '/modules/sales/invoices', [])['status']);
+        self::assertSame(403, $kernel->handle('GET', '/modules/sales/payments', [])['status']);
     }
 
     public function testLandingShowsOnlyPermittedSections(): void
@@ -76,6 +82,7 @@ final class SalesPagesTest extends TestCase
         $response = $pages->handle('GET', '/modules/sales', $this->actor(false), [], []);
         self::assertStringContainsString('href="/modules/sales/customers"', $response['body']);
         self::assertStringNotContainsString('href="/modules/sales/invoices"', $response['body']);
+        self::assertStringNotContainsString('href="/modules/sales/payments"', $response['body']);
         $this->expectException(AppError::class);
         $pages->handle('GET', '/modules/sales/invoices/new', $this->actor(false), [], []);
     }
@@ -155,7 +162,47 @@ final class SalesPagesTest extends TestCase
         self::assertStringContainsString('&lt;Unsaved&gt;', $response['body']);
         self::assertStringContainsString('value="invoice-stale"', $response['body']);
         self::assertSame('Updated notes', (new InvoiceService($db))->get($this->actor(), $number)['notes']);
-        self::assertStringNotContainsString('/modules/sales/payments', $pages->handle('GET', $base . '/' . $number, $this->actor(), [], [])['body']);
+        $detail = $pages->handle('GET', $base . '/' . $number, $this->actor(), [], [])['body'];
+        self::assertStringContainsString('/training/modules/sales/payments/history?invoice_number=' . $number, $detail);
+        self::assertStringNotContainsString('/modules/sales/payments/new?invoice_number=', $detail);
+    }
+
+    public function testInvoicePaymentLinksRespectStatusPermissionsAndOutstandingBalance(): void
+    {
+        $memory = new InvoiceMemoryConnection();
+        $this->source($memory);
+        $db = $this->invoiceConnection($memory);
+        $clock = static fn (): string => '2026-11-26';
+        $service = new InvoiceService($db, $clock);
+        $invoice = $service->create($this->actor(), ['source_order_number' => 'SO-1']);
+        $number = $invoice['invoice_number'];
+        $pages = new InvoicePages($db, new WebPath('/training'), 'csrf', $clock);
+        $path = '/modules/sales/invoices/' . $number;
+        $recordUrl = '/training/modules/sales/payments/new?invoice_number=' . $number;
+        $historyUrl = '/training/modules/sales/payments/history?invoice_number=' . $number;
+        $service->action($this->actor(), $number, 'submit', ['expected_version' => 1]);
+        $html = $pages->handle('GET', $path, $this->actor(), [], [])['body'];
+        self::assertStringContainsString($recordUrl, $html);
+        self::assertStringContainsString($historyUrl, $html);
+        $memory->grants = ['7:admin:sales.invoices:read'];
+        $html = $pages->handle('GET', $path, $this->actor(false), [], [])['body'];
+        self::assertStringNotContainsString($recordUrl, $html);
+        self::assertStringNotContainsString($historyUrl, $html);
+        $memory->grants[] = '7:admin:sales.payments:read';
+        $html = $pages->handle('GET', $path, $this->actor(false), [], [])['body'];
+        self::assertStringNotContainsString($recordUrl, $html);
+        self::assertStringContainsString($historyUrl, $html);
+        $memory->grants = ['7:admin:sales.invoices:read', '7:admin:sales.payments:record'];
+        $html = $pages->handle('GET', $path, $this->actor(false), [], [])['body'];
+        self::assertStringContainsString($recordUrl, $html);
+        self::assertStringNotContainsString($historyUrl, $html);
+        (new PaymentService($db, $clock))->record($this->actor(), $number, [
+            'expected_version' => 2, 'payment_amount' => '20.50', 'payment_date' => '2026-11-26',
+            'payment_reference' => 'Full payment', 'action_reference' => 'invoice-paid',
+        ]);
+        $html = $pages->handle('GET', $path, $this->actor(), [], [])['body'];
+        self::assertStringNotContainsString($recordUrl, $html);
+        self::assertStringContainsString($historyUrl, $html);
     }
 
     public function testInvoiceConfirmationActionsUseVersionsAndExistingWorkflow(): void
