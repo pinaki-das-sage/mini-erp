@@ -25,8 +25,7 @@
         <button type="button" class="button-secondary" id="trips-refresh-button">Refresh</button>
       </div>
     </div>
-    <p class="logistics-note">Assigning a Trip moves its Submitted Sales Order to In Progress. Cancelling a Draft Trip
-      returns the Order to Submitted; dispatch requires it to remain In Progress.</p>
+    <p class="logistics-note">Draft assignment keeps the Sales Order Submitted. Dispatch moves it to In Progress, and complete delivery closes it.</p>
     <p id="trips-status" class="logistics-status" role="status" aria-live="polite"></p>
     <p id="trips-error" class="error" role="alert" hidden></p>
     <div class="table-scroll">
@@ -151,7 +150,6 @@
       </div>
     </div>
     <div class="logistics-fleet-layout"><div class="logistics-fleet-list">
-    <form id="vehicles-filter" class="logistics-filter"><label for="vehicles-search">Find vehicle<input id="vehicles-search" name="search" type="search" maxlength="100" placeholder="Code or registration"></label><label for="vehicles-availability">Availability<select id="vehicles-availability" name="assignment_status"><option value="">All vehicles</option><option value="AVAILABLE">Available</option><option value="ASSIGNED">Assigned</option></select></label><button type="submit">Search</button><button type="button" class="button-secondary" id="vehicles-clear-filter">Clear</button></form>
     <p id="vehicles-status" class="logistics-status" role="status" aria-live="polite"></p>
     <p id="vehicles-error" class="error" role="alert" hidden></p>
     <div class="table-scroll">
@@ -260,14 +258,14 @@
       <p id="trip-driver-status" class="logistics-help" role="status" aria-live="polite">Available drivers will load when you open the planner.</p>
     </section>
     <section class="planner-card" id="planner-sales-section" aria-labelledby="planner-sales-title">
-      <div class="planner-card-heading"><h3 id="planner-sales-title">Submitted Sales Order lines</h3><span class="planner-state-filter">State filter: Submitted only</span></div>
+      <div class="planner-card-heading"><h3 id="planner-sales-title">Eligible Sales Order lines</h3><span class="planner-state-filter">Submitted and unassigned</span></div>
       <div class="planner-order-fields">
         <label for="trip-order-search">Find Sales Order<span class="logistics-inline-search"><input id="trip-order-search" type="search" maxlength="100" autocomplete="off"><button type="button" class="button-secondary" id="search-trip-orders">Search</button></span></label>
         <label for="trip-order-number">Sales Order *<select id="trip-order-number" name="order_number" required></select></label>
       </div>
       <p id="trip-order-status" class="logistics-help" role="status" aria-live="polite"></p>
-      <div class="table-scroll"><table aria-label="Selected sales order lines"><thead><tr><th scope="col">Sales Order</th><th scope="col">Sales line / product</th><th scope="col">State</th><th scope="col">Line qty</th><th scope="col">Assignment</th></tr></thead><tbody id="planner-order-lines"><tr><td colspan="5" class="logistics-empty">Select a submitted Sales Order to see its lines.</td></tr></tbody></table></div>
-      <p class="planner-rule">One Sales Order per Trip. All order lines are included when you save the draft.</p>
+      <div class="table-scroll"><table aria-label="Selected sales order lines"><thead><tr><th scope="col">Sales Order</th><th scope="col">Sales line / product</th><th scope="col">State</th><th scope="col">Line qty</th><th scope="col">Assignment</th></tr></thead><tbody id="planner-order-lines"><tr><td colspan="5" class="logistics-empty">Select an eligible Sales Order to see its lines.</td></tr></tbody></table></div>
+      <p class="planner-rule">One Sales Order per Trip. Saving assigns all lines; the order stays Submitted until dispatch.</p>
     </section>
     <div class="planner-summaries">
       <section class="planner-card" aria-labelledby="planner-load-title"><h3 id="planner-load-title">Planned load / vehicle capacity</h3><p class="planner-load-value" id="planner-load-value">- / - KG</p><progress id="planner-capacity-progress" max="100" value="0" aria-label="Vehicle capacity used" hidden></progress><p class="logistics-help" id="planner-load-help">Choose a vehicle. Planned load is confirmed when the trip is saved.</p></section>

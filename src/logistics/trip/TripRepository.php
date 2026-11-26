@@ -50,6 +50,54 @@ class TripRepository
         ]));
     }
 
+    public function findEligibleSalesOrders(int $companyId, array $page): array
+    {
+        $where = [
+            "D.CNY# = :company_id",
+            "D.DOCUMENT_TYPE = 'SALES_ORDER'",
+            "D.STATUS = 'SUBMITTED'",
+            "EXISTS (SELECT 1 FROM ME_OE_DOCUMENT_LINES L
+                    WHERE L.CNY# = D.CNY# AND L.DOCUMENT_RECORD# = D.RECORD#)",
+            "NOT EXISTS (SELECT 1 FROM ME_LOG_TRIPS T
+                         WHERE T.COMPANY_ID = D.CNY# AND T.SALES_ORDER_ID = D.RECORD# AND T.STATUS <> 'X')",
+            "NOT EXISTS (SELECT 1 FROM ME_OE_DOCUMENT_LINES L
+                         WHERE L.CNY# = D.CNY# AND L.DOCUMENT_RECORD# = D.RECORD#
+                           AND (L.TRIP_ID IS NOT NULL OR L.LOGISTICS_TRIP_LINE_ID IS NOT NULL))",
+        ];
+        $parameters = [
+            'company_id' => $companyId,
+            'offset' => $page['offset'],
+            'page_size' => $page['page_size'],
+        ];
+        if (isset($page['filters']['search']) && $page['filters']['search'] !== '') {
+            $where[] = '(UPPER(D.DOCUMENT_NUMBER) LIKE :search
+                OR UPPER(C.CUSTOMER_CODE) LIKE :search OR UPPER(C.CUSTOMER_NAME) LIKE :search)';
+            $parameters['search'] = '%' . mb_strtoupper($page['filters']['search'], 'UTF-8') . '%';
+        }
+
+        $rows = $this->connection->query(
+            'SELECT D.RECORD# AS ORDER_ID, D.DOCUMENT_NUMBER AS ORDER_NUMBER,
+                    D.STATUS, C.CUSTOMER_CODE
+             FROM ME_OE_DOCUMENTS D
+             JOIN ME_OE_CUSTOMERS C ON C.CNY# = D.CNY# AND C.RECORD# = D.CUSTOMER_RECORD#
+             WHERE ' . implode(' AND ', $where) . '
+             ORDER BY D.DOCUMENT_DATE, D.DOCUMENT_NUMBER
+             OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY',
+            $parameters
+        );
+
+        return [
+            'items' => array_map(static fn (array $row): array => [
+                'order_id' => (string) $row['ORDER_ID'],
+                'order_number' => $row['ORDER_NUMBER'],
+                'status' => 'Submitted',
+                'customer_code' => $row['CUSTOMER_CODE'],
+            ], $rows),
+            'page' => $page['page'],
+            'page_size' => $page['page_size'],
+        ];
+    }
+
     public function findById(int $companyId, int $id, ?TransactionContext $tx = null): array
     {
         $sql = 'SELECT T.ID, T.TRIP_CODE, T.VEHICLE_ID, T.DRIVER_ID,
@@ -272,6 +320,16 @@ class TripRepository
                 throw new AppError('INVALID_STATE', 'Sales returned duplicate Order lines.', 409);
             }
 
+            $claims = $tx->query(
+                "SELECT TL.ID FROM ME_LOG_TRIP_LINES TL
+                 JOIN ME_LOG_TRIPS T ON T.COMPANY_ID = TL.COMPANY_ID AND T.ID = TL.TRIP_ID
+                 WHERE TL.COMPANY_ID = :companyId AND TL.SALES_LINE_ID = :salesLineId AND T.STATUS <> 'X'",
+                ['companyId' => $companyId, 'salesLineId' => $lineId]
+            );
+            if ($claims !== []) {
+                throw new AppError('CONFLICT', 'A Sales Order line already has an active Trip claim.', 409);
+            }
+
             $seen[$lineId] = true;
             $totalWeight = $this->lineWeightKg($tx, $companyId, $productId, $quantity);
 
@@ -368,7 +426,7 @@ class TripRepository
             throw new AppError('INVALID_STATE', 'Trip vehicle could not be resolved for capacity validation.', 409);
         }
         if ($rows[0]['WITHIN_CAPACITY'] !== 'T') {
-            throw new AppError('CAPACITY_EXCEEDED', 'Trip load exceeds vehicle capacity.', 409);
+            throw new AppError('CAPACITY_EXCEEDED', 'The complete Sales Order load exceeds the selected Vehicle capacity.', 409);
         }
     }
 
@@ -385,6 +443,16 @@ class TripRepository
         }
 
         return $rows[0]['DOCUMENT_NUMBER'];
+    }
+
+    public function hasActiveTripForOrder(TransactionContext $tx, int $companyId, string $orderId): bool
+    {
+        return $tx->query(
+            "SELECT ID FROM ME_LOG_TRIPS
+             WHERE COMPANY_ID = :companyId AND SALES_ORDER_ID = :orderId AND STATUS <> 'X'
+             FETCH FIRST 1 ROWS ONLY",
+            ['companyId' => $companyId, 'orderId' => $orderId]
+        ) !== [];
     }
 
     public function update(

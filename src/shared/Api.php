@@ -16,7 +16,12 @@ final class Api
     private array $routes = [];
     private readonly TokenService $tokens;
 
-    public function __construct(private readonly Connection $connection, Config $config, private readonly string $clientAddress = 'unknown')
+    public function __construct(
+        private readonly Connection $connection,
+        Config $config,
+        private readonly string $clientAddress = 'unknown',
+        bool $registerModules = true,
+    )
     {
         $this->tokens = new TokenService($connection, $config->apiTokenTtl());
         $this->register(
@@ -101,14 +106,16 @@ final class Api
                 return ['id' => $params['id'], 'current_version' => $version + 1];
             }
         );
-        foreach (['inventory', 'purchasing', 'sales', 'logistics'] as $module) {
-            $file = dirname(__DIR__) . '/' . $module . '/api.php';
-            if (is_file($file)) {
-                $register = require $file;
-                if (!$register instanceof \Closure) {
-                    throw new \LogicException('Module api.php must return a route-registration closure.');
+        if ($registerModules) {
+            foreach (['inventory', 'purchasing', 'sales', 'logistics'] as $module) {
+                $file = dirname(__DIR__) . '/' . $module . '/api.php';
+                if (is_file($file)) {
+                    $register = require $file;
+                    if (!$register instanceof \Closure) {
+                        throw new \LogicException('Module api.php must return a route-registration closure.');
+                    }
+                    $register($this, $connection);
                 }
-                $register($this, $connection);
             }
         }
     }
@@ -117,7 +124,7 @@ final class Api
     public function register(string $method, string $path, string $object, string $operation, callable $handler, int $status = 200, bool $wrapResponse = true): void
     {
         if (!in_array($method, ['GET', 'POST', 'PUT', 'DELETE'], true)
-            || !preg_match('#\A/(?:[a-z][a-z0-9-]*|\{[a-z][a-z0-9_]*\})(?:/(?:[a-z][a-z0-9-]*|\{[a-z][a-z0-9_]*\}))*\z#', $path)
+            || !preg_match('#\A/(?:[a-z][a-z0-9-]*|\{[a-z][a-z0-9_]*(?::segment)?\})(?:/(?:[a-z][a-z0-9-]*|\{[a-z][a-z0-9_]*(?::segment)?\}))*\z#', $path)
             || $path === '/auth' || str_starts_with($path, '/auth/')
             || $object === '' || $operation === '' || !in_array($status, [200, 201], true)
         ) {
@@ -132,12 +139,15 @@ final class Api
         $names = [];
         foreach (explode('/', $path) as $segment) {
             if (str_starts_with($segment, '{')) {
-                $name = substr($segment, 1, -1);
+                preg_match('/\A\{([a-z][a-z0-9_]*)(?::(segment))?\}\z/', $segment, $match);
+                $name = $match[1];
                 if (isset($names[$name])) {
                     throw new \InvalidArgumentException('Duplicate API path parameter.');
                 }
                 $names[$name] = true;
-                $segments[] = '(?P<' . $name . '>[a-zA-Z0-9_-]{1,100})';
+                $segments[] = isset($match[2])
+                    ? '(?P<' . $name . '>[^/\#]+)'
+                    : '(?P<' . $name . '>[a-zA-Z0-9_-]{1,100})';
             } else {
                 $segments[] = preg_quote($segment, '#');
             }

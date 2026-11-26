@@ -19,6 +19,8 @@ export function initTrips(context) {
     loadList
   } = context;
   const tripReview = initTripReview(context);
+  let openingTrip = false;
+  let submittingTrip = false;
   const renderTrips = (items) => {
     const body = document.querySelector('#trips-table-body');
     body.replaceChildren();
@@ -105,12 +107,13 @@ export function initTrips(context) {
   const loadSubmittedOrders = async () => {
     if (loadingSubmittedOrders) return;
     loadingSubmittedOrders = true;
+    updateTripSubmitState();
     orderPreviewSequence += 1;
     loadingOrderPreview = false;
     resetOrderPreview();
     searchTripOrdersButton.disabled = true;
     tripOrderSelect.disabled = true;
-    tripOrderStatus.textContent = 'Loading Submitted Sales Orders...';
+    tripOrderStatus.textContent = 'Loading eligible Sales Orders...';
     const query = new URLSearchParams({ page: '1', page_size: '100' });
     const searchTerm = tripOrderSearch.value.trim();
     if (searchTerm !== '') query.set('search', searchTerm);
@@ -120,17 +123,18 @@ export function initTrips(context) {
       tripOrderSelect.replaceChildren();
       const placeholder = document.createElement('option');
       placeholder.value = '';
-      placeholder.textContent = result.items.length === 0 ? 'No eligible Submitted Sales Orders' : 'Select a Submitted Sales Order';
+      placeholder.textContent = result.items.length === 0 ? 'No eligible Submitted Sales Orders' : 'Select an eligible Sales Order';
       placeholder.disabled = true;
       placeholder.selected = true;
       tripOrderSelect.append(placeholder);
       for (const order of result.items) {
         const option = document.createElement('option');
         option.value = String(order.order_number);
-        option.textContent = `${order.order_number} | ${order.customer_code}`;
+        option.dataset.status = order.status;
+        option.textContent = `${order.order_number} | ${order.customer_code} | ${order.status}`;
         tripOrderSelect.append(option);
       }
-      tripOrderStatus.textContent = `${result.items.length} Submitted Sales Order${result.items.length === 1 ? '' : 's'} loaded.`;
+      tripOrderStatus.textContent = `${result.items.length} eligible Sales Order${result.items.length === 1 ? '' : 's'} loaded.`;
     } catch (error) {
       tripOrderSelect.replaceChildren();
       const option = document.createElement('option');
@@ -144,6 +148,7 @@ export function initTrips(context) {
       loadingSubmittedOrders = false;
       searchTripOrdersButton.disabled = false;
       tripOrderSelect.disabled = false;
+      updateTripSubmitState();
     }
   };
   searchTripOrdersButton.addEventListener('click', loadSubmittedOrders);
@@ -197,12 +202,13 @@ export function initTrips(context) {
       ? 'Remaining capacity: ' + formatKilograms(capacity - Number(load)) + ' KG'
       : 'Planned load is calculated from product weights when the draft is saved.';
   };
-  const resetOrderPreview = (message = 'Select a submitted Sales Order to see its lines.') => {
+  const resetOrderPreview = (message = 'Select an eligible Sales Order to see its lines.') => {
     selectedOrder = null;
     const row = document.createElement('tr'); const cell = textCell(row, message); cell.colSpan = 5;
     cell.className = 'logistics-empty'; document.querySelector('#planner-order-lines').replaceChildren(row);
     document.querySelector('#planner-warehouse').textContent = '-';
     document.querySelector('#planner-order-quantity').textContent = '-';
+    updateTripSubmitState();
   };
   // The planner previews Sales data. Saving still assigns the complete order on the server.
   const loadOrderPreview = async () => {
@@ -212,6 +218,7 @@ export function initTrips(context) {
     resetOrderPreview(number ? 'Loading order lines...' : undefined);
     if (!number) return;
     loadingOrderPreview = true;
+    updateTripSubmitState();
     try {
       const order = await apiRequest('/sales-orders/' + encodeURIComponent(number));
       if (sequence !== orderPreviewSequence) return;
@@ -233,13 +240,22 @@ export function initTrips(context) {
     } catch (failure) {
       if (sequence === orderPreviewSequence) resetOrderPreview(errorMessage(failure));
     } finally {
-      if (sequence === orderPreviewSequence) loadingOrderPreview = false;
+      if (sequence === orderPreviewSequence) { loadingOrderPreview = false; updateTripSubmitState(); }
     }
   };
   tripOrderSelect.addEventListener('change', loadOrderPreview);
   tripForm.elements.vehicle_id.addEventListener('change', updateLoadSummary);
   let driverLookupSequence = 0;
   let loadingEligibleTripDrivers = false;
+  // Keep Save disabled until every required server-backed selection is ready.
+  const updateTripSubmitState = () => {
+    const needsOrder = tripForm.dataset.mode === 'create';
+    tripSubmit.disabled = openingTrip || submittingTrip || loadingSubmittedOrders || loadingOrderPreview
+      || loadingEligibleTripDrivers || tripDriverSelect.disabled || !tripDriverSelect.value
+      || (needsOrder && (!selectedOrder || !tripOrderSelect.value));
+  };
+
+  tripDriverSelect.addEventListener('change', updateTripSubmitState);
 
   const refreshEligibleTripDrivers = async (selectedDriverId = tripDriverSelect.value || null, tripId = tripForm.dataset.tripId || null) => {
     const sequence = ++driverLookupSequence;
@@ -280,13 +296,14 @@ export function initTrips(context) {
     } finally {
       if (sequence === driverLookupSequence) {
         loadingEligibleTripDrivers = false;
-        tripSubmit.disabled = false;
+        updateTripSubmitState();
       }
     }
   };
 
 
   const openTripDialog = async (mode, trip = null) => {
+    openingTrip = true;
     setFormError(document.querySelector('#trip-form-error'), '');
     tripForm.reset();
     plannerTrip = trip;
@@ -318,7 +335,8 @@ export function initTrips(context) {
     } catch (error) {
       setFormError(document.querySelector('#trip-form-error'), errorMessage(error));
     } finally {
-      tripSubmit.disabled = false;
+      openingTrip = false;
+      updateTripSubmitState();
     }
   };
 
@@ -352,6 +370,7 @@ export function initTrips(context) {
       setFormError(document.querySelector('#trip-form-error'), errorMessage(error));
       return;
     }
+    submittingTrip = true;
     tripSubmit.disabled = true;
     try {
       const isCreate = mode === 'create';
@@ -366,7 +385,8 @@ export function initTrips(context) {
     } catch (error) {
       setFormError(document.querySelector('#trip-form-error'), errorMessage(error));
     } finally {
-      tripSubmit.disabled = false;
+      submittingTrip = false;
+      updateTripSubmitState();
     }
   });
 

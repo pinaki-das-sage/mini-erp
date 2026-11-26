@@ -8,6 +8,7 @@ use MiniErp\inventory\ReservationService;
 use MiniErp\logistics\SalesOrderProvider;
 use MiniErp\sales\orders\LogisticsOrderAdapter;
 use MiniErp\sales\orders\SalesFulfillment;
+use MiniErp\shared\Api;
 use MiniErp\shared\AppError;
 use MiniErp\shared\database\Connection;
 use MiniErp\shared\database\TransactionContext;
@@ -47,6 +48,14 @@ class TripService
         ];
     }
 
+    public function getEligibleSalesOrders(Actor $actor, array $query): array
+    {
+        (new Authorization($this->connection))->requirePermission($actor, 'sales.orders', 'read');
+        (new Authorization($this->connection))->requirePermission($actor, 'logistics.trips', 'read');
+        $page = Api::pagination($query, ['search']);
+        return $this->repository->findEligibleSalesOrders($actor->companyId, $page);
+    }
+
     // GET /logistics/trips/{id}
     public function getTrip(Actor $actor, int $id): array
     {
@@ -76,6 +85,7 @@ class TripService
                 if ($existingId !== null) {
                     $trip = $this->repository->lockTrip($tx, $actor->companyId, $existingId);
                     $tripLines = $this->repository->lockTripLines($tx, $actor->companyId, $existingId);
+                    $savedTrip = $this->repository->findById($actor->companyId, $existingId, $tx);
                     $orderNumber = $this->repository->findOrderNumber(
                         $tx,
                         $actor->companyId,
@@ -83,30 +93,24 @@ class TripService
                     );
 
                     if (
-                        $trip['status'] !== 'DRAFT'
-                        || $trip['vehicle_id'] !== $data['vehicle_id']
+                        $trip['vehicle_id'] !== $data['vehicle_id']
                         || $trip['driver_id'] !== $data['driver_id']
                         || $orderNumber !== $data['order_number']
-                        || !$this->sameTimestamp(
-                            $this->repository->findById($actor->companyId, $existingId, $tx)['planned_departure_at'],
-                            $data['planned_departure_at']
-                        )
+                        || !$this->sameTimestamp($savedTrip['planned_departure_at'], $data['planned_departure_at'])
+                        || (string) $savedTrip['assigned_by'] !== $actorId
                     ) {
                         throw new AppError('CONFLICT', 'Trip code already exists for a different assignment.', 409);
                     }
 
-                    // Trip and Sales assignment commit atomically, so an existing Draft Trip is a completed replay.
-                    $this->tripLineMapping($tripLines);
+                    $order = $fulfillment->lockOrderForEvent($tx, $actor, $orderNumber, 'assignment');
+                    if ((string) ($order['order_id'] ?? '') !== (string) $trip['sales_order_id']) {
+                        throw new AppError('DUPLICATE_ACTION_CONFLICT', 'Trip code already exists for a different Sales Order.', 409);
+                    }
+                    $this->assertTripMatchesOrderDemand($order, $tripLines);
 
+                    // The create and complete assignment committed atomically, so this exact Trip request is a replay.
                     return $this->repository->findById($actor->companyId, $existingId, $tx);
                 }
-
-                $this->assertResourcesAvailable(
-                    $tx,
-                    $actor->companyId,
-                    $data['vehicle_id'],
-                    $data['driver_id']
-                );
 
                 $order = $fulfillment->lockOrderForEvent($tx, $actor, $data['order_number'], 'assignment');
 
@@ -116,10 +120,20 @@ class TripService
 
                 $orderId = $this->decimalId($order['order_id'] ?? null, 'Sales Order ID', 15);
                 $salesLines = $this->validateSalesLines($order['lines'] ?? null);
-
                 if ($salesLines === []) {
-                    throw new AppError('INVALID_STATE', 'Sales Order must contain at least one line.', 409);
+                    throw new AppError('INVALID_STATE', 'A Sales Order must contain at least one saved line before Trip assignment.', 409);
                 }
+                $this->assertSalesLinesUnassigned($salesLines);
+                if ($this->repository->hasActiveTripForOrder($tx, $actor->companyId, $orderId)) {
+                    throw new AppError('CONFLICT', 'This Sales Order already has an active Trip assignment.', 409);
+                }
+
+                $this->assertResourcesAvailable(
+                    $tx,
+                    $actor->companyId,
+                    $data['vehicle_id'],
+                    $data['driver_id']
+                );
 
                 $tripId = $this->repository->create(
                     $tx,
@@ -128,13 +142,16 @@ class TripService
                     $actorId,
                     $data
                 );
-                $mapping = $this->repository->createTripLines(
+                $this->repository->createTripLines(
                     $tx,
                     $actor->companyId,
                     $tripId,
                     $actorId,
                     $salesLines
                 );
+                $tripLines = $this->repository->lockTripLines($tx, $actor->companyId, $tripId);
+                $this->assertTripMatchesOrderDemand($order, $tripLines, $salesLines);
+                $mapping = $this->tripLineMapping($tripLines);
                 $this->repository->assertTripWithinCapacity(
                     $tx,
                     $actor->companyId,
@@ -162,16 +179,28 @@ class TripService
         $this->validator->validateId($id);
         $data = $this->validator->validateUpdate($input);
         $actorId = $this->actorId($actor);
+        $fulfillment = $this->salesFulfillment();
 
         return (new TransactionManager($this->connection))->run(
-            function (TransactionContext $tx) use ($actor, $id, $data, $actorId): array {
-                $snapshot = $this->repository->findById($actor->companyId, $id, $tx);
-                if ($snapshot === []) {
+            function (TransactionContext $tx) use ($actor, $id, $data, $actorId, $fulfillment): array {
+                $trip = $this->repository->lockTrip($tx, $actor->companyId, $id);
+                if ($trip === []) {
                     throw new AppError('NOT_FOUND', 'Trip not found.', 404);
                 }
-                if ($snapshot['status'] !== 'DRAFT') {
+                if ($trip['status'] !== 'DRAFT') {
                     throw new AppError('CONFLICT', 'Only draft trips can be updated.', 409);
                 }
+
+                $tripLines = $this->repository->lockTripLines($tx, $actor->companyId, $id);
+                if ($tripLines === []) {
+                    throw new AppError('INVALID_STATE', 'Trip has no persisted lines.', 409);
+                }
+                $orderNumber = $this->repository->findOrderNumber($tx, $actor->companyId, $trip['sales_order_id']);
+                $order = $fulfillment->lockOrderForEvent($tx, $actor, $orderNumber, 'assignment');
+                if (($order['status'] ?? null) !== 'Submitted') {
+                    throw new AppError('INVALID_STATE', 'Only a Submitted Sales Order can be updated from a Draft Trip.', 409);
+                }
+                $this->assertOrderMatchesTrip($order, $trip, $tripLines);
 
                 $this->assertResourcesAvailable(
                     $tx,
@@ -180,14 +209,6 @@ class TripService
                     $data['driver_id'],
                     $id
                 );
-                $trip = $this->repository->lockTrip($tx, $actor->companyId, $id);
-
-                if ($trip === []) {
-                    throw new AppError('NOT_FOUND', 'Trip not found.', 404);
-                }
-                if ($trip['status'] !== 'DRAFT') {
-                    throw new AppError('CONFLICT', 'Only draft trips can be updated.', 409);
-                }
 
                 $this->repository->assertTripWithinCapacity(
                     $tx,
@@ -217,7 +238,8 @@ class TripService
                 if ($trip === []) {
                     throw new AppError('NOT_FOUND', 'Trip not found.', 404);
                 }
-                if ($trip['status'] !== 'DRAFT') {
+                $retry = $trip['status'] === 'CANCELLED';
+                if (!$retry && $trip['status'] !== 'DRAFT') {
                     throw new AppError('CONFLICT', 'Only draft trips can be cancelled.', 409);
                 }
 
@@ -230,8 +252,16 @@ class TripService
                 );
                 $order = $fulfillment->lockOrderForEvent($tx, $actor, $orderNumber, 'cancellation');
 
-                if (!in_array($order['status'] ?? null, ['Submitted', 'In Progress'], true)) {
-                    throw new AppError('INVALID_STATE', 'Only a Submitted or In Progress Sales Order can be cancelled from a Draft Trip.', 409);
+                if (!$retry && ($order['status'] ?? null) !== 'Submitted') {
+                    throw new AppError('INVALID_STATE', 'Only a Submitted Sales Order can be cancelled from a Draft Trip.', 409);
+                }
+                if ($retry) {
+                    $saved = $this->repository->findById($actor->companyId, $id, $tx);
+                    if ($saved['cancellation_reason'] !== $data['reason'] || (string) $saved['cancelled_by'] !== $actorId) {
+                        throw new AppError('DUPLICATE_ACTION_CONFLICT', 'Trip was already cancelled by a different request.', 409);
+                    }
+                    $this->assertCancelledTripLines($order, $trip, $tripLines);
+                    return $saved;
                 }
                 $this->assertOrderMatchesTrip($order, $trip, $tripLines);
 
@@ -266,58 +296,39 @@ class TripService
 
         return (new TransactionManager($this->connection))->run(
             function (TransactionContext $tx) use ($actor, $id, $actorId, $fulfillment, $reservations): array {
-                $snapshot = $this->repository->findById($actor->companyId, $id, $tx);
-                if ($snapshot === []) {
-                    throw new AppError('NOT_FOUND', 'Trip not found.', 404);
-                }
-                if (!in_array($snapshot['status'], ['DRAFT', 'DISPATCHED'], true)) {
-                    throw new AppError('CONFLICT', 'Only draft trips can be dispatched.', 409);
-                }
-                if ($snapshot['status'] === 'DRAFT') {
-                    $this->assertResourcesAvailable(
-                        $tx,
-                        $actor->companyId,
-                        $snapshot['vehicle_id'],
-                        $snapshot['driver_id'],
-                        $id
-                    );
-                }
-
                 $trip = $this->repository->lockTrip($tx, $actor->companyId, $id);
-
                 if ($trip === []) {
                     throw new AppError('NOT_FOUND', 'Trip not found.', 404);
                 }
-
-                $retry = $trip['status'] === 'DISPATCHED';
+                $retry = in_array($trip['status'], ['DISPATCHED', 'DELIVERED'], true);
                 if (!$retry && $trip['status'] !== 'DRAFT') {
                     throw new AppError('CONFLICT', 'Only draft trips can be dispatched.', 409);
                 }
-
-                if (!$retry) {
-                    if (
-                        $trip['vehicle_id'] !== $snapshot['vehicle_id']
-                        || $trip['driver_id'] !== $snapshot['driver_id']
-                    ) {
-                        throw new AppError('CONFLICT', 'Trip resources changed while dispatch was acquiring locks.', 409);
-                    }
-                    $this->repository->assertTripWithinCapacity(
-                        $tx,
-                        $actor->companyId,
-                        $id,
-                        $trip['vehicle_id']
-                    );
-                }
+                $savedTrip = $this->repository->findById($actor->companyId, $id, $tx);
 
                 $tripLines = $this->repository->lockTripLines($tx, $actor->companyId, $id);
                 if ($tripLines === []) {
                     throw new AppError('INVALID_STATE', 'Trip has no persisted lines.', 409);
                 }
-
                 $mapping = $this->tripLineMapping($tripLines);
+                $orderNumber = $this->repository->findOrderNumber(
+                    $tx,
+                    $actor->companyId,
+                    $trip['sales_order_id']
+                );
+                $order = $fulfillment->lockOrderForEvent($tx, $actor, $orderNumber, 'assignment');
+                if (!$retry && ($order['status'] ?? null) !== 'Submitted') {
+                    throw new AppError('INVALID_STATE', 'Only a Submitted Sales Order can be dispatched.', 409);
+                }
+                if ($retry && !in_array($order['status'] ?? null, ['In Progress', 'Closed'], true)) {
+                    throw new AppError('INVALID_STATE', 'A committed Dispatch retry requires an In Progress or Closed Sales Order.', 409);
+                }
+                $this->assertOrderMatchesTrip($order, $trip, $tripLines);
 
                 if ($retry) {
-                    // Dispatch, consumption and Sales update committed together; verify read-only and return.
+                    if ((string) $savedTrip['dispatched_by'] !== $actorId) {
+                        throw new AppError('DUPLICATE_ACTION_CONFLICT', 'Trip was already dispatched by a different request.', 409);
+                    }
                     foreach ($tripLines as $line) {
                         $this->assertReservationMatches(
                             $reservations->getReservationDetail($actor, $tx, $trip['sales_order_id'], (int) $line['SALES_LINE_ID']),
@@ -330,16 +341,19 @@ class TripService
                     return $this->repository->findById($actor->companyId, $id, $tx);
                 }
 
-                $orderNumber = $this->repository->findOrderNumber(
+                $this->assertResourcesAvailable(
                     $tx,
                     $actor->companyId,
-                    $trip['sales_order_id']
+                    $trip['vehicle_id'],
+                    $trip['driver_id'],
+                    $id
                 );
-                $order = $fulfillment->lockOrderForEvent($tx, $actor, $orderNumber, 'assignment');
-                if (($order['status'] ?? null) !== 'In Progress') {
-                    throw new AppError('INVALID_STATE', 'Only an In Progress Sales Order can be dispatched.', 409);
-                }
-                $this->assertOrderMatchesTrip($order, $trip, $tripLines);
+                $this->repository->assertTripWithinCapacity(
+                    $tx,
+                    $actor->companyId,
+                    $id,
+                    $trip['vehicle_id']
+                );
 
                 foreach ($tripLines as $line) {
                     $salesLineId = (int) $line['SALES_LINE_ID'];
@@ -409,12 +423,28 @@ class TripService
                 if (!$retry && $trip['status'] !== 'DISPATCHED') {
                     throw new AppError('CONFLICT', 'Only dispatched trips can be delivered.', 409);
                 }
+                if ($retry) {
+                    $savedTrip = $this->repository->findById($actor->companyId, $id, $tx);
+                    if ((string) $savedTrip['delivered_by'] !== $actorId) {
+                        throw new AppError('DUPLICATE_ACTION_CONFLICT', 'Trip was already delivered by a different request.', 409);
+                    }
+                }
 
                 $tripLines = $this->repository->lockTripLines($tx, $actor->companyId, $id);
                 if ($tripLines === []) {
                     throw new AppError('INVALID_STATE', 'Trip has no persisted lines.', 409);
                 }
                 $mapping = $this->tripLineMapping($tripLines);
+
+                $orderNumber = $this->repository->findOrderNumber($tx, $actor->companyId, $trip['sales_order_id']);
+                $order = $fulfillment->lockOrderForEvent($tx, $actor, $orderNumber, 'delivery');
+                if (!$retry && ($order['status'] ?? null) !== 'In Progress') {
+                    throw new AppError('INVALID_STATE', 'Only an In Progress Sales Order can be delivered.', 409);
+                }
+                if ($retry && !in_array($order['status'] ?? null, ['In Progress', 'Closed'], true)) {
+                    throw new AppError('INVALID_STATE', 'A committed Delivery retry requires an In Progress or Closed Sales Order.', 409);
+                }
+                $this->assertOrderMatchesTrip($order, $trip, $tripLines);
 
                 foreach ($tripLines as $line) {
                     $this->assertReservationMatches(
@@ -429,13 +459,6 @@ class TripService
                     // Delivery and the Sales update committed together, so only return the saved Trip.
                     return $this->repository->findById($actor->companyId, $id, $tx);
                 }
-
-                $orderNumber = $this->repository->findOrderNumber($tx, $actor->companyId, $trip['sales_order_id']);
-                $order = $fulfillment->lockOrderForEvent($tx, $actor, $orderNumber, 'delivery');
-                if (($order['status'] ?? null) !== 'In Progress') {
-                    throw new AppError('INVALID_STATE', 'Only an In Progress Sales Order can be delivered.', 409);
-                }
-                $this->assertOrderMatchesTrip($order, $trip, $tripLines);
 
                 $delivered = $this->repository->deliver($tx, $actor->companyId, $id, $actorId);
 
@@ -518,6 +541,11 @@ class TripService
             $line['line_id'] = $this->decimalId($line['line_id'] ?? null, 'Sales line ID', 15);
             $line['product_id'] = $this->decimalId($line['product_id'] ?? null, 'Product ID', 10);
             $line['quantity'] = $this->decimalId($line['quantity'] ?? null, 'Quantity', 10);
+            foreach (['trip_id', 'trip_line_id'] as $field) {
+                if (($line[$field] ?? null) !== null) {
+                    $line[$field] = $this->decimalId($line[$field], 'Sales line assignment ID', 15);
+                }
+            }
 
             if (isset($seen[$line['line_id']])) {
                 throw new AppError('INVALID_STATE', 'Sales returned duplicate Order lines.', 409);
@@ -530,6 +558,19 @@ class TripService
         return $validated;
     }
 
+    private function assertSalesLinesUnassigned(array $salesLines): void
+    {
+        foreach ($salesLines as $line) {
+            if (
+                ($line['trip_id'] ?? null) !== null
+                || ($line['trip_line_id'] ?? null) !== null
+                || !in_array($line['trip_status'] ?? null, [null, '', 'Cancelled'], true)
+            ) {
+                throw new AppError('CONFLICT', 'The Sales Order already has a current Trip assignment.', 409);
+            }
+        }
+    }
+
     private function assertOrderMatchesTrip(array $order, array $trip, array $tripLines): void
     {
         if ((string) ($order['order_id'] ?? '') !== (string) $trip['sales_order_id']) {
@@ -537,14 +578,17 @@ class TripService
         }
 
         $salesLines = $this->validateSalesLines($order['lines'] ?? null);
-        if (count($salesLines) !== count($tripLines)) {
-            throw new AppError('CONFLICT', 'Trip lines do not match the complete Sales Order.', 409);
-        }
-
+        $this->assertTripMatchesOrderDemand($order, $tripLines, $salesLines);
         $salesById = [];
         foreach ($salesLines as $line) {
             $salesById[$line['line_id']] = $line;
         }
+        $expectedStatus = match ($trip['status']) {
+            'DRAFT' => 'Draft',
+            'DISPATCHED' => 'Dispatched',
+            'DELIVERED' => 'Delivered',
+            default => throw new AppError('CONFLICT', 'Trip status cannot be matched to a current Sales assignment.', 409),
+        };
 
         foreach ($tripLines as $tripLine) {
             $lineId = (string) $tripLine['SALES_LINE_ID'];
@@ -554,9 +598,88 @@ class TripService
                 $salesLine === null
                 || $salesLine['product_id'] !== (string) $tripLine['PRODUCT_ID']
                 || $salesLine['quantity'] !== (string) $tripLine['QUANTITY']
+                || (string) ($salesLine['trip_id'] ?? '') !== (string) $trip['id']
+                || (string) ($salesLine['trip_line_id'] ?? '') !== (string) $tripLine['ID']
+                || ($salesLine['trip_status'] ?? null) !== $expectedStatus
             ) {
-                throw new AppError('CONFLICT', 'Persisted Trip line does not match its Sales Order line.', 409);
+                throw new AppError('CONFLICT', 'Persisted Trip line does not match its current Sales assignment.', 409);
             }
+        }
+    }
+
+    private function assertTripMatchesOrderDemand(array $order, array $tripLines, ?array $salesLines = null): void
+    {
+        $salesLines ??= $this->validateSalesLines($order['lines'] ?? null);
+        if ($salesLines === [] || count($tripLines) !== count($salesLines)) {
+            throw new AppError('CONFLICT', 'Trip must contain every saved Sales Order line exactly once.', 409);
+        }
+        $this->tripLineMapping($tripLines);
+
+        $salesById = [];
+        foreach ($salesLines as $line) {
+            $salesById[$line['line_id']] = $line;
+        }
+        $seen = [];
+        foreach ($tripLines as $tripLine) {
+            $lineId = (string) $tripLine['SALES_LINE_ID'];
+            $salesLine = $salesById[$lineId] ?? null;
+            if (
+                isset($seen[$lineId])
+                || $salesLine === null
+                || $salesLine['product_id'] !== (string) $tripLine['PRODUCT_ID']
+                || $salesLine['quantity'] !== (string) $tripLine['QUANTITY']
+            ) {
+                throw new AppError('CONFLICT', 'Trip lines must match every saved Sales Order line exactly once.', 409);
+            }
+            $seen[$lineId] = true;
+        }
+    }
+
+    private function assertCancelledTripLines(array $order, array $trip, array $tripLines): void
+    {
+        if ((string) ($order['order_id'] ?? '') !== (string) $trip['sales_order_id']) {
+            throw new AppError('CONFLICT', 'Trip Sales Order does not match the locked Sales Order.', 409);
+        }
+        $salesLines = $this->validateSalesLines($order['lines'] ?? null);
+        $this->assertTripMatchesOrderDemand($order, $tripLines, $salesLines);
+        $cancelledTripLineIds = [];
+        foreach ($tripLines as $tripLine) {
+            $cancelledTripLineIds[(string) $tripLine['ID']] = true;
+        }
+        $currentTrip = null;
+        $currentStatus = null;
+        $currentCount = 0;
+        $currentTripLines = [];
+        foreach ($salesLines as $line) {
+            $tripId = $line['trip_id'] ?? null;
+            $tripLineId = $line['trip_line_id'] ?? null;
+            if (($tripId === null) !== ($tripLineId === null)) {
+                throw new AppError('CONFLICT', 'Cancelled Trip history does not match the cleared Sales line assignments.', 409);
+            }
+            if ($tripId === null) {
+                if (($line['trip_status'] ?? null) !== 'Cancelled') {
+                    throw new AppError('CONFLICT', 'Cancelled Trip history does not match the cleared Sales line assignments.', 409);
+                }
+                continue;
+            }
+            if ((string) $tripId === (string) $trip['id'] || isset($cancelledTripLineIds[(string) $tripLineId])) {
+                throw new AppError('CONFLICT', 'Cancelled Trip history still owns a current Sales line assignment.', 409);
+            }
+            $status = $line['trip_status'] ?? null;
+            if (!in_array($status, ['Draft', 'Dispatched', 'Delivered'], true)
+                || ($currentTrip !== null && $currentTrip !== (string) $tripId)
+                || ($currentStatus !== null && $currentStatus !== $status)
+                || isset($currentTripLines[(string) $tripLineId])
+            ) {
+                throw new AppError('CONFLICT', 'Current Sales assignments must belong to one Trip with one shared status.', 409);
+            }
+            $currentTripLines[(string) $tripLineId] = true;
+            $currentTrip = (string) $tripId;
+            $currentStatus = $status;
+            $currentCount++;
+        }
+        if ($currentCount !== 0 && $currentCount !== count($salesLines)) {
+            throw new AppError('CONFLICT', 'A Sales Order cannot have a partial current Trip assignment.', 409);
         }
     }
 

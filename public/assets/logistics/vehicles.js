@@ -14,8 +14,7 @@ export function initVehicles(context) {
     makeButton,
     showDialog,
     closeDialog,
-    loadList,
-    logisticsState
+    loadList
   } = context;
   const renderVehicles = (items) => {
     const body = document.querySelector('#vehicles-table-body');
@@ -51,15 +50,6 @@ export function initVehicles(context) {
   const description = vehicleForm.elements.description;
   const updateDescriptionCount = () => { document.querySelector('#vehicle-description-count').textContent = (255 - description.value.length) + ' characters remaining'; };
   description.addEventListener('input', updateDescriptionCount);
-  const filterForm = document.querySelector('#vehicles-filter');
-  const applyFilters = () => {
-    if (logisticsState.vehicles.loading) return;
-    const filters = {};
-    for (const [key, value] of new FormData(filterForm)) if (value.trim()) filters[key] = value.trim();
-    logisticsState.vehicles.filters = filters; logisticsState.vehicles.page = 1; loadList('vehicles');
-  };
-  filterForm.addEventListener('submit', event => { event.preventDefault(); applyFilters(); });
-  document.querySelector('#vehicles-clear-filter').addEventListener('click', () => { if (!logisticsState.vehicles.loading) { filterForm.reset(); applyFilters(); } });
 
 
   const populateVehicleForm = (vehicle = null) => {

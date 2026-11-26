@@ -68,7 +68,7 @@ final class LogisticsUiApi
         if ($method === 'GET' && $path === '/vehicles') {
             return $this->response($this->vehicles->getVehicles(
                 $actor,
-                Api::pagination($query, ['active', 'assignment_status', 'search'])
+                Api::pagination($query)
             ));
         }
         if ($method === 'GET' && $path === '/eligible-vehicles') {
@@ -104,11 +104,11 @@ final class LogisticsUiApi
         if ($method === 'GET' && $path === '/trip-lines') {
             return $this->response($this->tripLines->getTripLines($actor, Api::pagination($query, ['trip_id'])));
         }
-        if ($method === 'GET' && preg_match('#\A/trip-lines/([0-9]+)\z#D', $path, $match)) {
+        if ($method === 'GET' && preg_match('#\A/trip-lines/([^/]+)\z#D', $path, $match)) {
             if ($query !== []) {
                 throw new AppError('VALIDATION_ERROR', 'Unsupported filter or invalid query value.');
             }
-            return $this->response($this->tripLines->getTripLine($actor, $this->optionalId($match[1], 'id')));
+            return $this->response($this->tripLines->getTripLine($actor, rawurldecode($match[1])));
         }
         // Read the selected order for the planner; Sales still owns its rules and permissions.
         if ($method === 'GET' && preg_match('#\A/sales-orders/([^/]+)\z#D', $path, $match)) {
@@ -118,16 +118,7 @@ final class LogisticsUiApi
             return $this->response($this->orders->get($actor, rawurldecode($match[1])));
         }
         if ($method === 'GET' && $path === '/sales-orders') {
-            $page = Api::pagination($query, ['search']);
-            $orderQuery = [
-                'status' => 'Submitted',
-                'page' => (string) $page['page'],
-                'page_size' => (string) $page['page_size'],
-            ];
-            if (isset($page['filters']['search'])) {
-                $orderQuery['search'] = $page['filters']['search'];
-            }
-            return $this->response($this->orders->list($actor, $orderQuery));
+            return $this->response($this->trips->getEligibleSalesOrders($actor, $query));
         }
 
         if (preg_match('#\A/(vehicles|drivers|trips)/([0-9]+)(?:/(update|delete|cancel|dispatch|deliver))?\z#D', $path, $match)) {

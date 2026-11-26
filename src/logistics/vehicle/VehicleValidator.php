@@ -19,28 +19,7 @@ final class VehicleValidator
         if ($page - 1 > intdiv(PHP_INT_MAX, $size)) {
             throw new AppError('VALIDATION_ERROR', 'Requested page is too large.', 400);
         }
-        $filters = $pagination['filters'] ?? [];
-        if (!is_array($filters) || array_diff(array_keys($filters), ['active', 'assignment_status', 'search']) !== []) {
-            throw new AppError('VALIDATION_ERROR', 'Unsupported vehicle filter.', 400);
-        }
-        foreach ($filters as $value) {
-            if (!is_string($value)) {
-                throw new AppError('VALIDATION_ERROR', 'Vehicle filters must be strings.', 400);
-            }
-        }
-        if (array_key_exists('active', $filters) && !in_array($filters['active'], ['true', 'false'], true)) {
-            throw new AppError('VALIDATION_ERROR', 'active must be true or false.', 400);
-        }
-        if (array_key_exists('assignment_status', $filters) && !in_array($filters['assignment_status'], ['AVAILABLE', 'ASSIGNED'], true)) {
-            throw new AppError('VALIDATION_ERROR', 'assignment_status must be AVAILABLE or ASSIGNED.', 400);
-        }
-        if (array_key_exists('search', $filters)) {
-            $filters['search'] = trim($filters['search']);
-            if (strlen($filters['search']) > 100) {
-                throw new AppError('VALIDATION_ERROR', 'search must not exceed 100 bytes.', 400);
-            }
-        }
-        return ['page' => $page, 'page_size' => $size, 'filters' => $filters];
+        return ['page' => $page, 'page_size' => $size];
     }
 
     public function validateCreate(array $input): array

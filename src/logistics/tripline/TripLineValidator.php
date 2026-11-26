@@ -11,12 +11,20 @@ final class TripLineValidator
 {
     public function id(mixed $value): int
     {
-        $id = is_int($value) || is_string($value)
-            ? filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) : false;
-        if ($id === false) {
-            throw new AppError('VALIDATION_ERROR', 'ID must be a positive integer.', 400);
+        $raw = is_int($value) ? (string) $value : $value;
+        if (!is_string($raw) || !preg_match('/\A[0-9]+\z/D', $raw)) {
+            throw new AppError('VALIDATION_ERROR', 'TripLine ID must be a positive integer.', 400);
         }
-        return $id;
+        $digits = ltrim($raw, '0');
+        $maximum = (string) PHP_INT_MAX;
+        if (
+            $digits === ''
+            || strlen($digits) > strlen($maximum)
+            || (strlen($digits) === strlen($maximum) && strcmp($digits, $maximum) > 0)
+        ) {
+            throw new AppError('VALIDATION_ERROR', 'TripLine ID must be a positive integer.', 400);
+        }
+        return (int) $digits;
     }
 
     public function pagination(array $pagination): array
