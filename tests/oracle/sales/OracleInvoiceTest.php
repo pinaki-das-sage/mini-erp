@@ -13,7 +13,7 @@ use PHPUnit\Framework\TestCase;
 /** Explicit opt-in only. Own Customer/action fixtures are cleaned; no shared Invoice is edited. */
 final class OracleInvoiceTest extends TestCase
 {
-    public function testStandaloneInvoicePersistenceAndBalanceLifecycle(): void
+    public function testOrderBackedInvoicePersistenceAndBalanceLifecycle(): void
     {
         if (getenv('LAB_ORACLE_TEST') !== '1' && ($_ENV['LAB_ORACLE_TEST'] ?? '') !== '1') {
             self::markTestSkipped('Invoice Oracle acceptance requires an explicitly enabled disposable _TEST schema.');
@@ -42,13 +42,23 @@ final class OracleInvoiceTest extends TestCase
                 VALUES (:company_id, :code, 'Invoice acceptance fixture', 'Test address', 'Test city', 'India')",
                 ['company_id' => $actor->companyId, 'code' => $prefix]));
             $service = new InvoiceService($db, static fn (): string => '2026-11-24');
-            $input = ['action_reference' => $prefix . '-create', 'customer_code' => $prefix,
-                'warehouse_id' => $products[0]['WAREHOUSE_ID'], 'lines' => [[
-                    'product_id' => (string) $products[0]['PRODUCT_ID'], 'description' => 'Acceptance line', 'quantity' => '2', 'unit_price' => '10.25',
-                ]]];
+            SubmittedOrderFixture::create($db, $actor, $prefix, $products[0]);
+            $lookup = ['customer_code' => $prefix];
+            self::assertSame([$prefix], array_column($service->eligibleOrders($actor, $lookup)['items'], 'order_number'));
+            foreach (['DRAFT', 'IN_PROGRESS', 'CLOSED'] as $status) {
+                $txs->run(static fn (TransactionContext $tx) => $tx->execute("UPDATE ME_OE_DOCUMENTS SET STATUS = :status
+                    WHERE CNY# = :company_id AND DOCUMENT_TYPE = 'SALES_ORDER' AND DOCUMENT_NUMBER = :document_number",
+                    ['company_id' => $actor->companyId, 'document_number' => $prefix, 'status' => $status]));
+                self::assertSame([], $service->eligibleOrders($actor, $lookup)['items']);
+            }
+            $txs->run(static fn (TransactionContext $tx) => $tx->execute("UPDATE ME_OE_DOCUMENTS SET STATUS = 'SUBMITTED'
+                WHERE CNY# = :company_id AND DOCUMENT_TYPE = 'SALES_ORDER' AND DOCUMENT_NUMBER = :document_number",
+                ['company_id' => $actor->companyId, 'document_number' => $prefix]));
+            $input = ['action_reference' => $prefix . '-create', 'source_order_number' => $prefix];
             $saved = $service->create($actor, $input);
             $number = $saved['invoice_number'];
             $numbers[] = $number;
+            self::assertSame([], $service->eligibleOrders($actor, $lookup)['items'], 'A Draft Invoice already claims its Order.');
             self::assertSame('20.50', $saved['document_total']);
             $observer = OciConnection::connect($config);
             self::assertSame($saved, (new InvoiceService($observer))->get($actor, $number));
@@ -66,6 +76,7 @@ final class OracleInvoiceTest extends TestCase
             self::assertSame('0.00', $balance());
             $deleted = $service->action($actor, $number, 'delete', ['action_reference' => $prefix . '-delete', 'expected_version' => 3]);
             self::assertTrue($deleted['deleted']);
+            self::assertSame([$prefix], array_column($service->eligibleOrders($actor, $lookup)['items'], 'order_number'));
         } finally {
             $txs->run(static function (TransactionContext $tx) use ($actor, $prefix, $numbers): void {
                 foreach ($numbers as $number) {
@@ -79,6 +90,7 @@ final class OracleInvoiceTest extends TestCase
                         $tx->execute("DELETE FROM ME_OE_DOCUMENTS WHERE CNY# = :company_id AND DOCUMENT_NUMBER = :document_number AND DOCUMENT_TYPE = 'SALES_INVOICE'", $binds);
                     }
                 }
+                SubmittedOrderFixture::delete($tx, $actor, $prefix);
                 foreach (['ME_AUDIT', 'ME_ACTIONS'] as $table) {
                     $tx->execute("DELETE FROM $table WHERE COMPANY_ID = :company_id AND ACTION_REFERENCE LIKE :pattern",
                         ['company_id' => $actor->companyId, 'pattern' => $prefix . '%']);

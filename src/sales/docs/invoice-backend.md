@@ -1,5 +1,58 @@
 # Invoice backend — 24 November 2026
 
+## Current Order-number creation contract
+
+`POST /api/v1/sales/invoices` accepts only `source_order_number` and an optional
+`action_reference`. The source must be a same-company Submitted Sales Order without
+an existing Invoice. Standalone creation and caller-supplied header/line values are
+rejected. The backend copies the complete saved Order, including its date, Customer,
+Warehouse, shipping address, terms, notes and ordered lines, and derives Due Date
+from that copied date and terms. Document and line source links are preserved.
+Existing linked Invoices cannot clear or replace their Order source.
+
+Order Submit already creates a Draft Invoice in the same transaction as Inventory
+reservation and returns `invoice_number`. Use that number to read the Invoice;
+calling create again for that Order is rejected. The public create operation covers
+previously submitted Orders without an Invoice. Explicit action references replay
+the original result; without one, the unique source claim prevents duplicates.
+Creation adds no Customer debt; Invoice Submit adds debt once.
+
+```json
+{ "source_order_number": "SO-000000000000001" }
+```
+
+Draft updates require only `expected_version`; `invoice_date`, `due_date`, `notes`
+and retry `action_reference` are optional. Lines and all inherited business fields
+are rejected in update requests. The server validates the saved lines and preserves
+their IDs and source links without rewriting them. A missing retry reference is
+generated internally; repeating an update with the old version is rejected as stale.
+
+```json
+{
+  "expected_version": 1,
+  "invoice_date": "2026-11-25",
+  "due_date": "2026-11-25",
+  "notes": "Payment due on receipt."
+}
+```
+
+The earlier implementation notes below describe the imported backend; the creation
+contract above supersedes their standalone/manual-line examples.
+
+Invoice submit, move-to-Draft and delete also require only `expected_version`.
+`action_reference` remains optional for explicit replay; when omitted, an internal
+reference is generated and stale/state checks prevent repeated debt changes.
+Payment recording also supports an optional retry reference. Use the latest version for
+each Invoice action; a retry without an explicit reference does not replay success.
+
+`GET /api/v1/sales/invoices/eligible-orders` is implemented as a read-only paginated
+lookup requiring Invoice create and Order read permissions. It returns only the
+current company's Submitted Sales Orders without a source claim. Customer Code,
+Warehouse and inclusive Order-date filters are supported. Draft/In Progress/Closed
+Orders and Orders already linked to an Invoice are excluded before pagination.
+Creation still rechecks status and claim under lock. Since Order Submit already
+creates an Invoice, normally submitted Orders will not appear here.
+
 Seven Sales Invoice operations have local PHP implementations. Deployment and real
 Oracle/Swagger acceptance remain pending for the complete lifecycle. Payment
 recording/history are now registered by the follow-up [API-07 implementation](api-07.md).
@@ -10,9 +63,9 @@ pending. No database migrations were changed for the Invoice/Payment backend wor
 | Method | Path under `/api/v1` | Behavior |
 | --- | --- | --- |
 | GET | `/sales/invoices` | Company-scoped summaries, filters, exact totals and pagination |
-| POST | `/sales/invoices` | Standalone or Order-linked Draft, HTTP 201 |
+| POST | `/sales/invoices` | Copy an unused Submitted Order using its number only, HTTP 201 |
 | GET | `/sales/invoices/{invoice_number}` | Saved header, ordered lines and payment summary |
-| POST | `/sales/invoices/{invoice_number}/update` | Full Draft line collection, expected version |
+| POST | `/sales/invoices/{invoice_number}/update` | Draft dates/notes only, expected version; optional retry reference |
 | POST | `/sales/invoices/{invoice_number}/submit` | Positive-total Draft to Submitted; add Customer debt |
 | POST | `/sales/invoices/{invoice_number}/move-to-draft` | Submitted with no payment/downstream references; remove debt |
 | POST | `/sales/invoices/{invoice_number}/delete` | Eligible Draft only; release source and delete lines/header |

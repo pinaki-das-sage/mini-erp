@@ -131,15 +131,77 @@ final class QuoteServiceTest extends TestCase
         catch (DatabaseError) { self::assertSame([], $db->documents); self::assertSame([], $db->lines); self::assertSame([], $db->actions); }
     }
 
-    public function testForeignOrDuplicateLineIdsAndMissingLinesAreRejected(): void
+    public function testForeignDuplicateOrExplicitlyInvalidLineCollectionsAreRejected(): void
     {
         $db = new QuoteMemoryConnection(); $service = $this->service($db);
         $saved = $service->create($this->actor(), $this->input()); $number = $saved['quote_number'];
         $line = [...$this->input()['lines'][0], 'line_id' => $saved['lines'][0]['line_id']];
-        foreach ([[], ['lines' => []], ['lines' => [$line, $line]], ['lines' => [[...$line, 'line_id' => '9999']]]] as $change) {
+        foreach ([['lines' => []], ['lines' => null], ['lines' => 'invalid'], ['lines' => [$line, $line]], ['lines' => [[...$line, 'line_id' => '9999']]]] as $change) {
             $this->reject(fn () => $service->update($this->actor(), $number, ['expected_version' => 1, ...$change]), 'VALIDATION_ERROR');
         }
         self::assertSame($saved, $service->get($this->actor(), $number));
+    }
+
+    public function testDateOnlyApiUpdateAfterReturnToDraftPreservesEverySavedLine(): void
+    {
+        $db = new QuoteMemoryConnection(); $service = $this->service($db);
+        $saved = $service->create($this->actor(), [...$this->input(), 'quote_date' => '2026-11-26',
+            'valid_until' => '2026-11-26', 'requested_delivery_date' => '2026-11-29']);
+        $number = $saved['quote_number'];
+        $service->action($this->actor(), $number, 'submit', ['expected_version' => 1]);
+        $draft = $service->action($this->actor(), $number, 'return_to_draft', ['expected_version' => 2]);
+        $lines = $db->lines; $writes = $db->lineWrites; $queries = $db->inventoryQueries;
+        $db->inventoryUnavailable = true; // Draft header edits must not depend on Inventory availability.
+        $api = new Api($db, Config::fromArray([]));
+        $headers = ['authorization' => 'Bearer ' . str_repeat('a', 64), 'content-type' => 'application/json'];
+        $url = '/api/v1/sales/quotes/' . $number . '/update';
+        $request = ['expected_version' => 3, 'quote_date' => '2026-11-27',
+            'valid_until' => '2026-11-27', 'requested_delivery_date' => '2026-11-29'];
+        $response = $api->handle('POST', $url, $request, $headers);
+        self::assertSame(200, $response['status'], $response['body']);
+        $result = json_decode($response['body'], true)['result'];
+        self::assertSame('2026-11-27', $result['quote_date']); self::assertSame('2026-11-27', $result['valid_until']);
+        self::assertSame('2026-11-29', $result['requested_delivery_date']); self::assertSame(4, $result['current_version']);
+        self::assertSame($draft['lines'], $result['lines']); self::assertSame($draft['document_total'], $result['document_total']);
+        self::assertSame($lines, $db->lines); self::assertSame($writes, $db->lineWrites);
+        self::assertSame($queries, $db->inventoryQueries);
+        self::assertSame(409, $api->handle('POST', $url, $request, $headers)['status']);
+    }
+
+    public function testNotesOnlyUpdatePreservesLinesAndRetainsReplayAndStateGuards(): void
+    {
+        $db = new QuoteMemoryConnection(); $service = $this->service($db);
+        $saved = $service->create($this->actor(), $this->input()); $number = $saved['quote_number'];
+        $writes = $db->lineWrites;
+        $input = ['expected_version' => 1, 'notes' => 'Header only', 'action_reference' => 'header-only-edit'];
+        $updated = $service->update($this->actor(), $number, $input);
+        self::assertSame('Header only', $updated['notes']); self::assertSame($saved['lines'], $updated['lines']);
+        self::assertSame($saved['document_total'], $updated['document_total']); self::assertSame(2, $updated['current_version']);
+        self::assertSame($updated, $service->update($this->actor(), $number, $input));
+        self::assertSame($writes, $db->lineWrites); self::assertCount(2, $db->audit);
+        $this->reject(fn () => $service->update($this->actor(), $number, [...$input, 'notes' => 'Different']), 'DUPLICATE_ACTION_CONFLICT');
+        $this->reject(fn () => $service->update($this->actor(7, false), $number, ['expected_version' => 2, 'notes' => 'Denied']), 'FORBIDDEN');
+        $this->reject(fn () => $service->update($this->actor(8), $number, ['expected_version' => 2, 'notes' => 'Foreign']), 'NOT_FOUND');
+        $service->action($this->actor(), $number, 'submit', ['expected_version' => 2]);
+        $this->reject(fn () => $service->update($this->actor(), $number, ['expected_version' => 3, 'notes' => 'Submitted']), 'INVALID_STATE');
+    }
+
+    public function testHeaderOnlyInvalidDatesAndAuditFailurePreserveHeaderAndLines(): void
+    {
+        $db = new QuoteMemoryConnection(); $service = $this->service($db);
+        $saved = $service->create($this->actor(), [...$this->input(), 'quote_date' => '2026-11-26',
+            'valid_until' => '2026-11-26', 'requested_delivery_date' => '2026-11-29']);
+        $number = $saved['quote_number']; $lines = $db->lines; $writes = $db->lineWrites;
+        foreach ([['quote_date' => '2026-11-27'], ['valid_until' => '2026-11-25'],
+            ['requested_delivery_date' => '2026-11-25'], ['quote_date' => 'not-a-date']] as $change) {
+            $this->reject(fn () => $service->update($this->actor(), $number, ['expected_version' => 1, ...$change]), 'VALIDATION_ERROR');
+            self::assertSame($saved, $service->get($this->actor(), $number));
+        }
+        $db->failAudit = true;
+        try { $service->update($this->actor(), $number, ['expected_version' => 1, 'notes' => 'Must roll back']); self::fail('Audit must fail.'); }
+        catch (DatabaseError) { self::assertSame($saved, $service->get($this->actor(), $number)); }
+        self::assertSame($lines, $db->lines); self::assertSame($writes, $db->lineWrites);
+        self::assertCount(1, $db->actions); self::assertCount(1, $db->audit);
     }
 
     public function testDraftSavesWithoutInventoryAndFailedSubmissionPreservesDraft(): void
@@ -364,6 +426,7 @@ final class QuoteMemoryConnection implements Connection
     public array $inventoryProducts = [['COMPANY_ID' => 7, 'PRODUCT_ID' => '163', 'WAREHOUSE_ID' => 'W01', 'IS_ACTIVE' => 'Y']];
     public bool $inventoryUnavailable = false;
     public int $inventoryQueries = 0;
+    public int $lineWrites = 0;
     private int $sequence = 0, $lineSequence = 0;
     private ?array $snapshot = null;
     public function begin(): void { if ($this->snapshot !== null) { throw new \LogicException('Nested transaction'); } $this->snapshot = [$this->documents, $this->lines, $this->actions, $this->audit]; }
@@ -406,6 +469,7 @@ final class QuoteMemoryConnection implements Connection
     public function execute(string $sql, array $p = []): int
     {
         if ($this->snapshot === null || !isset($p['company_id'])) { throw new \LogicException('Unscoped/nontransactional write'); }
+        if (preg_match('/\A(?:INSERT INTO|UPDATE|DELETE FROM) ME_OE_DOCUMENT_LINES\b/', $sql)) { $this->lineWrites++; }
         $key = $p['company_id'] . ':' . ($p['reference'] ?? '');
         if (str_starts_with($sql, 'INSERT INTO ME_ACTIONS')) {
             if (isset($this->actions[$key])) { throw new DatabaseError(1); }

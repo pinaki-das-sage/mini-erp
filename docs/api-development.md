@@ -2,6 +2,177 @@
 
 The shared framework implements bearer authentication, permission-checked route registration, JSON responses and input/pagination helpers. The note and user-administration APIs are working examples. Customer routes and the Quote backend are implemented; Quote Inventory validation is pending. Other domain endpoints remain team work.
 
+## Agreed Order increment: linear source flow
+
+The current Order contract in `public/openapi.yaml` narrows the broader future workflow described below:
+Submitted Quote -> Draft Order -> Submitted Order -> In Progress -> Closed plus an automatically created Draft Invoice.
+Standalone Orders/Invoices and manual Invoice creation are outside this increment. Order sources cannot
+be cleared or replaced. Customer, Warehouse, address and terms remain locked; the copied lines become
+editable Draft Order lines. The Quote is the starting point and remains unchanged when the Order is edited.
+
+Order Submit reserves final saved demand, marks the Order Submitted, and creates exactly one linked
+Draft Invoice using `src/sales/invoices/OrderInvoiceService.php`, all in the Order transaction.
+Invoice Date uses Order Date; Due Date follows payment terms. The Submit result includes `invoice_number`.
+Any failure rolls back stock, Invoice, Order status/version, audit and replay records. Exact retries
+return the original result. Draft creation has no Customer debt effect and does not deduct stock.
+
+One whole Sales Order belongs to one current Trip, including every line and full quantity. Draft
+Trip assignment leaves the Order Submitted. Successful dispatch consumes all reservations and makes
+the Order In Progress. Full delivery makes it Closed. Whole Draft assignment cancellation clears every
+Trip reference and leaves stock reserved. Partial line selections and mixed Trip IDs/statuses are rejected. Delivery
+does not create or modify the Invoice. Logistics does not wait for Invoice submission.
+Logistics selects whole Submitted Orders whose lines are all unassigned; Submitted status alone does
+not mean no Trip exists. The full detail API exposes each line's Trip state.
+
+An unassigned Submitted Order can return to Draft when its linked Invoice is Draft without payments
+or downstream references. Delete that Invoice/link, release reservations and return the Order atomically.
+Invoice creation requires sales.invoices:create; deletion requires sales.invoices:delete. Older Submitted
+Orders with no Invoice can still return. Keep the original Quote link. In Progress/Closed cannot return.
+
+Kavya's Invoice API/backend branch remains unmerged. This internal integration uses existing Sales tables
+and numbering; no public Invoice CRUD/payment endpoints are added. Future Invoice writers must use a
+consistent Order-before-Invoice lock order, including Invoice Submit/update/delete, before integration.
+Live Oracle transaction/concurrency acceptance remains pending.
+
+## Order backend and dependency status
+
+`src/sales/orders/OrderService.php` implements Quote-backed create/list/get/update/delete and an eligible
+Quote lookup. All Order routes are registered in `src/sales/api.php`; standalone Order creation is rejected.
+Order listing filters to same-company Quote-backed Orders before pagination. Legacy standalone Orders and
+records missing a valid Quote source do not break the page or consume its slots. They are left untouched;
+direct detail/actions still reject missing or wrong-type sources. Do not guess links or delete old records
+to work around the error; any historical data correction requires verified source evidence.
+Create requires `sales.orders:create` and `sales.quotes:read`. Eligible lookup uses those same permissions.
+Reads require `sales.orders:read`; edits require Update, deletion Delete, and lifecycle actions use the named
+`submit` / `return_to_draft` grants. Submit also requires current Quote Read, including on retries.
+
+Create requires only `source_quote_number`; the server copies the entire authoritative Quote line set,
+Customer, Warehouse, shipping address and payment terms. Do not send those inherited fields or `lines`
+when creating an Order. Optional Order-specific fields are Order Date, requested delivery date, Customer
+PO Number and notes, plus the optional retry reference.
+
+Draft updates allow editing Products, descriptions, quantities and prices, adding/removing lines and
+reordering them. `expected_version` is required; `lines` is optional. Omit `lines` for notes/date-only edits.
+If supplied, send the entire intended Order line set: retain `line_id` to edit/reorder an existing line,
+omit `line_id` to add a new line, and omit a saved row from the collection to remove it. An empty collection
+is invalid. Every submitted line requires numeric `product_id`, description, positive whole-number quantity
+and nonnegative unit price with at most two decimals. Unknown/duplicate IDs and read-only fields are rejected.
+Totals are calculated exactly and header/lines/version/audit/retry result are saved atomically. No stock
+check or reservation happens during Draft edits; Inventory validates and reserves the final saved demand
+on Submit. Product existence/company is enforced by the existing database FK. Submitted/In Progress/Closed
+Orders cannot be edited, nor can referenced or Trip-assigned Drafts.
+
+The server preserves original `source_line_id` provenance on quantity/price/description changes. Added
+lines have null provenance; replacing a Product clears its original Quote-line reference. Clients may
+omit this field or echo the current saved value but cannot forge/reassign it. The Order's Quote header link
+always remains, even if all original lines are replaced. Customer, Warehouse, shipping address and terms
+come from the source, preserving its snapshots. Order Date defaults to the
+business date and must be on/after Quote Date. On create, copy the Quote's requested delivery date only if
+it is on/after Order Date; an earlier default is left unset (null), preserving the Quote unchanged. Explicit
+non-null delivery dates must be on/after Order Date. The mutable
+Order header fields are dates, Customer PO Number and notes. Use the returned `current_version` as
+`expected_version` for each saved change. Optional `action_reference` supports exact retries.
+
+```json
+{
+  "source_quote_number": "SQ-000000000000044",
+  "action_reference": "order-from-quote-044"
+}
+```
+
+Example Draft update (use current Order line IDs/version from GET; omitted saved rows are removed):
+
+```json
+{
+  "expected_version": 1,
+  "notes": "Updated order notes",
+  "lines": [
+    {"line_id": "122", "product_id": "163", "description": "Sagar Testing order update", "quantity": "12", "unit_price": "9818.00"}
+  ]
+}
+```
+
+A notes-only update can be `{"expected_version": 1, "notes": "Deliver before noon"}`. No line array is needed.
+
+Replace the example Quote number with an eligible Submitted Quote. Order numbers use `SO-` plus 15 digits
+from the existing migration 009 sequence; gaps are expected and numbers are not reused. No new migration
+is needed. Verify sales migrations 005-011 and the Inventory Product FK prerequisite before use; do not
+edit applied migrations or reset numbering. Draft deletion releases its Quote link under the Quote parent
+lock, enabling the Quote to be used again.
+
+Order Submit is now connected to the supplied `src/inventory/ReservationService.php`, preserved byte-for-byte
+from the Inventory handoff. `InventoryOrderAdapter` implements `OrderInventory` and is injected by
+`src/sales/api.php`. It locks Sales lines by numeric record ID, rechecks authoritative demand, validates
+active same-company Products/W01 through the existing Quote validator and calls Inventory `reserveStock`
+using numeric internal Order/line/Product IDs (not the public SO number). Calls sort by Product ID then
+line ID; repeated Product quantities consume availability cumulatively under Inventory balance locks.
+Every saved line must be fully reserved before Submitted commits. Exact stock is sufficient; later-line
+shortages, provider errors and Sales audit failures roll back all Inventory/Sales effects together. On-hand
+stock does not decrease during reservation. No internal HTTP, Inventory-table access from Sales or runtime
+fake is used. Submit requires `inventory.reservations:reserve` in addition to Sales Submit and Quote Read.
+
+The adapter also calls Inventory `getReservationDetail` and `releaseReservation`, requiring Inventory
+reservation Read and Release grants. The simplified return flow uses `SalesTripAssignmentGuard` as its
+assignment authority: any saved `TRIP_ID`, `LOGISTICS_TRIP_LINE_ID`, or active Trip status blocks return.
+`trip_status` stores Draft/Dispatched/Delivered, not a boolean. Cancelled status is unassigned only after
+both references are cleared. The guard locks the same-company Order and its lines and supplies Inventory's
+planned-quantity callback from those saved fields. Successful verification yields zero for unassigned
+lines; Draft/unclear assignments conservatively report the saved quantity. This is not a constant-zero
+fallback. Missing Orders/lines and query failures are errors. All failures preserve state/reservations;
+later-line release failures roll back earlier releases as well. Eligible Submitted Orders now advertise
+`move_to_draft`; source Invoice references and versions are still checked before release.
+
+This simpler contract requires Logistics to save assignments/claims and mirror Sales Trip fields through
+the same transaction/callbacks and parent/line locks. A hidden Logistics-only claim is unsupported. No
+Logistics HTTP/provider lookup is needed on return. Keep the original Quote unchanged. Release retains
+Inventory history and resubmission creates a fresh reservation cycle without duplicating active records.
+For Logistics' dispatch/event verification, use its own authoritative claim callback as proposed in the
+handoff; do not reuse an intermediate pre-refresh Sales-field snapshot for dispatch detail checks.
+
+Deploy `src/inventory/ReservationService.php`, `src/sales/orders/InventoryOrderAdapter.php`,
+`src/sales/orders/SalesTripAssignmentGuard.php`, `src/sales/invoices/OrderInvoiceService.php`, the matching `OrderService.php` and `src/sales/api.php`
+together, plus the updated OpenAPI document. Regenerate Composer autoload files if using
+an authoritative class map. This change introduces no Sales migration. Inventory's owning migrations must
+already provide `ME_INV_PRODUCTS`, `ME_INV_STOCK_BALANCE`, `ME_INV_RESERVATION`, `ME_INV_RESERVATION_SEQ` and
+the registered `inventory.reservations` Read/Reserve/Release permissions. Missing objects or ungranted
+operations are real deployment errors; do not replace them with invented balances or automatic grants.
+
+Lock order for this increment is source Quote -> Order parent -> Customer -> sorted Sales lines ->
+Inventory calls ordered by Product ID/line ID, each locking balance before reservation.
+Source identity is immutable and rechecked after locking. Lists release each record's locks before the next
+record. Every future Logistics assignment/cancellation and Invoice source claim must coordinate on the
+same Order parent; review the complete Trip/balance lock order with both provider teams before integration.
+Draft deletion relies on the invariant that Logistics cannot assign Draft Orders. Existing Sales Trip fields
+are presentation facts only; they are not an authoritative replacement for a Logistics return check.
+
+The proposed `SalesFulfillment` event methods and provider/Invoice interfaces are ready for team review:
+see [the Sales–Logistics handoff](sales-logistics-handoff.md). They are not wired into production; real
+Logistics event facts remain integration work; submit-time Invoice creation is connected. The current
+return-to-Draft path uses the saved-field protocol above. No UI or live
+Oracle/concurrency acceptance is claimed. Adapter tests execute the real
+supplied reservation service with transactional database doubles; other Sales tests also use provider
+doubles. They cannot prove actual Oracle locks or persisted stock effects. Run:
+
+```text
+php vendor/bin/phpunit --filter OrderServiceTest
+php vendor/bin/phpunit --filter InventoryOrderAdapterTest
+php vendor/bin/phpunit --filter SalesFulfillmentTest
+php vendor/bin/phpunit --filter SalesTripAssignmentGuardTest
+php vendor/bin/phpunit --testsuite unit
+php bin/lint.php
+node --test tests/unit/sales/sales-openapi.test.cjs
+```
+
+Local verification for this increment: 311 focused PHPUnit tests passed (OrderService, QuoteService,
+CustomerService, SalesRules, InventoryQuoteValidator, InventoryOrderAdapter, OrderInvoiceService, LogisticsOrderAdapter,
+SalesFulfillment and SalesTripAssignmentGuard), with 1,701 assertions
+on PHP 8.4.27 WebAssembly. This includes the supplied ReservationService executing against a transactional
+database double for exact stock, cumulative shortages, permission checks, audit rollback and release/resubmit cycles.
+PHP parser checks passed for 85 application/test/migration PHP files. Native PHP execution is blocked on
+this Windows host; the full subprocess-dependent unit suite was not completed. OpenAPI checks have 12
+passes and three pre-existing failures in Customer metadata and shared Product
+definitions. Order-specific checks pass. No Oracle, provider concurrency or real stock effects were tested.
+
 ## Sales backend folders
 
 Customer-only classes live in `src/sales/customers/` (`MiniErp\sales\customers`), and Quote-only classes live in `src/sales/quotes/` (`MiniErp\sales\quotes`). Shared `Validation.php`, `DocumentRules.php`, `SalesPermissions.php`, and the module route entry point `api.php` remain directly in `src/sales/`. Migrations and fixtures remain under `database/`; API URLs and JSON fields are unchanged.
@@ -32,7 +203,7 @@ Quote routes under `/api/v1/sales/quotes` support create/list/get, POST `/{quote
 }
 ```
 
-Shipping Address and Payment Terms default from the active Customer and remain saved snapshots. Customer Code and Name in responses come from the current Customer master. Quantities are positive whole-number strings with up to 9 digits. Prices allow 10 whole digits and 2 decimals; amounts and totals allow 16 whole digits and 2 decimals. Every edit supplies all intended lines, retaining saved `line_id` values for edits. Array order controls line display positions. Line validation errors identify the affected line.
+Shipping Address and Payment Terms default from the active Customer and remain saved snapshots. Customer Code and Name in responses come from the current Customer master. Quantities are positive whole-number strings with up to 9 digits. Prices allow 10 whole digits and 2 decimals; amounts and totals allow 16 whole digits and 2 decimals. Draft Quote updates require the latest `expected_version`. Omit `lines` for date/notes/header-only edits: saved lines are revalidated and preserved without line writes. If supplied, `lines` is the complete intended collection, retaining saved `line_id` values for edits; `null` and an empty array are rejected. Array order controls line display positions. Line validation errors identify the affected line. Dates are checked against the resulting saved header, including any omitted date fields retained from the Quote.
 
 Sales migrations 005/006 install headers/lines. `007_oe_source_links.php` and `008_oe_payments.php` restore the supplied table migrations, already applied on the target database. `009_oe_document_numbering.php` creates separate Quote, Order, Invoice and Payment sequences together. The separate Quote numbering migration was consolidated into 009 at the requester's direction. If an earlier version of 009 or either former Quote numbering filename is already recorded as applied, reconcile migration history against existing sequences before the next run; do not recreate or reset sequences. The runner uses complete filenames and checksums as migration identities.
 

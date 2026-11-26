@@ -3,14 +3,13 @@ declare(strict_types=1);
 
 namespace MiniErp\Tests\unit\sales;
 
-use MiniErp\Tests\unit\sales\fixtures\InvoiceMemoryConnection;
 use MiniErp\sales\invoices\InvoiceService;
 use MiniErp\shared\Api;
 use MiniErp\shared\AppError;
 use MiniErp\shared\Config;
-use MiniErp\shared\database\Connection;
 use MiniErp\shared\database\DatabaseError;
 use MiniErp\shared\security\Actor;
+use MiniErp\Tests\unit\sales\fixtures\InvoiceMemoryConnection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -23,329 +22,269 @@ final class InvoiceWorkflowTest extends TestCase
 
     private function service(InvoiceMemoryConnection $db): InvoiceService
     {
-        return new InvoiceService($db, static fn (): string => '2026-11-24');
+        return new InvoiceService($db, static fn (): string => '2026-11-25');
     }
 
-    private function input(string $reference = 'create'): array
+    private function source(InvoiceMemoryConnection $db): array
     {
-        return ['action_reference' => $reference, 'customer_code' => 'CUST-0001', 'warehouse_id' => 'W01',
-            'lines' => [['product_id' => '163', 'description' => 'Item A', 'quantity' => '2', 'unit_price' => '10']]];
+        $db->documents[100] = [...$db->document(100, 'SO-1', 'SALES_ORDER', 'SUBMITTED'),
+            'NOTES' => 'Order notes', 'SHIPPING_ADDRESS' => 'Saved delivery address'];
+        $db->lines[101] = $db->line(101, 100, 1, 163, 'A', '2', '10.25');
+        $db->lines[102] = $db->line(102, 100, 2, 164, 'B', '3', '1.00');
+        return ['source_order_number' => 'SO-1', 'action_reference' => 'create'];
     }
 
     private function reject(callable $operation, string $code, int $status = 400): void
     {
-        try {
-            $operation();
-            self::fail('Expected ' . $code);
-        } catch (AppError $error) {
+        try { $operation(); self::fail('Expected ' . $code); }
+        catch (AppError $error) {
             self::assertSame($code, $error->errorCode);
             self::assertSame($status, $error->status);
         }
     }
 
-    public function testCreateGetDefaultsAndExactLineAmountsDoNotAffectBalance(): void
+    public function testNumberAloneCopiesCompleteOrderAndDoesNotCreateDebt(): void
     {
         $db = new InvoiceMemoryConnection();
-        $service = $this->service($db);
-        $saved = $service->create($this->actor(), $this->input());
+        $this->source($db);
+        $saved = $this->service($db)->create($this->actor(), ['source_order_number' => 'SO-1']);
         self::assertSame('SI-000000000000001', $saved['invoice_number']);
-        self::assertSame('Draft', $saved['status']);
-        self::assertSame(1, $saved['current_version']);
+        self::assertSame('SO-1', $saved['source_order_number']);
+        self::assertSame('CUST-0001', $saved['customer_code']);
+        self::assertSame('W01', $saved['warehouse_id']);
+        self::assertSame('NET_30', $saved['payment_terms']);
+        self::assertSame('Order notes', $saved['notes']);
+        self::assertSame('Saved delivery address', $saved['shipping_address']);
         self::assertSame('2026-11-24', $saved['invoice_date']);
         self::assertSame('2026-12-24', $saved['due_date']);
-        self::assertSame('20.00', $saved['document_total']);
-        self::assertSame('20.00', $saved['amount_due']);
-        self::assertSame('0.00', $saved['total_paid']);
-        self::assertNull($saved['payment_status']);
-        self::assertSame('10.00', $saved['lines'][0]['unit_price']);
-        self::assertSame('163', $saved['lines'][0]['product_id']);
-        self::assertArrayNotHasKey('item_code', $saved['lines'][0]);
-        self::assertSame('163', (string) array_values($db->lines)[0]['PRODUCT_ID']);
-        self::assertSame($saved, $service->get($this->actor(), $saved['invoice_number']));
+        self::assertSame('Draft', $saved['status']);
+        self::assertSame(1, $saved['current_version']);
+        self::assertSame('23.50', $saved['document_total']);
+        self::assertSame(['163', '164'], array_column($saved['lines'], 'product_id'));
+        self::assertSame(['101', '102'], array_column($saved['lines'], 'source_line_id'));
+        self::assertSame(['2', '3'], array_column($saved['lines'], 'quantity'));
         self::assertSame('0.00', $db->customers[1]['BALANCE']);
-        self::assertCount(1, $db->audit);
-    }
-
-    public function testReplayReturnsOriginalSnapshotAndDoesNotConsumeAnotherNumber(): void
-    {
-        $db = new InvoiceMemoryConnection();
-        $service = $this->service($db);
-        $original = $service->create($this->actor(), $this->input());
-        $service->update($this->actor(), $original['invoice_number'], [
-            'action_reference' => 'update', 'expected_version' => 1, 'notes' => 'Changed', 'lines' => $this->editable($original),
-        ]);
-        self::assertSame($original, $service->create($this->actor(), array_reverse($this->input(), true)));
-        self::assertSame(2, $db->nextNumber);
-        $this->reject(fn () => $service->create($this->actor(), [...$this->input(), 'notes' => 'Other']), 'DUPLICATE_ACTION_CONFLICT', 409);
-        self::assertCount(1, $db->documents);
-    }
-
-    public function testProductMustBelongToCompanyAndWarehouseAndBeActive(): void
-    {
-        foreach (['COMPANY_ID' => 8, 'WAREHOUSE_ID' => 'W02', 'IS_ACTIVE' => 'N'] as $field => $value) {
-            $db = new InvoiceMemoryConnection();
-            $db->products[163][$field] = $value;
-            $this->reject(fn () => $this->service($db)->create($this->actor(), $this->input()), 'VALIDATION_ERROR');
-            self::assertSame([], $db->documents);
-            self::assertSame([], $db->actions);
-        }
-    }
-
-    private function editable(array $invoice): array
-    {
-        return array_map(static fn (array $line): array => array_intersect_key($line,
-            array_flip(['line_id', 'product_id', 'description', 'quantity', 'unit_price', ...($line['source_line_id'] === null ? [] : ['source_line_id'])])), $invoice['lines']);
-    }
-
-    public function testUpdateReordersStableLinesAndRecalculatesDueDate(): void
-    {
-        $db = new InvoiceMemoryConnection();
-        $service = $this->service($db);
-        $input = $this->input();
-        $input['lines'][] = ['product_id' => '164', 'description' => 'Item B', 'quantity' => '1', 'unit_price' => '0.25'];
-        $saved = $service->create($this->actor(), $input);
-        $lines = array_reverse($this->editable($saved));
-        $updated = $service->update($this->actor(), $saved['invoice_number'], ['action_reference' => 'edit',
-            'expected_version' => 1, 'invoice_date' => '2028-02-29', 'payment_terms' => 'NET_15', 'lines' => $lines]);
-        self::assertSame(2, $updated['current_version']);
-        self::assertSame('2028-03-15', $updated['due_date']);
-        self::assertSame(array_column($lines, 'line_id'), array_column($updated['lines'], 'line_id'));
-        self::assertSame([1, 2], array_column($updated['lines'], 'line_number'));
-        self::assertSame('20.25', $updated['document_total']);
-        $this->reject(fn () => $service->update($this->actor(), $saved['invoice_number'], [
-            'action_reference' => 'stale', 'expected_version' => 1, 'lines' => $lines]), 'STALE_VERSION', 409);
-        self::assertArrayNotHasKey('7:stale', $db->actions);
-    }
-
-    public function testUpdateCanRemoveAddLinesAndPreserveExplicitDueDate(): void
-    {
-        $db = new InvoiceMemoryConnection();
-        $service = $this->service($db);
-        $saved = $service->create($this->actor(), $this->input());
-        $updated = $service->update($this->actor(), $saved['invoice_number'], ['action_reference' => 'replace',
-            'expected_version' => 1, 'due_date' => '2027-01-01', 'lines' => [[
-                'product_id' => '164', 'description' => 'Replacement', 'quantity' => '1', 'unit_price' => '0.10',
-            ]]]);
-        self::assertNotSame($saved['lines'][0]['line_id'], $updated['lines'][0]['line_id']);
-        self::assertSame('0.10', $updated['document_total']);
-        self::assertSame('2027-01-01', $updated['due_date']);
-        self::assertCount(1, $db->lines);
-    }
-
-    public function testSubmitReturnResubmitAndRetriesMaintainBalanceExactlyOnce(): void
-    {
-        $db = new InvoiceMemoryConnection();
-        $db->customers[1]['BALANCE'] = '100.01';
-        $service = $this->service($db);
-        $saved = $service->create($this->actor(), $this->input());
-        $submit = ['action_reference' => 'submit', 'expected_version' => 1];
-        $submitted = $service->action($this->actor(), $saved['invoice_number'], 'submit', $submit);
-        self::assertSame('Submitted', $submitted['status']);
-        self::assertSame('Unpaid', $submitted['payment_status']);
-        self::assertSame('120.01', $db->customers[1]['BALANCE']);
-        self::assertSame($submitted, $service->action($this->actor(), $saved['invoice_number'], 'submit', $submit));
-        $returned = $service->action($this->actor(), $saved['invoice_number'], 'return_to_draft', [
-            'action_reference' => 'return', 'expected_version' => 2]);
-        self::assertSame('Draft', $returned['status']);
-        self::assertNull($returned['payment_status']);
-        self::assertSame('100.01', $db->customers[1]['BALANCE']);
-        $service->action($this->actor(), $saved['invoice_number'], 'submit', ['action_reference' => 'resubmit', 'expected_version' => 3]);
-        self::assertSame('120.01', $db->customers[1]['BALANCE']);
-        self::assertCount(4, $db->audit);
-    }
-
-    public function testZeroTotalDraftCannotSubmitAndCustomerCapacityCannotOverflow(): void
-    {
-        $db = new InvoiceMemoryConnection();
-        $service = $this->service($db);
-        $input = $this->input();
-        $input['lines'][0]['unit_price'] = '0';
-        $saved = $service->create($this->actor(), $input);
-        $this->reject(fn () => $service->action($this->actor(), $saved['invoice_number'], 'submit',
-            ['action_reference' => 'zero', 'expected_version' => 1]), 'VALIDATION_ERROR');
-        self::assertSame('0.00', $db->customers[1]['BALANCE']);
-        $next = $service->create($this->actor(), $this->input('next'));
-        $db->customers[1]['BALANCE'] = '9999999999999999.99';
-        $this->reject(fn () => $service->action($this->actor(), $next['invoice_number'], 'submit',
-            ['action_reference' => 'overflow', 'expected_version' => 1]), 'VALIDATION_ERROR');
-        self::assertSame('DRAFT', $db->documents[2]['STATUS']);
-        self::assertArrayNotHasKey('7:overflow', $db->actions);
-    }
-
-    public function testPaymentsAndSubmittedStateBlockReturnOrDeletion(): void
-    {
-        $db = new InvoiceMemoryConnection();
-        $service = $this->service($db);
-        $saved = $service->create($this->actor(), $this->input());
-        $service->action($this->actor(), $saved['invoice_number'], 'submit', ['action_reference' => 'submit', 'expected_version' => 1]);
-        $db->payments[] = ['CNY#' => 7, 'INVOICE_RECORD#' => 1, 'PAYMENT_AMOUNT' => '5.00'];
-        foreach (['return_to_draft', 'delete'] as $action) {
-            $this->reject(fn () => $service->action($this->actor(), $saved['invoice_number'], $action,
-                ['action_reference' => $action, 'expected_version' => 2]), 'INVALID_STATE', 409);
-        }
-        self::assertCount(2, $db->audit);
-    }
-
-    public function testDeleteDraftIsReplayableAndDoesNotReuseNumber(): void
-    {
-        $db = new InvoiceMemoryConnection();
-        $service = $this->service($db);
-        $saved = $service->create($this->actor(), $this->input());
-        $input = ['action_reference' => 'delete', 'expected_version' => 1];
-        $deleted = $service->action($this->actor(), $saved['invoice_number'], 'delete', $input);
-        self::assertTrue($deleted['deleted']);
-        self::assertNull($deleted['current_version']);
-        self::assertSame($deleted, $service->action($this->actor(), $saved['invoice_number'], 'delete', $input));
-        self::assertSame([], $db->lines);
-        $this->reject(fn () => $service->get($this->actor(), $saved['invoice_number']), 'NOT_FOUND', 404);
-        self::assertNotSame($saved['invoice_number'], $service->create($this->actor(), $this->input('new'))['invoice_number']);
-    }
-
-    public function testLaterLineFailureAndAuditFailureRollBackAllEffects(): void
-    {
-        $db = new InvoiceMemoryConnection();
-        $service = $this->service($db);
-        $input = $this->input();
-        $input['lines'][] = ['product_id' => '164', 'description' => 'B', 'quantity' => '1', 'unit_price' => '1'];
-        $db->failLine = 2;
-        try {
-            $service->create($this->actor(), $input);
-            self::fail('Later line failure must propagate.');
-        } catch (DatabaseError) {}
-        self::assertSame([], $db->documents);
-        self::assertSame([], $db->lines);
-        self::assertSame([], $db->actions);
-        $db->failLine = 0;
-        $saved = $service->create($this->actor(), $this->input());
-        $db->failAudit = true;
-        $submit = ['action_reference' => 'submit', 'expected_version' => 1];
-        try {
-            $service->action($this->actor(), $saved['invoice_number'], 'submit', $submit);
-            self::fail('Audit failure must propagate.');
-        } catch (DatabaseError) {}
-        self::assertSame('0.00', $db->customers[1]['BALANCE']);
-        self::assertSame('Draft', $service->get($this->actor(), $saved['invoice_number'])['status']);
-        $db->failAudit = false;
-        $service->action($this->actor(), $saved['invoice_number'], 'submit', $submit);
-        self::assertSame('20.00', $db->customers[1]['BALANCE']);
-    }
-
-    private function linked(InvoiceMemoryConnection $db, string $number = 'SO-1', int $id = 100): array
-    {
-        $db->documents[$id] = $db->document($id, $number, 'SALES_ORDER', 'IN_PROGRESS');
-        $db->lines[$id] = $db->line($id, $id, 1, 163, 'Item A', '2', '10.00');
-        return ['action_reference' => 'linked-' . $id, 'source_order_number' => $number,
-            'lines' => [['source_line_id' => (string) $id, 'product_id' => '163', 'description' => 'Item A',
-                'quantity' => '2', 'unit_price' => '10.00']]];
-    }
-
-    public function testLinkedCreateClaimsOrderAndRejectsSecondTargetOrChangedContents(): void
-    {
-        $db = new InvoiceMemoryConnection();
-        $input = $this->linked($db);
-        $service = $this->service($db);
-        $saved = $service->create($this->actor(), $input);
-        self::assertSame('SO-1', $saved['source_order_number']);
-        self::assertSame('100', $saved['lines'][0]['source_line_id']);
         self::assertCount(1, $db->links);
-        $this->reject(fn () => $service->create($this->actor(), [...$input, 'action_reference' => 'duplicate']), 'SOURCE_IN_USE', 409);
-        $lines = $this->editable($saved);
-        $lines[0]['quantity'] = '1';
-        $this->reject(fn () => $service->update($this->actor(), $saved['invoice_number'], ['action_reference' => 'changed',
-            'expected_version' => 1, 'lines' => $lines]), 'VALIDATION_ERROR');
-        $submitted = $service->action($this->actor(), $saved['invoice_number'], 'submit', ['action_reference' => 'submit', 'expected_version' => 1]);
-        self::assertSame('Submitted', $submitted['status']);
-        $service->action($this->actor(), $saved['invoice_number'], 'return_to_draft', ['action_reference' => 'return', 'expected_version' => 2]);
-        self::assertCount(1, $db->links, 'Return to Draft retains source claim.');
-        $service->action($this->actor(), $saved['invoice_number'], 'delete', ['action_reference' => 'delete', 'expected_version' => 3]);
+        self::assertSame($saved, $this->service($db)->get($this->actor(), $saved['invoice_number']));
+    }
+
+    public function testReplayAndSecondRequestCannotCreateDuplicateInvoices(): void
+    {
+        $db = new InvoiceMemoryConnection();
+        $input = $this->source($db);
+        $service = $this->service($db);
+        $saved = $service->create($this->actor(), $input);
+        self::assertSame($saved, $service->create($this->actor(), array_reverse($input, true)));
+        $this->reject(fn () => $service->create($this->actor(), ['source_order_number' => 'SO-1']), 'SOURCE_IN_USE', 409);
+        self::assertSame(2, $db->nextNumber);
+        self::assertCount(2, $db->documents);
+        self::assertCount(1, $db->audit);
+        self::assertCount(1, $db->actions);
+    }
+
+    #[DataProvider('invalidSources')]
+    public function testOnlySubmittedSameCompanyOrdersAreEligible(string $status, string $type, int $company, string $code, int $http): void
+    {
+        $db = new InvoiceMemoryConnection();
+        $input = $this->source($db);
+        $db->documents[100] = [...$db->documents[100], 'STATUS' => $status, 'DOCUMENT_TYPE' => $type, 'CNY#' => $company];
+        $this->reject(fn () => $this->service($db)->create($this->actor(), $input), $code, $http);
+        self::assertCount(1, $db->documents);
+        self::assertSame([], $db->actions);
         self::assertSame([], $db->links);
     }
 
-    public function testFailedSourceReplacementPreservesOriginalClaimAndLines(): void
+    public static function invalidSources(): array
     {
-        $db = new InvoiceMemoryConnection();
-        $input = $this->linked($db);
-        $other = $this->linked($db, 'SO-2', 101);
-        $service = $this->service($db);
-        $saved = $service->create($this->actor(), $input);
-        $db->failAudit = true;
-        try {
-            $service->update($this->actor(), $saved['invoice_number'], [...$other, 'action_reference' => 'replace', 'expected_version' => 1]);
-            self::fail('Injected source replacement failure must roll back.');
-        } catch (DatabaseError) {}
-        self::assertSame($saved, $service->get($this->actor(), $saved['invoice_number']));
-        self::assertSame(100, (int) array_values($db->links)[0]['SOURCE_DOCUMENT_RECORD#']);
+        return [['DRAFT', 'SALES_ORDER', 7, 'INVALID_STATE', 409],
+            ['IN_PROGRESS', 'SALES_ORDER', 7, 'INVALID_STATE', 409],
+            ['CLOSED', 'SALES_ORDER', 7, 'INVALID_STATE', 409],
+            ['SUBMITTED', 'SALES_QUOTE', 7, 'NOT_FOUND', 404],
+            ['SUBMITTED', 'SALES_ORDER', 8, 'NOT_FOUND', 404]];
     }
 
-    public function testCompanyIsolationAndAuthorizationBeforeReplay(): void
+    public function testMissingSourceAndCallerSuppliedBusinessValuesAreRejected(): void
     {
         $db = new InvoiceMemoryConnection();
-        $service = $this->service($db);
-        $saved = $service->create($this->actor(), $this->input());
-        $this->reject(fn () => $service->get($this->actor(8), $saved['invoice_number']), 'NOT_FOUND', 404);
-        $this->reject(fn () => $service->update($this->actor(8), $saved['invoice_number'], [
-            'action_reference' => 'foreign', 'expected_version' => 1, 'lines' => $this->editable($saved)]), 'NOT_FOUND', 404);
-        $this->reject(fn () => $service->create($this->actor(7, false), $this->input()), 'FORBIDDEN', 403);
+        $input = $this->source($db);
+        foreach ([[], ['source_order_number' => null], ['source_order_number' => ''],
+            [...$input, 'lines' => []], [...$input, 'customer_code' => 'CUST-0001'],
+            [...$input, 'invoice_date' => '2026-11-25'], [...$input, 'notes' => 'Override']] as $bad) {
+            $this->reject(fn () => $this->service($db)->create($this->actor(), $bad), 'VALIDATION_ERROR');
+        }
+        self::assertSame([], $db->actions);
+        self::assertSame(1, $db->nextNumber);
+    }
+
+    public function testSourcePermissionIsRequiredEvenOnReplay(): void
+    {
+        $db = new InvoiceMemoryConnection();
+        $input = $this->source($db);
+        $actor = $this->actor(7, false);
+        $db->grants = ['7:admin:sales.invoices:create', '7:admin:sales.orders:read'];
+        $this->service($db)->create($actor, $input);
+        $db->grants = ['7:admin:sales.invoices:create'];
+        $this->reject(fn () => $this->service($db)->create($actor, $input), 'FORBIDDEN', 403);
         self::assertCount(1, $db->audit);
     }
 
-    public function testRegisteredRoutesReturnCorrectEnvelopesAndRetryOriginalStatus(): void
+    public function testEmptyOrderAndInactiveProductCannotCreateInvoice(): void
+    {
+        foreach (['empty', 'inactive'] as $fault) {
+            $db = new InvoiceMemoryConnection();
+            $input = $this->source($db);
+            if ($fault === 'empty') { $db->lines = []; }
+            else { $db->products[163]['IS_ACTIVE'] = 'N'; }
+            $this->reject(fn () => $this->service($db)->create($this->actor(), $input), 'VALIDATION_ERROR');
+            self::assertCount(1, $db->documents);
+            self::assertSame([], $db->links);
+        }
+    }
+
+    public function testLineAndAuditFailuresRollBackInvoiceAndClaim(): void
+    {
+        foreach (['line', 'audit'] as $fault) {
+            $db = new InvoiceMemoryConnection();
+            $input = $this->source($db);
+            if ($fault === 'line') { $db->failLine = 2; }
+            else { $db->failAudit = true; }
+            try { $this->service($db)->create($this->actor(), $input); self::fail('Failure must propagate.'); }
+            catch (DatabaseError) {}
+            self::assertCount(1, $db->documents);
+            self::assertCount(2, $db->lines);
+            self::assertSame([], $db->links);
+            self::assertSame([], $db->actions);
+            self::assertSame('0.00', $db->customers[1]['BALANCE']);
+        }
+    }
+
+    public function testDraftUpdateKeepsOrderLineageAndAllowsInvoiceNotes(): void
     {
         $db = new InvoiceMemoryConnection();
+        $input = $this->source($db);
+        $db->lines[101]['DESCRIPTION'] = '';
+        $service = $this->service($db);
+        $saved = $service->create($this->actor(), $input);
+        self::assertSame('', $saved['lines'][0]['description']);
+        $lines = array_map(static fn (array $line): array => array_intersect_key($line,
+            array_flip(['line_id', 'source_line_id', 'product_id', 'description', 'quantity', 'unit_price'])), $saved['lines']);
+        $edit = ['action_reference' => 'edit', 'expected_version' => 1, 'notes' => 'Invoice notes'];
+        foreach ([null, 'SO-OTHER'] as $source) {
+            $this->reject(fn () => $service->update($this->actor(), $saved['invoice_number'],
+                [...$edit, 'source_order_number' => $source]), 'VALIDATION_ERROR');
+        }
+        $changed = $lines;
+        $changed[0]['quantity'] = '1';
+        $this->reject(fn () => $service->update($this->actor(), $saved['invoice_number'],
+            [...$edit, 'lines' => $changed]), 'VALIDATION_ERROR');
+        $updated = $service->update($this->actor(), $saved['invoice_number'], $edit);
+        self::assertSame(2, $updated['current_version']);
+        self::assertSame('Invoice notes', $updated['notes']);
+        self::assertSame($saved['lines'], $updated['lines']);
+        self::assertSame($updated, $service->update($this->actor(), $saved['invoice_number'], $edit));
+    }
+
+    public function testDatesAndNotesUpdateWithoutReferenceOrLinesAndRejectStaleVersion(): void
+    {
+        $db = new InvoiceMemoryConnection();
+        $input = $this->source($db);
+        $service = $this->service($db);
+        $saved = $service->create($this->actor(), $input);
+        $lines = $db->lines;
+        $links = $db->links;
+        $edit = ['expected_version' => 1, 'invoice_date' => '2026-11-25',
+            'due_date' => '2026-11-25', 'notes' => 'Payment due on receipt.'];
+        $updated = $service->update($this->actor(), $saved['invoice_number'], $edit);
+        self::assertSame(2, $updated['current_version']);
+        self::assertSame($edit['invoice_date'], $updated['invoice_date']);
+        self::assertSame($edit['due_date'], $updated['due_date']);
+        self::assertSame($edit['notes'], $updated['notes']);
+        self::assertSame($lines, $db->lines);
+        self::assertSame($links, $db->links);
+        self::assertSame('0.00', $db->customers[1]['BALANCE']);
+        $this->reject(fn () => $service->update($this->actor(), $saved['invoice_number'], $edit), 'STALE_VERSION', 409);
+        foreach ([['invoice_date' => '2026-11-23'], ['due_date' => '2026-11-24'],
+            ['invoice_date' => null], ['notes' => null], ['action_reference' => '']] as $bad) {
+            $this->reject(fn () => $service->update($this->actor(), $saved['invoice_number'],
+                [...$edit, 'expected_version' => 2, ...$bad]), 'VALIDATION_ERROR');
+        }
+    }
+
+    public function testSubmitReturnDeleteAndRetriesPreserveBalanceAndSource(): void
+    {
+        $db = new InvoiceMemoryConnection();
+        $input = $this->source($db);
+        $service = $this->service($db);
+        $saved = $service->create($this->actor(), $input);
+        $number = $saved['invoice_number'];
+        $submit = ['action_reference' => 'submit', 'expected_version' => 1];
+        $submitted = $service->action($this->actor(), $number, 'submit', $submit);
+        self::assertSame($submitted, $service->action($this->actor(), $number, 'submit', $submit));
+        self::assertSame('23.50', $db->customers[1]['BALANCE']);
+        $service->action($this->actor(), $number, 'return_to_draft', ['action_reference' => 'return', 'expected_version' => 2]);
+        self::assertSame('0.00', $db->customers[1]['BALANCE']);
+        self::assertCount(1, $db->links);
+        $delete = ['action_reference' => 'delete', 'expected_version' => 3];
+        $deleted = $service->action($this->actor(), $number, 'delete', $delete);
+        self::assertSame($deleted, $service->action($this->actor(), $number, 'delete', $delete));
+        self::assertSame([], $db->links);
+        self::assertCount(2, $db->lines, 'Source Order lines survive deletion.');
+    }
+
+    public function testHttpCreateAcceptsOnlyOrderNumberAndSupportsExplicitReplay(): void
+    {
+        $db = new InvoiceMemoryConnection();
+        $input = $this->source($db);
         $api = new Api($db, Config::fromArray([]));
         $headers = ['authorization' => 'Bearer ' . str_repeat('a', 64), 'content-type' => 'application/json'];
-        self::assertSame(401, $api->handle('POST', '/api/v1/sales/invoices', $this->input())['status']);
-        // Match public/index.php: the outer body is an array; nested line objects are stdClass.
-        $input = get_object_vars(json_decode(json_encode([...$this->input(), 'invoice_date' => '2026-11-24']), false));
         $created = $api->handle('POST', '/api/v1/sales/invoices', $input, $headers);
         self::assertSame(201, $created['status']);
         $body = json_decode($created['body'], true, 512, JSON_THROW_ON_ERROR);
-        self::assertSame('create', $body['operation_id']);
         self::assertSame(1, $body['current_version']);
-        $number = $body['result']['invoice_number'];
-        $url = '/api/v1/sales/invoices/' . $number;
-        self::assertSame(200, $api->handle('GET', $url, [], $headers)['status']);
-        $updated = $api->handle('POST', $url . '/update', ['action_reference' => 'edit', 'expected_version' => 1,
-            'notes' => 'Edited', 'lines' => $this->editable($body['result'])], $headers);
-        self::assertSame(200, $updated['status']);
-        $submitted = $api->handle('POST', $url . '/submit', ['action_reference' => 'submit', 'expected_version' => 2], $headers);
-        self::assertSame(200, $submitted['status']);
-        self::assertSame(3, json_decode($submitted['body'], true)['current_version']);
+        self::assertSame('SO-1', $body['result']['source_order_number']);
         self::assertSame($created['body'], $api->handle('POST', '/api/v1/sales/invoices', $input, $headers)['body']);
-        $reordered = $input;
-        $reordered['lines'][0] = (object) array_reverse(get_object_vars($input['lines'][0]), true);
-        self::assertSame($created['body'], $api->handle('POST', '/api/v1/sales/invoices', $reordered, $headers)['body']);
-        self::assertSame(200, $api->handle('POST', $url . '/move-to-draft', ['action_reference' => 'return', 'expected_version' => 3], $headers)['status']);
-        $deleted = $api->handle('POST', $url . '/delete', ['action_reference' => 'delete', 'expected_version' => 4], $headers);
-        self::assertSame(200, $deleted['status']);
-        self::assertNull(json_decode($deleted['body'], true)['current_version']);
     }
 
-    #[DataProvider('invalidCreates')]
-    public function testInvalidCreatesDoNotPersist(array $changes): void
+    public function testLifecycleActionsWithoutReferencesRetainVersionAndDebtProtection(): void
     {
         $db = new InvoiceMemoryConnection();
-        $this->reject(fn () => $this->service($db)->create($this->actor(), [...$this->input(), ...$changes]), 'VALIDATION_ERROR');
-        self::assertSame([], $db->documents);
-        self::assertSame([], $db->actions);
+        $service = $this->service($db);
+        $saved = $service->create($this->actor(), $this->source($db));
+        $number = $saved['invoice_number'];
+        foreach (['submit', 'return_to_draft', 'delete'] as $action) {
+            $this->reject(fn () => $service->action($this->actor(), $number, $action, []), 'VALIDATION_ERROR');
+            $this->reject(fn () => $service->action($this->actor(), $number, $action,
+                ['expected_version' => 1, 'action_reference' => '']), 'VALIDATION_ERROR');
+        }
+        $submitted = $service->action($this->actor(), $number, 'submit', ['expected_version' => 1]);
+        self::assertSame('Submitted', $submitted['status']);
+        self::assertSame(2, $submitted['current_version']);
+        self::assertSame('23.50', $db->customers[1]['BALANCE']);
+        $this->reject(fn () => $service->action($this->actor(), $number, 'submit', ['expected_version' => 1]), 'STALE_VERSION', 409);
+        self::assertSame('23.50', $db->customers[1]['BALANCE']);
+        $returned = $service->action($this->actor(), $number, 'return_to_draft', ['expected_version' => 2]);
+        self::assertSame('Draft', $returned['status']);
+        self::assertSame(3, $returned['current_version']);
+        self::assertSame('0.00', $db->customers[1]['BALANCE']);
+        self::assertCount(1, $db->links);
+        $this->reject(fn () => $service->action($this->actor(), $number, 'return_to_draft', ['expected_version' => 2]), 'STALE_VERSION', 409);
+        $this->reject(fn () => $service->action($this->actor(), $number, 'delete', ['expected_version' => 2]), 'STALE_VERSION', 409);
+        $deleted = $service->action($this->actor(), $number, 'delete', ['expected_version' => 3]);
+        self::assertTrue($deleted['deleted']);
+        self::assertSame([], $db->links);
+        self::assertCount(1, $db->documents, 'Source Order is retained.');
+        self::assertCount(4, $db->audit, 'Only successful create/submit/return/delete are audited.');
+        self::assertSame('0.00', $db->customers[1]['BALANCE']);
     }
 
-    public static function invalidCreates(): array
+    public function testEligibleOrdersRouteTakesPriorityOverInvoiceNumberLookup(): void
     {
-        $line = ['product_id' => '163', 'description' => 'A', 'quantity' => '1', 'unit_price' => '1'];
-        return [[['lines' => []]], [['invoice_date' => '2026-02-30']], [['due_date' => '2026-11-23']],
-            [['notes' => null]], [['payment_terms' => 'INVALID']], [['document_total' => '1.00']],
-            [['warehouse_id' => 'OTHER']], [['lines' => [[...$line, 'quantity' => '0']]]],
-            [['lines' => [[...$line, 'product_id' => 163]]]],
-            [['lines' => [[...$line, 'product_id' => '0']]]],
-            [['lines' => [[...$line, 'product_id' => '0163']]]],
-            [['lines' => [[...$line, 'product_id' => '163.0']]]],
-            [['lines' => [[...$line, 'product_id' => '10000000000']]]],
-            [['lines' => [[...$line, 'product_id' => '999']]]],
-            [['lines' => [[...$line, 'item_code' => 'SKU-A']]]],
-            [['lines' => [[...$line, 'quantity' => '1.5']]]], [['lines' => [[...$line, 'unit_price' => '1.001']]]],
-            [['lines' => [[...$line, 'unit_price' => '9999999999.99', 'quantity' => '999999999']]]],
-            [['lines' => [[...$line, 'source_line_id' => '100']]]], [['lines' => [[...$line, 'line_id' => '1']]]]];
+        $api = new Api(new InvoiceMemoryConnection(), Config::fromArray([]));
+        $headers = ['authorization' => 'Bearer ' . str_repeat('a', 64)];
+        $response = $api->handle('GET', '/api/v1/sales/invoices/eligible-orders', [], $headers);
+        self::assertSame(200, $response['status']);
+        $body = json_decode($response['body'], true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame([], $body['result']['items']);
+        self::assertNull($body['current_version']);
     }
 }
-

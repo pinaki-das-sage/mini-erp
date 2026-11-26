@@ -41,6 +41,56 @@ final readonly class InvoiceService
         return new InvoiceWorkflow($this->connection, $this->businessDate);
     }
 
+    /** Read-only source lookup. Creation rechecks status and claims under the Order lock. */
+    public function eligibleOrders(Actor $actor, array $query = []): array
+    {
+        $permissions = new SalesPermissions(new Authorization($this->connection));
+        $permissions->requireDocument($actor, 'invoice', 'create');
+        $permissions->requireDocument($actor, 'order', 'read');
+        $page = Api::pagination($query, ['customer_code', 'warehouse_id', 'from_date', 'to_date']);
+        $binds = ['company_id' => $actor->companyId, 'offset_rows' => $page['offset'], 'limit_rows' => $page['page_size']];
+        $where = ["D.CNY# = :company_id", "D.DOCUMENT_TYPE = 'SALES_ORDER'", "D.STATUS = 'SUBMITTED'",
+            'NOT EXISTS (SELECT 1 FROM ME_OE_SOURCE_LINKS S WHERE S.CNY# = D.CNY# AND S.SOURCE_DOCUMENT_RECORD# = D.RECORD#)'];
+        foreach (['customer_code' => 'C.CUSTOMER_CODE', 'warehouse_id' => 'D.WAREHOUSE_ID'] as $field => $column) {
+            if (isset($page['filters'][$field])) {
+                $binds[$field] = Validation::text($page['filters'][$field], $field, 20);
+                $where[] = "$column = :$field";
+            }
+        }
+        foreach (['from_date', 'to_date'] as $field) {
+            if (isset($page['filters'][$field])) {
+                $binds[$field] = Validation::date($page['filters'][$field], $field);
+            }
+        }
+        if (isset($binds['from_date'], $binds['to_date'])) {
+            Validation::dateRange($binds['to_date'], $binds['from_date'], 'To Date', 'From Date');
+        }
+        if (isset($binds['from_date'])) { $where[] = "D.DOCUMENT_DATE >= TO_DATE(:from_date, 'YYYY-MM-DD')"; }
+        if (isset($binds['to_date'])) { $where[] = "D.DOCUMENT_DATE < TO_DATE(:to_date, 'YYYY-MM-DD') + 1"; }
+        $conditions = implode(' AND ', $where);
+        $rows = $this->connection->query("SELECT D.DOCUMENT_NUMBER AS ORDER_NUMBER, C.CUSTOMER_CODE, C.CUSTOMER_NAME,
+            D.WAREHOUSE_ID, TO_CHAR(D.DOCUMENT_DATE, 'YYYY-MM-DD') AS ORDER_DATE,
+            D.SHIPPING_ADDRESS, D.PAYMENT_TERMS, D.NOTES, D.VERSION,
+            TO_CHAR(NVL((SELECT SUM(ROUND(L.QUANTITY * L.UNIT_PRICE, 2)) FROM ME_OE_DOCUMENT_LINES L
+                WHERE L.CNY# = D.CNY# AND L.DOCUMENT_RECORD# = D.RECORD#), 0), " . InvoiceStore::MONEY . ") AS DOCUMENT_TOTAL
+            FROM ME_OE_DOCUMENTS D
+            JOIN ME_OE_CUSTOMERS C ON C.CNY# = D.CNY# AND C.RECORD# = D.CUSTOMER_RECORD#
+            WHERE $conditions ORDER BY D.DOCUMENT_DATE, D.DOCUMENT_NUMBER
+            OFFSET :offset_rows ROWS FETCH NEXT :limit_rows ROWS ONLY", $binds);
+        $items = array_map(static function (array $row): array {
+            if (!is_string($row['DOCUMENT_TOTAL'] ?? null)
+                || !preg_match('/\A[0-9]{1,16}\.[0-9]{2}\z/D', $row['DOCUMENT_TOTAL'])) {
+                throw new AppError('INVALID_INVOICE_DATA', 'Source Order total is unavailable.', 503);
+            }
+            return ['order_number' => $row['ORDER_NUMBER'], 'customer_code' => $row['CUSTOMER_CODE'],
+                'customer_name' => $row['CUSTOMER_NAME'], 'warehouse_id' => $row['WAREHOUSE_ID'],
+                'order_date' => $row['ORDER_DATE'], 'shipping_address' => $row['SHIPPING_ADDRESS'],
+                'payment_terms' => $row['PAYMENT_TERMS'], 'notes' => $row['NOTES'] ?? '',
+                'status' => 'Submitted', 'current_version' => (int) $row['VERSION'], 'document_total' => $row['DOCUMENT_TOTAL']];
+        }, $rows);
+        return ['items' => $items, 'page' => $page['page'], 'page_size' => $page['page_size']];
+    }
+
     public function list(Actor $actor, array $query = []): array
     {
         $permissions = new SalesPermissions(

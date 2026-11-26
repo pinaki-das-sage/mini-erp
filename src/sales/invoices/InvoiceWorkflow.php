@@ -45,9 +45,15 @@ final readonly class InvoiceWorkflow
 
     public function create(Actor $actor, array $input): array
     {
+        $this->permissions->requireDocument($actor, 'order', 'read');
+        // Like Order creation, the source number is the only required business input.
+        // Supplying a retry reference is optional; source claims still prevent duplicate Invoices.
+        if (!array_key_exists('action_reference', $input)) {
+            $input['action_reference'] = bin2hex(random_bytes(16));
+        }
         return $this->actions->run($actor, 'create', null, $input, function (TransactionContext $tx) use ($actor, $input): array {
-            $this->fields($input, true);
-            $draft = $this->draft->prepare($tx, $actor, $input);
+            Validation::allowedFields($input, ['source_order_number', 'action_reference']);
+            $draft = $this->draft->fromSubmittedOrder($tx, $actor, $input['source_order_number'] ?? null);
             $value = $tx->query("SELECT TO_CHAR(ME_OE_INVOICE_NO_SEQ.NEXTVAL, 'FM999999999999999') AS NUMBER_VALUE FROM DUAL")[0]['NUMBER_VALUE'] ?? null;
             if (!is_string($value) || !preg_match('/\A[1-9][0-9]{0,14}\z/D', $value)) {
                 throw new AppError('NUMBERING_UNAVAILABLE', 'Invoice Number could not be generated.', 503);
@@ -69,21 +75,28 @@ final readonly class InvoiceWorkflow
 
     public function update(Actor $actor, string $number, array $input): array
     {
+        if (!array_key_exists('action_reference', $input)) {
+            $input['action_reference'] = bin2hex(random_bytes(16));
+        }
         return $this->actions->run($actor, 'edit', $number, $input, function (TransactionContext $tx) use ($actor, $number, $input): array {
-            $this->fields($input, false);
+            $this->fields($input);
             $header = $this->store->header($tx, $actor, $this->number($number));
             $this->version($header, $input);
             DocumentRules::requireAction('invoice', 'edit', $this->status($header));
             $this->unused($tx, $actor, $header, 'edit');
-            $draft = $this->draft->prepare($tx, $actor, $input, $header);
-            $this->saveLines($tx, $actor, $header, $draft);
-            $this->saveSource($tx, $actor, $header['RECORD#'], $draft['source_id']);
-            $changed = $tx->execute("UPDATE ME_OE_DOCUMENTS SET CUSTOMER_RECORD# = :customer_id,
-                WAREHOUSE_ID = :warehouse, DOCUMENT_DATE = TO_DATE(:invoice_date, 'YYYY-MM-DD'),
-                PAYMENT_TERMS = :terms, DUE_DATE = TO_DATE(:due_date, 'YYYY-MM-DD'), NOTES = :notes,
-                SHIPPING_ADDRESS = :shipping, VERSION = VERSION + 1, WHENMODIFIED = CURRENT_TIMESTAMP
+            // Validate the retained lines from storage; updates never rewrite lines or source links.
+            $lines = array_map(static fn (array $line): array => [
+                'line_id' => $line['LINE_ID'], 'source_line_id' => $line['SOURCE_LINE_ID'],
+                'product_id' => (string) $line['PRODUCT_ID'], 'description' => $line['DESCRIPTION'] ?? '',
+                'quantity' => $line['SAVED_QUANTITY'], 'unit_price' => $line['SAVED_PRICE'],
+            ], $this->store->lines($tx, $actor, $header['RECORD#']));
+            $draft = $this->draft->prepare($tx, $actor, [...$input, 'lines' => $lines], $header);
+            $changed = $tx->execute("UPDATE ME_OE_DOCUMENTS SET DOCUMENT_DATE = TO_DATE(:invoice_date, 'YYYY-MM-DD'),
+                DUE_DATE = TO_DATE(:due_date, 'YYYY-MM-DD'), NOTES = :notes,
+                VERSION = VERSION + 1, WHENMODIFIED = CURRENT_TIMESTAMP
                 WHERE CNY# = :company_id AND RECORD# = :id AND VERSION = :version AND DOCUMENT_TYPE = 'SALES_INVOICE'",
-                ['company_id' => $actor->companyId, 'id' => $header['RECORD#'], 'version' => (int) $header['VERSION'], ...$this->headerBinds($draft)]);
+                ['company_id' => $actor->companyId, 'id' => $header['RECORD#'], 'version' => (int) $header['VERSION'],
+                    'invoice_date' => $draft['date'], 'due_date' => $draft['due'], 'notes' => $draft['notes']]);
             $this->changed($changed);
             return $this->snapshot($tx, $actor, $this->store->header($tx, $actor, $number));
         });
@@ -93,6 +106,9 @@ final readonly class InvoiceWorkflow
     {
         if (!in_array($action, ['submit', 'return_to_draft', 'delete'], true)) {
             throw new AppError('FORBIDDEN', 'This Invoice action is not supported.', 403);
+        }
+        if (!array_key_exists('action_reference', $input)) {
+            $input['action_reference'] = bin2hex(random_bytes(16));
         }
         return $this->actions->run($actor, $action, $number, $input, function (TransactionContext $tx) use ($actor, $number, $action, $input): array {
             Validation::allowedFields($input, ['action_reference', 'expected_version']);
@@ -143,11 +159,10 @@ final readonly class InvoiceWorkflow
         });
     }
 
-    private function fields(array $input, bool $create): void
+    private function fields(array $input): void
     {
-        Validation::allowedFields($input, ['action_reference', 'customer_code', 'warehouse_id', 'invoice_date',
-            'payment_terms', 'due_date', 'notes', 'source_order_number', 'lines', ...($create ? [] : ['expected_version'])]);
-        foreach (['customer_code', 'warehouse_id', 'invoice_date', 'payment_terms', 'due_date', 'notes'] as $field) {
+        Validation::allowedFields($input, ['action_reference', 'expected_version', 'invoice_date', 'due_date', 'notes']);
+        foreach (['invoice_date', 'due_date', 'notes'] as $field) {
             if (array_key_exists($field, $input) && !is_string($input[$field])) {
                 throw new AppError('VALIDATION_ERROR', $field . ' must be text.');
             }

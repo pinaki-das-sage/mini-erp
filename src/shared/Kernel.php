@@ -12,8 +12,7 @@ use MiniErp\shared\security\AuthService;
 use MiniErp\shared\security\Security;
 use MiniErp\shared\security\UserService;
 use MiniErp\shared\view\Renderer;
-use MiniErp\sales\customers\CustomerPages;
-use MiniErp\sales\invoices\InvoicePages;
+use MiniErp\sales\SalesPages;
 
 final class Kernel
 {
@@ -86,51 +85,13 @@ final class Kernel
                 }
                 return $this->page('shared/security/login.tpl', 'Sign in to Mini ERP');
             }
-            if (
-                $path === '/modules/sales/customers'
-                || str_starts_with($path, '/modules/sales/customers/')
-            ) {
+            if ($path === '/modules/sales' || str_starts_with($path, '/modules/sales/')) {
                 $actor = $this->actor();
-
-                return (new CustomerPages(
-                    $this->db(),
-                    $this->paths,
-                    Security::csrfToken($this->session),
-                ))->handle($method, $path, $actor, $input, $query);
-            }
-            if (
-                $path === '/modules/sales/invoices'
-                || str_starts_with($path, '/modules/sales/invoices/')
-            ) {
-                $actor = $this->actor();
-
-                return (new InvoicePages(
-                    $this->db(),
-                    $this->paths,
-                    Security::csrfToken($this->session),
-                ))->handle($method, $path, $actor, $input, $query);
+                return (new SalesPages($this->db(), $this->paths, Security::csrfToken($this->session)))
+                    ->handle($method, $path, $actor, $input, $query);
             }
             if ($method === 'GET' && preg_match('#^/modules/(inventory|purchasing|sales|logistics)$#', $path, $match)) {
-                $data = [
-                    'module' => $match[1],
-                    'actor' => $this->actor(),
-                ];
-
-                if ($match[1] === 'sales') {
-                    $data['salesUrls'] = [
-                        'customers' => $this->paths->url('/modules/sales/customers'),
-                        'quotes' => $this->paths->url('/modules/sales/quotes'),
-                        'orders' => $this->paths->url('/modules/sales/orders'),
-                        'invoices' => $this->paths->url('/modules/sales/invoices'),
-                        'payments' => $this->paths->url('/modules/sales/payments'),
-                    ];
-                }
-
-                return $this->page(
-                    $match[1] . '/index.tpl',
-                    ucfirst($match[1]),
-                    $data,
-                );
+                return $this->page($match[1] . '/index.tpl', ucfirst($match[1]), ['module' => $match[1], 'actor' => $this->actor()]);
             }
             if ($method === 'GET' && $path === '/login') {
                 return $this->page('shared/security/login.tpl', 'Sign in to Mini ERP');

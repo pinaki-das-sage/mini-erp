@@ -47,10 +47,8 @@ final class OraclePaymentTest extends TestCase
                 VALUES (:company_id, :code, 'Payment test fixture', 'Test address', 'Test city', 'India')",
                 ['company_id' => $actor->companyId, 'code' => $prefix]));
             $invoices = new InvoiceService($db, $clock);
-            $created = $invoices->create($actor, ['action_reference' => $prefix . '-create', 'customer_code' => $prefix,
-                'warehouse_id' => $products[0]['WAREHOUSE_ID'], 'lines' => [[
-                    'product_id' => (string) $products[0]['PRODUCT_ID'], 'description' => 'Payment test', 'quantity' => '2', 'unit_price' => '10.25',
-                ]]]);
+            SubmittedOrderFixture::create($db, $actor, $prefix, $products[0]);
+            $created = $invoices->create($actor, ['action_reference' => $prefix . '-create', 'source_order_number' => $prefix]);
             $invoiceNumber = $created['invoice_number'];
             $invoices->action($actor, $invoiceNumber, 'submit', ['action_reference' => $prefix . '-submit', 'expected_version' => 1]);
             (new TransactionManager($db))->run(static fn (TransactionContext $tx) => $tx->execute("UPDATE ME_OE_CUSTOMERS SET IS_ACTIVE = 'F'
@@ -116,6 +114,7 @@ final class OraclePaymentTest extends TestCase
                         $tx->execute("DELETE FROM ME_OE_DOCUMENTS WHERE CNY# = :company_id AND RECORD# = :id AND DOCUMENT_TYPE = 'SALES_INVOICE'", $binds);
                     }
                 }
+                SubmittedOrderFixture::delete($tx, $actor, $prefix);
                 foreach (['ME_AUDIT', 'ME_ACTIONS'] as $table) {
                     $tx->execute("DELETE FROM $table WHERE COMPANY_ID = :company_id AND ACTION_REFERENCE LIKE :pattern",
                         ['company_id' => $actor->companyId, 'pattern' => $prefix . '%']);

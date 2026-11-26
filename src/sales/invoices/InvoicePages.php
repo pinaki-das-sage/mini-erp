@@ -163,6 +163,7 @@ final readonly class InvoicePages
             'listUrl' => $listUrl,
             'salesUrl' => $this->paths->url('/modules/sales'),
             'createUrl' => $this->can($actor, SalesPermissions::DOCUMENTS['invoice'], 'create')
+                && $this->can($actor, SalesPermissions::DOCUMENTS['order'], 'read')
                 ? $this->paths->url(self::BASE . '/new')
                 : null,
             'previousUrl' => $invoices['page'] > 1
@@ -196,13 +197,14 @@ final readonly class InvoicePages
 
         if ($method === 'POST') {
             try {
-                $payload = $this->payload($input, !$isNew, true);
+                $payload = $this->payload($input, !$isNew);
 
                 $saved = $isNew
                     ? $this->invoices->create($actor, $payload)
                     : $this->invoices->update($actor, $number, $payload);
 
-                return $this->redirect($this->invoiceUrl($saved['invoice_number']));
+                return $this->redirect($this->can($actor, SalesPermissions::DOCUMENTS['invoice'], 'read')
+                    ? $this->invoiceUrl($saved['invoice_number']) : $this->paths->url('/modules/sales'));
             } catch (AppError $exception) {
                 if (!in_array($exception->status, [400, 404, 409], true)) {
                     throw $exception;
@@ -214,7 +216,7 @@ final readonly class InvoicePages
         }
 
         $invoice = $isNew
-            ? $this->blankInvoice()
+            ? ['invoice_number' => '', 'source_order_number' => '', 'current_version' => null]
             : $this->invoices->get($actor, $number);
 
         if (!$isNew && !in_array('edit', $invoice['available_actions'], true)) {
@@ -226,40 +228,26 @@ final readonly class InvoicePages
             );
         }
 
+        $expectedVersion = $invoice['current_version'];
         if ($method === 'POST') {
-            foreach ([
-                'customer_code', 'warehouse_id', 'invoice_date',
-                'due_date', 'payment_terms', 'notes',
-            ] as $field) {
-                if (isset($input[$field]) && is_string($input[$field])) {
-                    $invoice[$field] = $input[$field];
-                }
+            foreach (['source_order_number', 'invoice_date', 'due_date', 'notes'] as $field) {
+                if (isset($input[$field]) && is_string($input[$field])) { $invoice[$field] = $input[$field]; }
             }
-
-            if (isset($input['lines']) && is_array($input['lines'])) {
-                $invoice['lines'] = array_values($input['lines']);
+            // Retain the submitted revision on an edit error; do not silently overwrite concurrent edits.
+            if (!$isNew && is_string($input['expected_version'] ?? null) &&
+                preg_match('/\A[1-9][0-9]{0,9}\z/D', $input['expected_version'])) {
+                $expectedVersion = (int) $input['expected_version'];
             }
         }
-
-        $invoice = $this->prepareFormLines($invoice);
-        $options = $this->lookups->forForm($actor, $invoice);
-
-        if ($invoice['warehouse_id'] === '' && count($options['warehouses']) === 1) {
-            $invoice['warehouse_id'] = $options['warehouses'][0];
-        }
-
-        return $this->page('form', $isNew ? 'New invoice' : 'Edit draft invoice', $actor, [
-            ...$options,
-            'invoice' => $invoice,
-            'isLinked' => !empty($invoice['source_order_number']),
-            'emptyLine' => $this->emptyLine(),
+        $orders = $isNew ? $this->invoices->eligibleOrders($actor, ['page_size' => '100']) : ['items' => []];
+        if (!$isNew) { $invoice = $this->lookups->withProductLabels($actor, $invoice); }
+        return $this->page('form', $isNew ? 'New invoice from Order' : 'Edit draft invoice', $actor, [
+            'invoice' => $invoice, 'isNew' => $isNew, 'expectedVersion' => $expectedVersion,
+            'orders' => $orders['items'],
             'listUrl' => $this->paths->url(self::BASE),
-            'formUrl' => $isNew
-                ? $this->paths->url(self::BASE . '/new')
-                : $this->invoiceUrl($number, '/edit'),
+            'formUrl' => $isNew ? $this->paths->url(self::BASE . '/new') : $this->invoiceUrl($number, '/edit'),
             'scriptUrl' => $this->paths->url('/assets/sales/invoices.js'),
-            'actionReference' => bin2hex(random_bytes(16)),
-            'error' => $error,
+            'actionReference' => $this->reference($input), 'error' => $error,
         ], $status);
     }
 
@@ -282,7 +270,7 @@ final readonly class InvoicePages
                     $actor,
                     $number,
                     $definition['service'],
-                    $this->payload($input, true, false),
+                    $this->payload($input, true),
                 );
 
                 return $this->redirect(
@@ -318,7 +306,7 @@ final readonly class InvoicePages
             'actionTitle' => $definition['label'],
             'actionMessage' => $definition['message'],
             'submitLabel' => $definition['label'],
-            'actionReference' => bin2hex(random_bytes(16)),
+            'actionReference' => $this->reference($input),
             'error' => $error,
         ], $status);
     }
@@ -349,8 +337,6 @@ final readonly class InvoicePages
             'NET_30' => 'Net 30 days',
         ];
 
-        $invoiceQuery = '?' . http_build_query(['invoice_number' => $number]);
-
         return $this->page('detail', $number, $actor, [
             'invoice' => $invoice,
             'paymentTermsLabel' => $terms[$invoice['payment_terms']],
@@ -359,17 +345,13 @@ final readonly class InvoicePages
                 ? $this->invoiceUrl($number, '/edit')
                 : null,
             'actions' => $actions,
-            'recordPaymentUrl' => in_array('record_payment', $available, true)
-                ? $this->paths->url('/modules/sales/payments/new') . $invoiceQuery
-                : null,
-            'paymentHistoryUrl' => $this->can($actor, SalesPermissions::PAYMENTS, 'read')
-                ? $this->paths->url('/modules/sales/payments/history') . $invoiceQuery
-                : null,
+            'recordPaymentUrl' => null,
+            'paymentHistoryUrl' => null,
             'error' => $error,
         ], $status);
     }
 
-    private function payload(array $input, bool $versionRequired, bool $withLines): array
+    private function payload(array $input, bool $versionRequired): array
     {
         $payload = $input;
         unset($payload['csrf_token']);
@@ -390,99 +372,16 @@ final readonly class InvoicePages
             $payload['expected_version'] = (int) $version;
         }
 
-        if ($withLines) {
-            foreach (['payment_terms', 'due_date'] as $field) {
-                if (($payload[$field] ?? null) === '') {
-                    unset($payload[$field]);
-                }
-            }
-
-            if (!isset($payload['lines']) || !is_array($payload['lines'])) {
-                throw new AppError('VALIDATION_ERROR', 'Add at least one item line.');
-            }
-
-            $payload['lines'] = array_values($payload['lines']);
-
-            foreach ($payload['lines'] as &$line) {
-                if (!is_array($line)) {
-                    throw new AppError('VALIDATION_ERROR', 'Each invoice line must be an object.');
-                }
-
-                foreach (['line_id', 'source_line_id'] as $field) {
-                    if (($line[$field] ?? null) === '') {
-                        unset($line[$field]);
-                    }
-                }
-            }
-            unset($line);
-        }
+        if (($payload['due_date'] ?? null) === '') { unset($payload['due_date']); }
 
         return $payload;
     }
 
-    private function blankInvoice(): array
+    private function reference(array $input): string
     {
-        return [
-            'invoice_number' => '',
-            'current_version' => null,
-            'customer_code' => '',
-            'warehouse_id' => '',
-            'invoice_date' => ($this->businessDate)(),
-            'due_date' => '',
-            'payment_terms' => '',
-            'notes' => '',
-            'source_order_number' => null,
-            'document_total' => '0.00',
-            'lines' => [$this->emptyLine()],
-        ];
-    }
-
-    private function emptyLine(): array
-    {
-        return [
-            'line_id' => '',
-            'source_line_id' => '',
-            'product_id' => '',
-            'description' => '',
-            'quantity' => '1',
-            'unit_price' => '0.00',
-            'line_amount' => '0.00',
-        ];
-    }
-
-    private function prepareFormLines(array $invoice): array
-    {
-        $lines = [];
-        $total = 0;
-        $valid = true;
-
-        foreach ($invoice['lines'] as $inputLine) {
-            $line = $this->emptyLine();
-
-            if (is_array($inputLine)) {
-                foreach ($line as $field => $default) {
-                    if (isset($inputLine[$field]) && is_string($inputLine[$field])) {
-                        $line[$field] = $inputLine[$field];
-                    }
-                }
-            }
-
-            try {
-                $money = InvoiceMoney::line($line['quantity'], $line['unit_price']);
-                $line['line_amount'] = InvoiceMoney::format($money['cents']);
-                $total = InvoiceMoney::add($total, $money['cents']);
-            } catch (AppError) {
-                $line['line_amount'] = '-';
-                $valid = false;
-            }
-
-            $lines[] = $line;
-        }
-
-        $invoice['lines'] = $lines ?: [$this->emptyLine()];
-        $invoice['document_total'] = $valid ? InvoiceMoney::format($total) : '-';
-
-        return $invoice;
+        $reference = $input['action_reference'] ?? null;
+        return is_string($reference) && preg_match('/\A[A-Za-z0-9_-]{1,100}\z/D', $reference)
+            ? $reference : bin2hex(random_bytes(16));
     }
 
     private function can(Actor $actor, string $object, string $operation): bool

@@ -97,6 +97,9 @@ final class InvoiceMemoryConnection implements Connection
             $row = $this->actions[$company . ':' . $p['reference']] ?? null;
             return $row === null ? [] : [$row];
         }
+        if (str_contains($sql, 'AS ORDER_NUMBER') && str_contains($sql, 'NOT EXISTS')) {
+            return [];
+        }
         if (str_contains($sql, 'FROM ME_OE_DOCUMENTS D WHERE')) {
             self::requireLock($sql);
             $rows = array_values(array_filter($this->documents, static fn ($r) => $r['CNY#'] === $company
@@ -201,6 +204,8 @@ final class InvoiceMemoryConnection implements Connection
             if (isset($p['customer_id'])) {
                 $row = [...$row, 'CUSTOMER_RECORD#' => $p['customer_id'], 'WAREHOUSE_ID' => $p['warehouse'], 'SAVED_DATE' => $p['invoice_date'],
                     'SAVED_DUE_DATE' => $p['due_date'], 'PAYMENT_TERMS' => $p['terms'], 'NOTES' => $p['notes'], 'SHIPPING_ADDRESS' => $p['shipping']];
+            } elseif (isset($p['invoice_date'])) {
+                $row = [...$row, 'SAVED_DATE' => $p['invoice_date'], 'SAVED_DUE_DATE' => $p['due_date'], 'NOTES' => $p['notes']];
             } elseif (isset($p['status'])) { $row['STATUS'] = $p['status']; }
             $row['VERSION']++;
             $this->documents[$id] = $row;

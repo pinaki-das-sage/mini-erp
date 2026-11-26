@@ -15,11 +15,40 @@ final readonly class InvoiceDraft
 {
     public function __construct(private InvoiceStore $store, private \Closure $businessDate, private SalesPermissions $permissions) {}
 
+    /** Creation reads the complete saved Order under its lock; callers cannot supply copied values. */
+    public function fromSubmittedOrder(TransactionContext $tx, Actor $actor, mixed $number): array
+    {
+        $this->permissions->requireDocument($actor, 'order', 'read');
+        if (!is_string($number) || !preg_match('/\A[A-Za-z0-9_-]{1,20}\z/D', $number)) {
+            throw new AppError('VALIDATION_ERROR', 'Select a Submitted Sales Order.');
+        }
+        $source = $this->store->header($tx, $actor, $number, 'SALES_ORDER');
+        if ($source['STATUS'] !== 'SUBMITTED') {
+            throw new AppError('INVALID_STATE', 'Invoice creation requires a Submitted Sales Order.', 409);
+        }
+        $lines = $this->store->lines($tx, $actor, $source['RECORD#']);
+        return $this->prepare($tx, $actor, [
+            'source_order_number' => $number,
+            'invoice_date' => $source['SAVED_DATE'],
+            'notes' => $source['NOTES'] ?? '',
+            'lines' => array_map(static fn (array $line): array => [
+                'source_line_id' => $line['LINE_ID'],
+                'product_id' => (string) $line['PRODUCT_ID'],
+                'description' => $line['DESCRIPTION'] ?? '',
+                'quantity' => $line['SAVED_QUANTITY'],
+                'unit_price' => $line['SAVED_PRICE'],
+            ], $lines),
+        ]);
+    }
+
     public function prepare(TransactionContext $tx, Actor $actor, array $input, ?array $saved = null): array
     {
         $oldSource = $saved === null ? null : $this->store->source($tx, $actor, $saved['RECORD#']);
         $sourceNumber = array_key_exists('source_order_number', $input)
             ? $input['source_order_number'] : ($oldSource['DOCUMENT_NUMBER'] ?? null);
+        if ($saved !== null && ($oldSource === null || $sourceNumber !== $oldSource['DOCUMENT_NUMBER'])) {
+            throw new AppError('VALIDATION_ERROR', 'Invoice must retain its linked Sales Order.');
+        }
         if ($sourceNumber !== null) {
             $this->permissions->requireDocument($actor, 'order', 'read');
             $sourceNumber = Validation::text($sourceNumber, 'Source Order Number', 20);
@@ -120,7 +149,7 @@ final readonly class InvoiceDraft
             if (!is_string($productId) || preg_match('/\A[1-9][0-9]{0,9}\z/D', $productId) !== 1) {
                 throw new AppError('VALIDATION_ERROR', 'Product ID must be a positive numeric string such as "163".');
             }
-            $description = Validation::text($line['description'] ?? '', 'Description', 200);
+            $description = Validation::text($line['description'] ?? '', 'Description', 200, $source === null);
             $id = $line['line_id'] ?? null;
             if (array_key_exists('line_id', $line) && (!is_string($id) || !isset($existing[$id]) || isset($ids[$id]))) {
                 throw new AppError('VALIDATION_ERROR', 'Line ID must identify a distinct existing line of this Invoice.');
