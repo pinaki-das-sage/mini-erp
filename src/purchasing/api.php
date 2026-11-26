@@ -14,13 +14,13 @@ return static function (Api $api, Connection $connection): void {
     $api->register('GET', '/purchasing/vendors', 'purchasing.vendor', 'read', [$vendors, 'list']);
     $api->register('POST', '/purchasing/vendors', 'purchasing.vendor', 'create', [$vendors, 'create'], 201);
     $api->register('GET', '/purchasing/vendors/{id}', 'purchasing.vendor', 'read', [$vendors, 'get']);
-    $api->register('PATCH', '/purchasing/vendors/{id}', 'purchasing.vendor', 'update', [$vendors, 'update']);
+    $api->register('POST', '/purchasing/vendors/{id}', 'purchasing.vendor', 'update', [$vendors, 'update']);
 
     $documents = new PurchasingDocumentController(new PurchasingDocumentModel($connection));
     $api->register('GET', '/purchasing/documents', 'purchasing.document', 'read', [$documents, 'list']);
     $api->register('POST', '/purchasing/documents', 'purchasing.document', 'create', [$documents, 'create'], 201);
     $api->register('GET', '/purchasing/documents/{id}', 'purchasing.document', 'read', [$documents, 'get']);
-    $api->register('PATCH', '/purchasing/documents/{id}', 'purchasing.document', 'update', [$documents, 'update']);
+    $api->register('POST', '/purchasing/documents/{id}', 'purchasing.document', 'update', [$documents, 'update']);
 
     $entries = new PurchasingEntryController(new PurchasingDocumentModel($connection));
     $api->register('GET', '/purchasing/document-entries', 'purchasing.document_entry', 'read', [$entries, 'list']);

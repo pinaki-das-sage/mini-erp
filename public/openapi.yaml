@@ -331,7 +331,7 @@ paths:
           $ref: "#/components/responses/Unavailable"
       description: Enter the id returned by POST /purchasing/vendors to retrieve that vendor. In Swagger dummy
         mode, ID 101 is available initially and created vendors remain available until this tab reloads.
-    patch:
+    post:
       tags:
         - Vendors
       operationId: updateVendor
@@ -573,7 +573,7 @@ paths:
           $ref: "#/components/responses/PurchaseDocumentNotFound"
       description: "Returns the document with its entries array. Every entry doc_id matches the document id.
         Dummy documents: 201 and 202."
-    patch:
+    post:
       tags:
         - Purchasing Documents
       operationId: updatePurchaseDocument
@@ -731,7 +731,7 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/PurchaseDocumentEntryNotFound"
-      description: Read an entry by ID. Entries are created and updated through the parent document POST/PATCH.
+      description: Read an entry by ID. Entries are created and updated through the parent document POST operations.
 components:
   examples:
     PurchaseDocumentEntryRead:
@@ -1077,7 +1077,7 @@ components:
         country: United Kingdom
         payment_terms: net_30
     VendorUpdateRequest:
-      summary: Sample JSON request body for PATCH /purchasing/vendors/101
+      summary: Sample JSON request body for POST /purchasing/vendors/101
       value:
         status: inactive
         payment_terms: net_15
@@ -3889,7 +3889,7 @@ x-pdf-validation-review:
     - Documents use order/order_id, receiver/receiver_id and invoice/invoice_id. Only the selected type
       key is supplied. Entries use cnyid/id; identity and audit fields are generated.
   workflow_rules:
-    - Document POST creates the header and entries together. Document PATCH accepts payment_terms, status
+    - Document POST creates the header and entries together. Document update POST accepts payment_terms, status
       and entries. An existing entry ID permits description/notes updates; an entry without ID adds a new
       line.
     - Standalone document-entry endpoints support GET only. Parent links and generated identity/audit

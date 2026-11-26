@@ -369,21 +369,40 @@ final readonly class PurchasingDocumentModel
     /** @param array<string, mixed> $entry */
     private static function insertEntry(TransactionContext $tx, Actor $actor, string $documentId, array $entry): void
     {
-        $tx->execute(
-            'INSERT INTO ME_PUR_DOC_ENTRY
-                (CNYID, ID, DOC_ID, LINENO, PRODUCT_ID, DESCRIPTION, QUANTITY, UNITCOST, LINEAMOUNT,
-                 NOTES, CREATEDBY, MODIFIEDBY, WHENCREATED, WHENMODIFIED)
-             VALUES
-                (:company_id, :id, :doc_id, :lineno, :product_id, :description, :quantity, :unitcost,
-                 :lineamount, :notes, :created_by, :modified_by, SYSTIMESTAMP, SYSTIMESTAMP)',
-            [
-                'company_id' => $actor->companyId, 'id' => bin2hex(random_bytes(16)),
-                'doc_id' => $documentId, 'lineno' => $entry['lineno'], 'product_id' => $entry['product_id'],
-                'description' => $entry['description'], 'quantity' => $entry['quantity'],
-                'unitcost' => $entry['unitcost'], 'lineamount' => $entry['lineamount'],
-                'notes' => $entry['notes'] ?? null, 'created_by' => $actor->id, 'modified_by' => $actor->id,
-            ],
+        $products = $tx->query(
+            'SELECT PRODUCT_ID FROM ME_INV_PRODUCTS
+             WHERE COMPANY_ID = :company_id AND PRODUCT_ID = :product_id',
+            ['company_id' => $actor->companyId, 'product_id' => $entry['product_id']],
         );
+        if ($products === []) {
+            throw new AppError('VALIDATION_ERROR',
+                'product_id must reference an existing inventory product in this company.');
+        }
+
+        try {
+            $tx->execute(
+                'INSERT INTO ME_PUR_DOC_ENTRY
+                    (CNYID, ID, DOC_ID, LINENO, PRODUCT_ID, DESCRIPTION, QUANTITY, UNITCOST, LINEAMOUNT,
+                     NOTES, CREATEDBY, MODIFIEDBY, WHENCREATED, WHENMODIFIED)
+                 VALUES
+                    (:company_id, :id, :doc_id, :lineno, :product_id, :description, :quantity, :unitcost,
+                     :lineamount, :notes, :created_by, :modified_by, SYSTIMESTAMP, SYSTIMESTAMP)',
+                [
+                    'company_id' => $actor->companyId, 'id' => bin2hex(random_bytes(16)),
+                    'doc_id' => $documentId, 'lineno' => $entry['lineno'], 'product_id' => $entry['product_id'],
+                    'description' => $entry['description'], 'quantity' => $entry['quantity'],
+                    'unitcost' => $entry['unitcost'], 'lineamount' => $entry['lineamount'],
+                    'notes' => $entry['notes'] ?? null, 'created_by' => $actor->id, 'modified_by' => $actor->id,
+                ],
+            );
+        } catch (DatabaseError $error) {
+            // The reference can disappear after the lookup; the FK remains authoritative.
+            if ($error->oracleCode === 2291) {
+                throw new AppError('VALIDATION_ERROR',
+                    'The product or document reference no longer exists in this company. Reload and try again.');
+            }
+            throw $error;
+        }
     }
 
     /** @param list<array<string, mixed>> $entries */
