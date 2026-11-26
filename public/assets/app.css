@@ -44,3 +44,15 @@ legend { font-weight: bold; }
   header { padding: 1rem; }
   .brand { font-size: 1.2rem; }
 }
+
+/* Purchasing uses the shared application shell and panel styles. */
+.purchasing-nav, .purchasing-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; }
+.purchasing-toolbar h2 { margin-right: auto; }
+.purchasing-nav [aria-pressed="false"] { background: #e8eef3; color: #075a80; }
+.purchasing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 0 1rem; }
+.purchasing-grid label { max-width: none; min-width: 0; }
+#purchasing [hidden] { display: none !important; }
+#purchasing caption { text-align: left; padding: .75rem 0; font-weight: bold; }
+#purchasing-detail-fields { display: grid; grid-template-columns: minmax(100px, 1fr) 3fr; gap: .6rem; overflow-wrap: anywhere; }
+#purchasing-detail-fields dt { font-weight: bold; }
+#purchasing-detail-fields dd { margin: 0; white-space: pre-wrap; }

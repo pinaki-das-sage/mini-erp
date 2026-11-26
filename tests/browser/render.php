@@ -8,6 +8,7 @@ use MiniErp\shared\view\Renderer;
 require dirname(__DIR__, 2) . '/vendor/autoload.php';
 
 $template = match ($argv[1] ?? '') {
+    'purchasing' => 'purchasing/index.tpl',
     'user-new' => 'shared/settings/users/create.tpl',
     'user-edit' => 'shared/settings/users/edit.tpl',
     'users' => 'shared/settings/users/list.tpl',

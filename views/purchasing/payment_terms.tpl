@@ -1,0 +1,1 @@
+<label>Payment terms <select name="payment_terms" required><option value="net_30">Net 30</option><option value="net_15">Net 15</option><option value="due_on_receipt">Due on receipt</option></select></label>

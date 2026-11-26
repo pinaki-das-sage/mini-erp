@@ -125,6 +125,16 @@ final class Kernel
             if (str_starts_with($path, '/settings/') || str_starts_with($path, '/api/settings/')) {
                 return $this->settings($method, $path, $input, $headers);
             }
+            if (str_starts_with($path, '/api/purchasing/')) {
+                $actor = $this->actor();
+                if ($method !== 'GET') {
+                    Security::verifyCsrf($this->session, $headers['x-csrf-token'] ?? null);
+                }
+                $result = (new \MiniErp\purchasing\Controller\PurchasingWebController($this->db()))
+                    ->handle($actor, $method, $path, $input, $query);
+                return $this->json(200,
+                    ['success' => true, 'result' => $result, 'error' => null]);
+            }
             if ($method === 'POST' && $path === '/api/note') {
                 Security::verifyCsrf($this->session, $headers['x-csrf-token'] ?? null);
                 $actor = $this->actor();
