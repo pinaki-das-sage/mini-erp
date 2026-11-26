@@ -182,7 +182,7 @@ final readonly class PurchasingDocumentModel
                         $tx->execute(
                             "UPDATE ME_PUR_DOC
                              SET TOTAL = :total,
-                                 AMOUNTDUE = CASE WHEN LOWER(RECORDTYPE) = 'invoice' THEN :amountdue ELSE AMOUNTDUE END,
+                                 AMOUNTDUE = CASE WHEN LOWER(RECORDTYPE) = 'invoice' THEN CAST(:amountdue AS NUMBER(38,2)) ELSE AMOUNTDUE END,
                                  MODIFIEDBY = :modified_by, WHENMODIFIED = SYSTIMESTAMP
                              WHERE CNYID = :company_id AND ID = :id",
                             [
