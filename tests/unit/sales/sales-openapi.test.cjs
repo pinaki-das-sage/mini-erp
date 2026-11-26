@@ -43,6 +43,12 @@ test('Customer contract matches the updated backend without changing login compa
   assert(!schemas.CustomerCreateRequest.required.includes('action_reference'));
   assert(!schemas.CustomerCreateRequest.required.includes('customer_code'));
   assert.equal(schemas.CustomerCreateRequest.allOf[1].properties.customer_code, undefined);
+  assert.equal(schemas.CustomerCreateRequest.allOf[1].properties.action_reference.$ref, '#/components/schemas/ActionReference');
+  assert.equal(schemas.CustomerUpdateRequest.allOf[1].properties.action_reference.$ref, '#/components/schemas/ActionReference');
+  assert.deepEqual(
+    schemas.CustomerUpdateRequest.anyOf.map(branch => branch.required[0]).sort(),
+    Object.keys(schemas.CustomerDetails.properties).sort(),
+  );
   assert.equal(schemas.Customer.allOf[1].properties.customer_code.readOnly, true);
   assert.equal(operation('/sales/customers').requestBody.content['application/json'].example.customer_code, undefined);
   assert(!(schemas.CustomerUpdateRequest.required || []).includes('action_reference'));

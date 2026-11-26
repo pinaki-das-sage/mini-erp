@@ -363,12 +363,21 @@ final class ApiFrameworkTest extends TestCase
         $code = '$_ENV["APP_BASE_PATH"] = "/"; $_SERVER["SCRIPT_NAME"] = "/index.php"; $_SERVER["REQUEST_URI"] = "/api/v1/auth/me";'
             . '$_SERVER["REQUEST_METHOD"] = "GET"; function getallheaders() { return []; }'
             . 'register_shutdown_function(function () { echo "|session=" . session_status(); }); require ' . var_export($entry, true) . ';';
-        $output = [];
-        $exit = 0;
-        exec(escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($code), $output, $exit);
-        self::assertSame(0, $exit);
-        self::assertStringContainsString('UNAUTHENTICATED', implode("\n", $output));
-        self::assertStringEndsWith('|session=' . PHP_SESSION_NONE, implode("\n", $output));
+        $process = proc_open(
+            [PHP_BINARY, '-r', $code],
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+        );
+        self::assertIsResource($process);
+        fclose($pipes[0]);
+        $output = stream_get_contents($pipes[1]);
+        $errors = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exit = proc_close($process);
+        self::assertSame(0, $exit, $errors);
+        self::assertStringContainsString('UNAUTHENTICATED', $output);
+        self::assertStringEndsWith('|session=' . PHP_SESSION_NONE, $output);
     }
 
     public function testSecurityRevocationDuringServiceExecutionReturns401(): void

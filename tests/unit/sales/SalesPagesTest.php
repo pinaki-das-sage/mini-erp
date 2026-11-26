@@ -58,7 +58,7 @@ final class SalesPagesTest extends TestCase
         self::assertStringContainsString('href="/training/modules/sales/customers"', $response['body']);
         self::assertStringContainsString('href="/training/modules/sales/invoices"', $response['body']);
         self::assertStringNotContainsString('href="/training/modules/sales/quotes"', $response['body']);
-        self::assertStringNotContainsString('href="/training/modules/sales/payments"', $response['body']);
+        self::assertStringContainsString('href="/training/modules/sales/payments"', $response['body']);
         self::assertSame(200, $kernel->handle('GET', '/training/modules/inventory', [])['status']);
         self::assertSame(404, $kernel->handle('GET', '/training/modules/sales/customers-extra', [])['status']);
         $anonymous = [];
@@ -154,7 +154,22 @@ final class SalesPagesTest extends TestCase
         self::assertStringContainsString('&lt;Unsaved&gt;', $response['body']);
         self::assertStringContainsString('value="invoice-stale"', $response['body']);
         self::assertSame('Updated notes', (new InvoiceService($db))->get($this->actor(), $number)['notes']);
-        self::assertStringNotContainsString('/modules/sales/payments', $pages->handle('GET', $base . '/' . $number, $this->actor(), [], [])['body']);
+                $detail = $pages->handle(
+            'GET',
+            $base . '/' . $number,
+            $this->actor(),
+            [],
+            [],
+        );
+
+        self::assertStringContainsString(
+            '/modules/sales/payments/history?invoice_number=',
+            $detail['body'],
+        );
+        self::assertStringNotContainsString(
+            '/modules/sales/payments/new?invoice_number=',
+            $detail['body'],
+        );
     }
 
     public function testInvoiceConfirmationActionsUseVersionsAndExistingWorkflow(): void

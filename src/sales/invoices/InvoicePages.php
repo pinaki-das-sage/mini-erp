@@ -336,7 +336,9 @@ final readonly class InvoicePages
             'NET_15' => 'Net 15 days',
             'NET_30' => 'Net 30 days',
         ];
-
+        $invoiceQuery = '?' . http_build_query([
+            'invoice_number' => $number,
+        ]);
         return $this->page('detail', $number, $actor, [
             'invoice' => $invoice,
             'paymentTermsLabel' => $terms[$invoice['payment_terms']],
@@ -345,8 +347,16 @@ final readonly class InvoicePages
                 ? $this->invoiceUrl($number, '/edit')
                 : null,
             'actions' => $actions,
-            'recordPaymentUrl' => null,
-            'paymentHistoryUrl' => null,
+            'recordPaymentUrl' => in_array('record_payment', $available, true)
+                ? $this->paths->url('/modules/sales/payments/new') . $invoiceQuery
+                : null,
+            'paymentHistoryUrl' => $this->can(
+                $actor,
+                SalesPermissions::PAYMENTS,
+                'read',
+            )
+                ? $this->paths->url('/modules/sales/payments/history') . $invoiceQuery
+                : null,
             'error' => $error,
         ], $status);
     }
