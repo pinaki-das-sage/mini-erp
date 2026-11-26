@@ -18,13 +18,15 @@
         <a class="button" href="{$data.salesUrls.quotes}">
             View quotes
         </a>
-        {else}<p>Coming soon.</p>{/if}
+        {else}<p>No read access.</p>{/if}
     </article>
 
     <article>
         <h2>Orders</h2>
-        <p><strong>Under construction</strong></p>
-        <p>Order processing and Logistics integration are being verified.</p>
+        <p>Create Orders from Submitted Quotes and follow their fulfillment.</p>
+        {if isset($data.salesUrls.orders)}
+        <a class="button" href="{$data.salesUrls.orders}">View orders</a>
+        {else}<p>No read access.</p>{/if}
     </article>
 
     <article>

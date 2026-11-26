@@ -121,7 +121,8 @@ final readonly class OrderService
 
     private function listing(Actor $actor, array $query, bool $sources): array
     {
-        $page = Api::pagination($query, ['customer_code', 'warehouse_id', 'from_date', 'to_date', ...($sources ? [] : ['status'])]);
+        $numberFilter = $sources ? 'quote_number' : 'order_number';
+        $page = Api::pagination($query, [$numberFilter, 'customer_code', 'warehouse_id', 'from_date', 'to_date', ...($sources ? [] : ['status'])]);
         $where = 'D.CNY# = :company_id AND D.DOCUMENT_TYPE = :document_type';
         $binds = ['company_id' => $actor->companyId, 'document_type' => $sources ? 'SALES_QUOTE' : 'SALES_ORDER',
             'offset_rows' => $page['offset'], 'limit_rows' => $page['page_size']];
@@ -140,6 +141,10 @@ final readonly class OrderService
             if (in_array($key, ['from_date', 'to_date'], true)) {
                 Validation::date($value, $key);
                 $where .= ' AND D.DOCUMENT_DATE ' . ($key === 'from_date' ? '>=' : '<=') . " TO_DATE(:$key, 'YYYY-MM-DD')";
+            } elseif ($key === $numberFilter) {
+                $value = Validation::text($value, $sources ? 'Quote Number' : 'Order Number', 20);
+                if (!preg_match('/\A[A-Za-z0-9_-]{1,20}\z/D', $value)) { throw new AppError('VALIDATION_ERROR', 'Enter a valid document number.'); }
+                $where .= " AND D.DOCUMENT_NUMBER = :$numberFilter";
             } elseif ($key === 'status') {
                 $value = array_search($value, self::STATUSES, true);
                 if ($value === false) { throw new AppError('VALIDATION_ERROR', 'Select a valid Order status.'); }
@@ -207,7 +212,6 @@ final readonly class OrderService
         if (!in_array($action, ['submit', 'return_to_draft', 'delete'], true)) { throw new AppError('VALIDATION_ERROR', 'Select a valid Order action.'); }
         if ($action === 'submit') {
             $this->permissions()->requireDocument($actor, 'quote', 'read');
-            $this->permissions()->requireDocument($actor, 'invoice', 'create');
         }
         return $this->write($actor, $action, $number, $input, function (TransactionContext $tx) use ($actor, $number, $action, $input): array {
             Validation::allowedFields($input, ['action_reference', 'expected_version']);
@@ -252,14 +256,7 @@ final readonly class OrderService
             $tx->execute("UPDATE ME_OE_DOCUMENTS SET STATUS = :status, VERSION = VERSION + 1, WHENMODIFIED = CURRENT_TIMESTAMP
                 WHERE CNY# = :company_id AND RECORD# = :id AND DOCUMENT_TYPE = 'SALES_ORDER'",
                 [...$binds, 'status' => $action === 'submit' ? 'SUBMITTED' : 'DRAFT']);
-            $invoiceNumber = null;
-            if ($action === 'submit') {
-                try { $invoiceNumber = $this->invoices->createDraftFromSubmittedOrder($tx, $actor, (string) $row['RECORD#']); }
-                catch (DatabaseError) { throw new AppError('INVOICE_UNAVAILABLE', 'Unable to create the linked Draft Invoice.', 503); }
-            }
-            $result = $this->present($tx, $actor, $this->document($tx, $actor, $number, 'SALES_ORDER'), $source);
-            if ($invoiceNumber !== null) { $result['invoice_number'] = $invoiceNumber; }
-            return $result;
+            return $this->present($tx, $actor, $this->document($tx, $actor, $number, 'SALES_ORDER'), $source);
         });
     }
 
@@ -556,7 +553,6 @@ final readonly class OrderService
                 $this->permissions()->requireDocument($actor, 'order', $action === 'move_to_draft' ? 'return_to_draft' : $action);
                 if ($action === 'submit') {
                     $this->permissions()->requireDocument($actor, 'quote', 'read');
-                    $this->permissions()->requireDocument($actor, 'invoice', 'create');
                 }
                 return true;
             } catch (AppError $error) { if ($error->errorCode !== 'FORBIDDEN') { throw $error; } return false; }

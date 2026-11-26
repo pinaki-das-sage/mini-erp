@@ -56,7 +56,7 @@ final class InventoryOrderAdapterTest extends TestCase
         self::assertCount(2, $db->reservations);
         self::assertSame($submitted['body'], $api->handle('POST', $url . '/submit', $request, $headers)['body']);
         self::assertCount(2, $db->reservations); self::assertCount(2, $db->sales->audit);
-        self::assertCount(3, $db->sales->documents); // One Draft Invoice on Submit.
+        self::assertCount(2, $db->sales->documents); // Submission reserves stock without creating an Invoice.
         self::assertSame(['move_to_draft'], $result['available_actions']);
         $returned = $api->handle('POST', $url . '/move-to-draft', ['expected_version' => 2], $headers);
         self::assertSame(200, $returned['status'], $returned['body']);
@@ -71,8 +71,14 @@ final class InventoryOrderAdapterTest extends TestCase
     {
         $db = new ReservationMemoryConnection(); $db->balances[163]['ON_HAND'] = 3;
         $service = $this->service($db); $order = $this->create($service);
-        $this->reject(fn () => $service->action($this->actor(), $order['order_number'], 'submit',
-            ['expected_version' => 1, 'action_reference' => 'shortage']), 'INSUFFICIENT_STOCK');
+        try {
+            $service->action($this->actor(), $order['order_number'], 'submit', ['expected_version' => 1, 'action_reference' => 'shortage']);
+            self::fail('Expected stock shortage');
+        } catch (AppError $error) {
+            self::assertSame('INSUFFICIENT_STOCK', $error->errorCode);
+            self::assertSame(409, $error->status);
+            self::assertStringContainsString('Product ID 163:', $error->getMessage());
+        }
         self::assertSame(['ON_HAND' => 3, 'RESERVED' => 0], $db->balances[163]);
         self::assertSame([], $db->reservations); self::assertCount(1, $db->sales->actions);
         self::assertSame($order, $service->get($this->actor(), $order['order_number']));
@@ -92,6 +98,23 @@ final class InventoryOrderAdapterTest extends TestCase
         self::assertSame(array_column($changed['lines'], 'line_id'), array_column($submitted['lines'], 'line_id'));
     }
 
+    public function testApiShortageIdentifiesTheActualFailingProduct(): void
+    {
+        $db = new ReservationMemoryConnection(); $service = $this->service($db); $order = $this->create($service);
+        $service->update($this->actor(), $order['order_number'], ['expected_version' => 1, 'lines' => [
+            ['product_id' => '163', 'description' => 'Available product', 'quantity' => '1', 'unit_price' => '1'],
+            ['product_id' => '268', 'description' => 'Short product', 'quantity' => '999', 'unit_price' => '1'],
+        ]]);
+        $headers = ['authorization' => 'Bearer ' . str_repeat('a', 64), 'content-type' => 'application/json'];
+        $response = (new Api($db, Config::fromArray([])))->handle('POST', '/api/v1/sales/orders/' . $order['order_number'] . '/submit', ['expected_version' => 2], $headers);
+        self::assertSame(409, $response['status']);
+        $error = json_decode($response['body'], true)['error'];
+        self::assertSame('INSUFFICIENT_STOCK', $error['code']);
+        self::assertStringContainsString('Product ID 268:', $error['message']);
+        self::assertSame(0, $db->balances[163]['RESERVED']);
+        self::assertSame([], $db->reservations);
+    }
+
     public function testProductReferencesAndInventoryPermissionAreEnforced(): void
     {
         foreach (['inactive', 'warehouse', 'missing'] as $failure) {
@@ -107,8 +130,6 @@ final class InventoryOrderAdapterTest extends TestCase
         $db->sales->grants = ['sales.orders:submit', 'sales.quotes:read'];
         $this->reject(fn () => $service->action($this->actor(false), $order['order_number'], 'submit', ['expected_version' => 1]), 'FORBIDDEN');
         $db->sales->grants[] = 'inventory.reservations:reserve';
-        $this->reject(fn () => $service->action($this->actor(false), $order['order_number'], 'submit', ['expected_version' => 1]), 'FORBIDDEN');
-        $db->sales->grants[] = 'sales.invoices:create';
         self::assertSame('Submitted', $service->action($this->actor(false), $order['order_number'], 'submit', ['expected_version' => 1])['status']);
     }
 
@@ -125,7 +146,7 @@ final class InventoryOrderAdapterTest extends TestCase
         self::assertSame(['RELEASED', 'RELEASED'], array_column($db->reservations, 'RESERVATION_STATUS'));
         $submitted = $ready->action($this->actor(), $order['order_number'], 'submit', ['expected_version' => 3]);
         self::assertSame('Submitted', $submitted['status']); self::assertCount(4, $db->reservations);
-        self::assertSame(4, $db->balances[163]['RESERVED']); self::assertCount(2, $db->sales->links);
+        self::assertSame(4, $db->balances[163]['RESERVED']); self::assertCount(1, $db->sales->links);
     }
 
     public function testReservationByIdKeepsReleasedHistorySeparateFromCurrentDraftClaims(): void

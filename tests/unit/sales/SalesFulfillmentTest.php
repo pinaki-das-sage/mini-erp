@@ -9,6 +9,7 @@ use MiniErp\sales\orders\InventoryOrderAdapter;
 use MiniErp\sales\orders\LogisticsOrderProvider;
 use MiniErp\sales\orders\OrderService;
 use MiniErp\sales\orders\SalesFulfillment;
+use MiniErp\sales\invoices\OrderInvoiceService;
 use MiniErp\shared\AppError;
 use MiniErp\shared\database\Connection;
 use MiniErp\shared\database\TransactionContext;
@@ -21,7 +22,7 @@ require_once __DIR__ . '/InventoryOrderAdapterTest.php';
 final class SalesFulfillmentTest extends TestCase
 {
     private function actor(): Actor { return new Actor('admin', 'admin', [], 7, true); }
-    private function setupOrder(): array
+    private function setupOrder(bool $withInvoice = true): array
     {
         $db = new FulfillmentMemoryConnection(); $provider = $db->logistics;
         $reservations = new ReservationService($db, $provider->getPlannedQuantity(...));
@@ -29,6 +30,10 @@ final class SalesFulfillmentTest extends TestCase
             static fn (): string => '2026-11-25');
         $order = $orders->create($this->actor(), ['source_quote_number' => 'SQ-000000000000010']);
         $order = $orders->action($this->actor(), $order['order_number'], 'submit', ['expected_version' => 1]);
+        if ($withInvoice) {
+            (new TransactionManager($db))->run(fn (TransactionContext $tx): string =>
+                (new OrderInvoiceService($db))->createDraftFromSubmittedOrder($tx, $this->actor(), '11'));
+        }
         return [$db, $provider, $reservations, $orders, new SalesFulfillment($db, $provider, $reservations), $order];
     }
     private function input(array $order, int $version, string $reference): array
@@ -122,7 +127,20 @@ final class SalesFulfillmentTest extends TestCase
         self::assertCount(3, $db->inventory->sales->documents);
     }
 
-    public function testDeliveryPreservesTheInvoiceCreatedAtOrderSubmission(): void
+    public function testDeliveryWithoutAnInvoiceDoesNotCreateOne(): void
+    {
+        $setup = $this->setupOrder(false); [$db, $provider, , , $service, $order] = $setup;
+        $this->assign($setup); $this->dispatch($setup);
+        $closed = (new TransactionManager($db))->run(function (TransactionContext $tx) use ($provider, $service, $order): array {
+            $service->lockOrderForEvent($tx, $this->actor(), $order['order_number'], 'delivery');
+            $provider->assignments = $this->facts($order, 'Delivered');
+            return $service->recordDelivery($tx, $this->actor(), $order['order_number'], $this->input($order, 4, 'delivery-no-invoice'));
+        });
+        self::assertSame('Closed', $closed['status']);
+        self::assertCount(2, $db->inventory->sales->documents);
+    }
+
+    public function testDeliveryPreservesTheManuallyCreatedInvoice(): void
     {
         $setup = $this->setupOrder(); [$db, $provider, , , $service, $order] = $setup;
         self::assertSame('DRAFT', $db->inventory->sales->documents[12]['STATUS']);

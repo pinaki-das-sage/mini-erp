@@ -1,14 +1,18 @@
-<p><a href="{$data.salesUrl}">Back to Sales</a></p>
-
-{if $data.createUrl}
-    <p>
-        <a class="button" href="{$data.createUrl}">New invoice</a>
-    </p>
-{/if}
+<link rel="stylesheet" href="{$data.dateRangeStyleUrl}">
+<link rel="stylesheet" href="{$data.styleUrl}">
+<div class="sales-document">
+    <div class="document-toolbar">
+        <a href="{$data.salesUrl}">Back to Sales</a>
+        {if $data.createUrl}<a class="button" href="{$data.createUrl}">New Invoice</a>{/if}
+    </div>
+</div>
 
 <div class="panel">
     <form method="get" action="{$data.listUrl}">
         <div class="filters">
+            <label>Invoice number
+                <input name="invoice_number" maxlength="20" value="{$data.filters.invoice_number}" placeholder="SI-000000000000001">
+            </label>
             <label>
                 Customer code
                 <input type="text" name="customer_code" maxlength="20"
@@ -51,17 +55,7 @@
         </div>
 
         <div class="filters">
-            <label>
-                Invoice date from
-                <input type="date" name="from_date"
-                       value="{$data.filters.from_date}">
-            </label>
-
-            <label>
-                Invoice date to
-                <input type="date" name="to_date"
-                       value="{$data.filters.to_date}">
-            </label>
+            {include file='sales/documents/date_range.tpl'}
         </div>
 
         <button type="submit">Search</button>
@@ -120,3 +114,4 @@
         <a class="button" href="{$data.nextUrl}">Next</a>
     {/if}
 </nav>
+<script src="{$data.dateRangeScriptUrl}" defer></script>

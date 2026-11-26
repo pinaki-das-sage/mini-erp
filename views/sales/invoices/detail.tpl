@@ -25,9 +25,6 @@
         <dt>Customer code</dt>
         <dd>{$data.invoice.customer_code}</dd>
 
-        <dt>Warehouse</dt>
-        <dd>{$data.invoice.warehouse_id}</dd>
-
         <dt>Invoice date</dt>
         <dd>{$data.invoice.invoice_date}</dd>
 

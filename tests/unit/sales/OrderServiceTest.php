@@ -173,7 +173,8 @@ final class OrderServiceTest extends TestCase
         $submitted = $service->action($this->actor(), $number, 'submit', $request);
         self::assertSame('Submitted', $submitted['status']); self::assertCount(2, $db->reservations);
         self::assertSame($submitted, $service->action($this->actor(), $number, 'submit', $request));
-        self::assertCount(3, $db->documents); // Quote + Order + Draft Invoice.
+        self::assertCount(2, $db->documents); // Quote + Order; Invoice creation is separate.
+        self::assertArrayNotHasKey('invoice_number', $submitted);
         $this->reject(fn () => $service->action($this->actor(), $number, 'submit', ['expected_version' => 2]), 'INVALID_STATE');
         $reservations = $db->reservations;
         $db->assigned = true;
@@ -215,7 +216,7 @@ final class OrderServiceTest extends TestCase
             $read = $service->get($this->actor(), $number);
             self::assertSame($public, $read['status']); self::assertSame([], $read['available_actions']);
             self::assertSame('9', $read['lines'][0]['trip_reference']); self::assertTrue($read['lines'][0]['trip_assigned']);
-            self::assertCount(3, $db->documents); // Reading Closed must not create another Invoice.
+            self::assertCount(2, $db->documents); // Reading Closed must not create an Invoice.
             $this->reject(fn () => $service->action($this->actor(), $number, 'return_to_draft', ['expected_version' => 2]), 'INVALID_STATE');
         }
     }
@@ -391,6 +392,18 @@ final class OrderMemoryConnection implements Connection
         if (!isset($p['company_id']) || !str_contains($sql, 'CNY# = :company_id') && !str_contains($sql, 'COMPANY_ID = :company_id')) { throw new \LogicException('Unscoped read: ' . $sql); }
         if (str_contains($sql, 'FROM ME_ACTIONS')) { $r = $this->actions[$p['company_id'] . ':' . $p['reference']] ?? null; return $r ? [$r] : []; }
         if (str_contains($sql, 'FROM ME_OE_CUSTOMERS')) { return $p['company_id'] === 7 ? [['RECORD#' => 1, 'CUSTOMER_CODE' => 'CUST-001', 'CUSTOMER_NAME' => 'Example Traders', 'IS_ACTIVE' => $this->activeCustomer ? 'T' : 'F']] : []; }
+        if (str_contains($sql, 'SELECT I.DOCUMENT_NUMBER AS INVOICE_NUMBER FROM ME_OE_DOCUMENTS O')) {
+            foreach ($this->documents as $order) {
+                if ($order['CNY#'] !== $p['company_id'] || $order['DOCUMENT_TYPE'] !== 'SALES_ORDER' || $order['DOCUMENT_NUMBER'] !== $p['order_number']) { continue; }
+                foreach ($this->links as $link) {
+                    $invoice = $this->documents[$link['TARGET_DOCUMENT_RECORD#']] ?? null;
+                    if ($link['CNY#'] === $p['company_id'] && $link['SOURCE_DOCUMENT_RECORD#'] === $order['RECORD#'] && $invoice !== null && $invoice['CNY#'] === $p['company_id'] && $invoice['DOCUMENT_TYPE'] === 'SALES_INVOICE') {
+                        return [['INVOICE_NUMBER' => $invoice['DOCUMENT_NUMBER']]];
+                    }
+                }
+            }
+            return [];
+        }
         if (str_contains($sql, 'FROM ME_OE_SOURCE_LINKS') && !str_contains($sql, 'FROM ME_OE_DOCUMENTS')) {
             return array_values(array_filter($this->links, fn ($r) => $r['CNY#'] === $p['company_id'] &&
                 (!isset($p['source_id']) || $r['SOURCE_DOCUMENT_RECORD#'] == $p['source_id']) && (!isset($p['target_id']) || $r['TARGET_DOCUMENT_RECORD#'] == $p['target_id'])));

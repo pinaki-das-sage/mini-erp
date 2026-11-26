@@ -70,7 +70,7 @@ final readonly class SalesFulfillment
     }
 
     /** All dispatched Order lines delivered in full on the same Trip; close the Order.
-     * Invoice creation belongs to Order Submit and has no dependency on this callback.
+     * Invoice creation is a separate action for Submitted Orders and has no dependency on this callback.
      */
     public function recordDelivery(TransactionContext $tx, Actor $actor, string $orderNumber, array $input): array
     {

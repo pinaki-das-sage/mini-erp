@@ -57,13 +57,17 @@ final readonly class QuoteService
     public function list(Actor $actor, array $query = []): array
     {
         $this->permissions()->requireDocument($actor, 'quote', 'read');
-        $page = Api::pagination($query, ['customer_code', 'warehouse_id', 'status', 'from_date', 'to_date']);
+        $page = Api::pagination($query, ['quote_number', 'customer_code', 'warehouse_id', 'status', 'from_date', 'to_date']);
         $where = "D.CNY# = :company_id AND D.DOCUMENT_TYPE = 'SALES_QUOTE'";
         $binds = ['company_id' => $actor->companyId, 'offset_rows' => $page['offset'], 'limit_rows' => $page['page_size']];
         foreach ($page['filters'] as $key => $value) {
             if (in_array($key, ['from_date', 'to_date'], true)) {
                 Validation::date($value, $key);
                 $where .= ' AND D.DOCUMENT_DATE ' . ($key === 'from_date' ? '>=' : '<=') . " TO_DATE(:$key, 'YYYY-MM-DD')";
+            } elseif ($key === 'quote_number') {
+                $value = Validation::text($value, 'Quote Number', 20);
+                if (!preg_match('/\A[A-Za-z0-9_-]{1,20}\z/D', $value)) { throw new AppError('VALIDATION_ERROR', 'Enter a valid Quote Number.'); }
+                $where .= ' AND D.DOCUMENT_NUMBER = :quote_number';
             } elseif ($key === 'status') {
                 if (!in_array($value, ['Draft', 'Submitted'], true)) {
                     throw new AppError('VALIDATION_ERROR', 'Select a valid Quote status.');

@@ -1,0 +1,21 @@
+.sales-document .document-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem; margin: 1rem 0; }
+.sales-document .document-grid, .sales-document .document-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 0 1.25rem; }
+.sales-document .document-grid label { max-width: none; }
+.sales-document dt { font-size: .85rem; color: #536575; margin-top: 1rem; }
+.sales-document dd { margin: .35rem 0 0; overflow-wrap: anywhere; }
+.sales-document .document-muted { display: block; margin-top: .3rem; color: #536575; }
+.sales-document .document-status { display: inline-block; background: #e8eef3; border-radius: .3rem; padding: .25rem .55rem; white-space: nowrap; }
+.sales-document .document-money { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sales-document .document-total { margin-left: auto; font-size: 1.2rem; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.sales-document .document-caption { text-align: left; padding: .8rem 0; font-weight: 600; }
+.sales-document .document-lines { min-width: 950px; }
+.sales-document .document-lines td { padding: .65rem .4rem; }
+.sales-document .document-lines input { min-width: 100px; }
+.sales-document .document-lines td:nth-child(3) { width: 30%; }
+.sales-document .document-lines td:nth-child(1) { width: 2rem; }
+.sales-document .document-line-actions { display: flex; gap: .3rem; }
+.sales-document .document-line-actions button { padding: .45rem .55rem; }
+.sales-document .document-notes { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 700px) {
+    .app-layout > main { width: 100%; box-sizing: border-box; }
+}

@@ -57,7 +57,8 @@ final class SalesPagesTest extends TestCase
         self::assertSame(200, $response['status']);
         self::assertStringContainsString('href="/training/modules/sales/customers"', $response['body']);
         self::assertStringContainsString('href="/training/modules/sales/invoices"', $response['body']);
-        self::assertStringNotContainsString('href="/training/modules/sales/quotes"', $response['body']);
+        self::assertStringContainsString('href="/training/modules/sales/quotes"', $response['body']);
+        self::assertStringContainsString('href="/training/modules/sales/orders"', $response['body']);
         self::assertStringNotContainsString('href="/training/modules/sales/payments"', $response['body']);
         self::assertSame(200, $kernel->handle('GET', '/training/modules/inventory', [])['status']);
         self::assertSame(404, $kernel->handle('GET', '/training/modules/sales/customers-extra', [])['status']);

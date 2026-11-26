@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace MiniErp\sales\invoices;
 
 use MiniErp\sales\BusinessDate;
+use MiniErp\sales\ListingFilters;
 use MiniErp\sales\SalesPermissions;
 use MiniErp\shared\Api;
 use MiniErp\shared\AppError;
@@ -19,6 +20,7 @@ final readonly class InvoicePages
     private const BASE = '/modules/sales/invoices';
 
     private const FILTERS = [
+        'invoice_number',
         'customer_code',
         'warehouse_id',
         'status',
@@ -119,6 +121,8 @@ final readonly class InvoicePages
 
     private function listing(Actor $actor, array $query): array
     {
+        $this->authorization->requirePermission($actor, SalesPermissions::DOCUMENTS['invoice'], 'read');
+        unset($query['page_size']);
         foreach (self::FILTERS as $filter) {
             if (($query[$filter] ?? null) === '') {
                 unset($query[$filter]);
@@ -129,7 +133,7 @@ final readonly class InvoicePages
         $status = 200;
 
         try {
-            $invoices = $this->invoices->list($actor, $query);
+            $invoices = $this->invoices->list($actor, ListingFilters::query($query));
         } catch (AppError $exception) {
             if ($exception->status !== 400) {
                 throw $exception;
@@ -154,6 +158,7 @@ final readonly class InvoicePages
         }
 
         $listUrl = $this->paths->url(self::BASE);
+        $filters['date_range'] = ListingFilters::range($query);
         $pageUrl = static fn (int $page): string =>
             $listUrl . '?' . http_build_query([...$query, 'page' => (string) $page]);
 
@@ -162,6 +167,9 @@ final readonly class InvoicePages
             'filters' => $filters,
             'listUrl' => $listUrl,
             'salesUrl' => $this->paths->url('/modules/sales'),
+            'styleUrl' => $this->paths->url('/assets/sales/documents.css'),
+            'dateRangeScriptUrl' => $this->paths->url('/assets/sales/date-range.js'),
+            'dateRangeStyleUrl' => $this->paths->url('/assets/sales/date-range.css'),
             'createUrl' => $this->can($actor, SalesPermissions::DOCUMENTS['invoice'], 'create')
                 && $this->can($actor, SalesPermissions::DOCUMENTS['order'], 'read')
                 ? $this->paths->url(self::BASE . '/new')

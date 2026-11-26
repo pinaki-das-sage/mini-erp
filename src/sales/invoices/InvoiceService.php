@@ -99,6 +99,7 @@ final readonly class InvoiceService
         $permissions->requireDocument($actor, 'invoice', 'read');
 
         $page = Api::pagination($query, [
+            'invoice_number',
             'customer_code',
             'warehouse_id',
             'status',
@@ -121,6 +122,15 @@ final readonly class InvoiceService
             'D.CNY# = :company_id',
             "D.DOCUMENT_TYPE = 'SALES_INVOICE'",
         ];
+
+        if (isset($filters['invoice_number'])) {
+            $number = Validation::text($filters['invoice_number'], 'Invoice Number', 20);
+            if (!preg_match('/\A[A-Za-z0-9_-]{1,20}\z/D', $number)) {
+                throw new AppError('VALIDATION_ERROR', 'Enter a valid Invoice Number.');
+            }
+            $binds['invoice_number'] = $number;
+            $where[] = 'D.DOCUMENT_NUMBER = :invoice_number';
+        }
 
         foreach ([
             'customer_code' => 'C.CUSTOMER_CODE',

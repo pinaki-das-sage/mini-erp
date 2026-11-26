@@ -84,7 +84,7 @@ final readonly class OrderInvoiceService
     public function deleteDraftForOrderReturn(TransactionContext $tx, Actor $actor, string $orderId): void
     {
         $invoice = $this->returnableInvoice($tx, $actor, $orderId, true);
-        // Orders submitted before automatic Invoice creation can still release their reservations.
+        // A Submitted Order may have no Invoice yet; its reservations can still be released.
         if ($invoice === null) { return; }
         $binds = ['company_id' => $actor->companyId, 'id' => $invoice['RECORD#']];
         $tx->execute('DELETE FROM ME_OE_SOURCE_LINKS WHERE CNY# = :company_id AND TARGET_DOCUMENT_RECORD# = :target_id',
