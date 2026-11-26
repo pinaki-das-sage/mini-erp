@@ -12,7 +12,6 @@ use MiniErp\logistics\vehicle\VehicleService;
 use MiniErp\logistics\driver\DriverService;
 use MiniErp\logistics\trip\TripService;
 use MiniErp\logistics\tripline\TripLineService;
-use MiniErp\logistics\tripline\TripLineValidator;
 
 /**
  * The application loads this file and calls the returned function to register routes.
@@ -23,7 +22,7 @@ use MiniErp\logistics\tripline\TripLineValidator;
  * - actor: authenticated identity/company, provided by the framework.
  * - input: parsed JSON object as an array (not input[body]).
  * - params: URL placeholders, e.g. id from /vehicles/{id}.
- * - query: URL query parameters, e.g. page, page_size, active and search.
+ * - query: URL query parameters, e.g. page and page_size.
  */
 return static function (Api $api, Connection $connection): void {
     $drivers = new DriverService($connection);
@@ -48,8 +47,8 @@ return static function (Api $api, Connection $connection): void {
         'read',
         static function (Actor $actor, array $input, array $params, array $query) use ($vehicles): array {
             // use ($vehicles) captures the outer service for this anonymous function.
-            // pagination() validates page/size, calculates offset and permits only these filters.
-            return $vehicles->getVehicles($actor, Api::pagination($query, ['active', 'assignment_status', 'search']));
+            // pagination() validates page/size and rejects unsupported query parameters.
+            return $vehicles->getVehicles($actor, Api::pagination($query));
         }
     );
 
@@ -250,6 +249,15 @@ return static function (Api $api, Connection $connection): void {
 
     $api->register(
         'GET',
+        '/logistics/sales-orders/eligible',
+        'sales.orders',
+        'read',
+        static function (Actor $actor, array $input, array $params, array $query) use ($tripService): array {
+            return $tripService()->getEligibleSalesOrders($actor, $query);
+        }
+    );
+    $api->register(
+        'GET',
         '/logistics/trips',
         'logistics.trips',
         'read',
@@ -362,7 +370,6 @@ return static function (Api $api, Connection $connection): void {
 
     // Read-only trip-line routes; trip creation and lifecycle belong to the trip module.
     $tripLines = new TripLineService($connection);
-    $tripLineValidator = new TripLineValidator();
     $api->register(
         'GET',
         '/logistics/trip-lines',
@@ -374,11 +381,11 @@ return static function (Api $api, Connection $connection): void {
     );
     $api->register(
         'GET',
-        '/logistics/trip-lines/{id}',
+        '/logistics/trip-lines/{id:segment}',
         'logistics.trip_lines',
         'read',
-        static function (Actor $actor, array $input, array $params, array $query) use ($tripLines, $tripLineValidator): array {
-            return $tripLines->getTripLine($actor, $tripLineValidator->id($params['id']));
+        static function (Actor $actor, array $input, array $params, array $query) use ($tripLines): array {
+            return $tripLines->getTripLine($actor, $params['id']);
         }
     );
 };

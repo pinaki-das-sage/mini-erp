@@ -1,5 +1,5 @@
 <section class="logistics-workspace" id="logistics-workspace">
-  <p class="logistics-intro">Coordinate trips, maintain driver profiles, and review the available fleet. Sales Order lines, capacity validation, Sales state changes, and Inventory effects are validated by the server.</p>
+  <p class="logistics-intro">One complete Sales Order is assigned to one Trip. All saved Order lines are included automatically.</p>
   <input type="hidden" id="logistics-csrf" value="{$csrf}">
   <p id="logistics-capabilities-error" class="error" role="alert" hidden></p>
 
@@ -13,14 +13,14 @@
     <div class="logistics-section-heading">
       <div>
         <h2>Trip Operations</h2>
-        <p>One whole submitted Sales Order per Trip; its complete Sales Order lines are used. Trips move from Draft to Dispatched, then Delivered, or may be Cancelled while Draft.</p>
+        <p>Each Trip carries every saved line from one Sales Order. Draft Trips may be cancelled before dispatch.</p>
       </div>
       <div class="logistics-toolbar">
         <button type="button" id="create-trip-button" hidden>Create Trip</button>
         <button type="button" class="button-secondary" id="trips-refresh-button">Refresh</button>
       </div>
     </div>
-    <p class="logistics-note">Assigning a Trip moves its Submitted Sales Order to In Progress. Cancelling a Draft Trip returns the Order to Submitted; dispatch requires it to remain In Progress.</p>
+    <p class="logistics-note">Draft assignment keeps the Sales Order Submitted. Dispatch moves it to In Progress, and complete delivery closes it.</p>
     <p id="trips-status" class="logistics-status" role="status" aria-live="polite"></p>
     <p id="trips-error" class="error" role="alert" hidden></p>
     <div class="table-scroll">
@@ -128,7 +128,7 @@
   <form id="trip-form">
     <h2 id="trip-dialog-title">Create Trip</h2>
     <p id="trip-form-error" class="error" role="alert" hidden></p>
-    <label for="trip-order-search">Search Submitted Sales Orders
+    <label for="trip-order-search">Search eligible Sales Orders
       <span class="logistics-inline-search">
         <input id="trip-order-search" type="search" maxlength="100" autocomplete="off">
         <button type="button" class="button-secondary" id="search-trip-orders">Search</button>

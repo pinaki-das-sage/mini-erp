@@ -15,7 +15,8 @@ final readonly class SalesOrderProvider implements LogisticsOrderProviderContrac
 {
     public function __construct(private Connection $connection) {}
 
-    /** Owner event references use logtrip_assignment_, logtrip_dispatch_, logtrip_cancellation_
+    /** All Order lines must belong to one current Trip, with one shared status.
+     * Owner event references use logtrip_assignment_, logtrip_dispatch_, logtrip_cancellation_
      * or logtrip_delivery_. Audit and assigned-driver IDs reference numeric ME_USERS.ID,
      * resolved from the authenticated actor's company-scoped USER_ID.
      */
@@ -173,6 +174,10 @@ final readonly class SalesOrderProvider implements LogisticsOrderProviderContrac
             $result[] = $fact;
         }
 
+        if (count(array_unique(array_column($result, 'trip_id'))) > 1 ||
+            count(array_unique(array_column($result, 'trip_status'))) > 1) {
+            throw new AppError('INVALID_STATE', 'The whole Order must belong to one Trip with the same status on every line.', 409);
+        }
         return $result;
     }
 

@@ -7,7 +7,6 @@ namespace MiniErp\logistics;
 use MiniErp\logistics\driver\DriverService;
 use MiniErp\logistics\trip\TripService;
 use MiniErp\logistics\vehicle\VehicleService;
-use MiniErp\sales\orders\OrderService;
 use MiniErp\shared\Api;
 use MiniErp\shared\AppError;
 use MiniErp\shared\database\Connection;
@@ -20,7 +19,6 @@ final class LogisticsUiApi
     private VehicleService $vehicles;
     private DriverService $drivers;
     private TripService $trips;
-    private OrderService $orders;
 
     public function __construct(Connection $connection)
     {
@@ -28,7 +26,6 @@ final class LogisticsUiApi
         $this->vehicles = new VehicleService($connection);
         $this->drivers = new DriverService($connection);
         $this->trips = new TripService($connection);
-        $this->orders = new OrderService($connection);
     }
 
     /**
@@ -64,7 +61,7 @@ final class LogisticsUiApi
         if ($method === 'GET' && $path === '/vehicles') {
             return $this->response($this->vehicles->getVehicles(
                 $actor,
-                Api::pagination($query, ['active', 'assignment_status', 'search'])
+                Api::pagination($query)
             ));
         }
         if ($method === 'GET' && $path === '/eligible-vehicles') {
@@ -100,16 +97,7 @@ final class LogisticsUiApi
             return $this->response($this->trips->getTrips($actor, Api::pagination($query)));
         }
         if ($method === 'GET' && $path === '/sales-orders') {
-            $page = Api::pagination($query, ['search']);
-            $orderQuery = [
-                'status' => 'Submitted',
-                'page' => (string) $page['page'],
-                'page_size' => (string) $page['page_size'],
-            ];
-            if (isset($page['filters']['search'])) {
-                $orderQuery['search'] = $page['filters']['search'];
-            }
-            return $this->response($this->orders->list($actor, $orderQuery));
+            return $this->response($this->trips->getEligibleSalesOrders($actor, $query));
         }
 
         if (preg_match('#\A/(vehicles|drivers|trips)/([0-9]+)(?:/(update|delete|cancel|dispatch|deliver))?\z#D', $path, $match)) {

@@ -202,19 +202,6 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PageSize'
-        - name: active
-          in: query
-          schema:
-            type: boolean
-        - name: assignment_status
-          in: query
-          schema:
-            type: string
-            enum: [ AVAILABLE, ASSIGNED ]
-        - name: search
-          in: query
-          schema:
-            type: string
       responses:
         '200':
           description: Paged vehicle list
@@ -514,16 +501,55 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /logistics/sales-orders/eligible:
+    get:
+      tags: ["Logistics - Trips"]
+      summary: List eligible Sales Orders for whole-Order Trip assignment
+      description: >
+        Returns same-company Submitted Sales Orders with saved lines and no
+        current Trip assignment. Each eligible Order can be assigned to exactly
+        one Trip containing every saved Order line.
+      operationId: listEligibleTripSalesOrders
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: search
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        '200':
+          description: Eligible Sales Orders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EligibleTripSalesOrderListEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /logistics/trips:
     post:
       tags: ["Logistics - Trips"]
-      summary: Create a Draft Trip from one complete Submitted Sales Order
+      summary: Create a Draft Trip for one complete Sales Order
       description: >
-        One whole Submitted Sales Order becomes one Draft Trip and every Sales
-        Order line becomes a TripLine. In the same transaction, Trip assignment
-        changes the Sales Order from SUBMITTED to IN_PROGRESS. Line weight and
-        load are derived from Inventory, never supplied by the client. The
-        selected Driver's licence must be valid on the planned departure date.
+        One complete Submitted Sales Order is assigned to one Trip. Every saved
+        Order line is included automatically; partial mappings and a second
+        active Trip for the Order are rejected. Every line shares that Trip's
+        reference and status. Product identity, quantity,
+        line weight and Sales Order identity come from locked server-side data.
+        The complete Order load is checked against Vehicle capacity. Draft
+        assignment keeps the Order Submitted; dispatching the complete Trip
+        moves it to In Progress, and delivering the complete Trip closes it.
+        Draft cancellation clears the complete assignment. Invoice creation is
+        a separate Sales action. The selected Driver's licence must be valid
+        on the planned departure date. Logistics locks the Sales Order before
+        Vehicle/Driver resources and creates all TripLines in the same outer
+        transaction as the Sales callback.
       operationId: createTrip
       requestBody:
         required: true
@@ -536,7 +562,8 @@ paths:
               properties:
                 order_number:
                   type: string
-                  example: SO-1001
+                  pattern: '^[A-Za-z0-9_-]{1,20}$'
+                  example: SO-000000000000022
                 trip_code:
                   type: integer
                   minimum: 1
@@ -551,6 +578,12 @@ paths:
                   type: string
                   format: date-time
                   example: '2026-11-26T10:00:00+05:30'
+              example:
+                order_number: SO-000000000000022
+                trip_code: 1001
+                vehicle_id: 1
+                driver_id: 63
+                planned_departure_at: '2026-11-26T10:00:00+05:30'
       responses:
         '201':
           description: Draft trip created
@@ -608,7 +641,12 @@ paths:
     post:
       tags: ["Logistics - Trips"]
       summary: Update a Draft trip's Vehicle, Driver and planned departure
-      description: The selected Driver's licence must be valid on the resulting planned departure date.
+      description: >
+        Updates Trip resources only. Logistics locks the Trip, then its Sales
+        Order, before locking Vehicle/Driver resources. The complete Sales
+        Order assignment remains on this Trip. The selected Driver's licence
+        must be valid on the resulting planned departure date. The changes
+        commit or roll back together in the Logistics transaction.
       operationId: updateTrip
       requestBody:
         required: true
@@ -650,9 +688,14 @@ paths:
       tags: ["Logistics - Trips"]
       summary: Cancel a Draft trip
       description: >
-        Requires a Draft Trip and a Sales Order already in IN_PROGRESS.
-        A required cancellation reason is saved. In the same transaction the
-        Sales Order returns from IN_PROGRESS to SUBMITTED and the Draft assignment is released.
+        Cancels the complete Draft Trip and clears the complete Sales Order
+        assignment. Dispatched or Delivered Trips cannot be cancelled. A
+        required cancellation reason is saved; Trip and TripLine history remain.
+        The Sales Order remains or returns to Submitted, and Inventory On Hand
+        is unchanged. Logistics locks the Trip and all TripLines before the
+        Sales Order, then records cancellation and its complete line mapping in
+        the shared outer transaction. A committed retry verifies the saved
+        cancellation read-only and does not invoke the callback again.
       operationId: cancelTrip
       requestBody:
         required: true
@@ -670,7 +713,7 @@ paths:
                   example: Vehicle unavailable
       responses:
         '200':
-          description: Trip cancelled and resources released
+          description: Complete Draft Trip cancelled and Vehicle/Driver released
           content:
             application/json:
               schema:
@@ -685,12 +728,17 @@ paths:
       - $ref: '#/components/parameters/Id'
     post:
       tags: ["Logistics - Trips"]
-      summary: Dispatch a Draft trip
+      summary: Dispatch the complete Draft Trip
       description: >
-        Draft -> Dispatched. Consumes the Inventory reservations, records the
-        dispatch with Sales in one transaction shared by Logistics, Inventory
-        and Sales. The Sales Order must already be IN_PROGRESS and remains
-        IN_PROGRESS; dispatch does not perform SUBMITTED -> IN_PROGRESS.
+        Draft -> Dispatched for the complete Trip and every saved Order line.
+        Logistics locks the Trip and all TripLines, then the Sales Order,
+        before revalidating Vehicle/Driver eligibility and consuming every
+        Inventory reservation. The complete mapping is sent to Sales in the
+        shared outer transaction; all Logistics, Inventory and Sales writes
+        commit or roll back together. The Sales Order moves from Submitted to
+        In Progress. A committed retry verifies the complete saved Trip mapping
+        and consumed reservations read-only; it does not consume Inventory
+        again or invoke the Sales callback again.
       operationId: dispatchTrip
       requestBody:
         required: true
@@ -726,10 +774,13 @@ paths:
       tags: ["Logistics - Trips"]
       summary: Complete delivery of a Dispatched trip
       description: >
-        Dispatched -> Delivered. Notifies Sales through the existing
-        recordDelivery() fulfillment path in the same transaction. The Order
-        remains IN_PROGRESS through dispatch and is closed by the existing
-        successful-delivery closure logic. No invoice is created during delivery.
+        Dispatched -> Delivered for the complete Trip and every saved Order
+        line. Logistics locks the Trip and all TripLines, then the Sales Order,
+        and sends the complete mapping to recordDelivery() in the shared outer
+        transaction. Sales closes the Order. Only the assigned Driver may
+        record delivery. Delivery does not create or modify an Invoice; Invoice
+        creation remains a separate Sales action. A committed retry verifies
+        saved state read-only and does not invoke the Sales callback again.
       operationId: deliverTrip
       requestBody:
         required: true
@@ -989,7 +1040,7 @@ paths:
       operationId: getOrder
       responses: { "200": { $ref: "#/components/responses/Order" }, default: { $ref: "#/components/responses/Error" } }
       x-implementation-status: implemented
-      x-integration-status: Submit-time Invoice creation is connected; Logistics event writers require team integration.
+      x-integration-status: Submit-time Invoice creation and Logistics Trip assignment, dispatch, delivery, and cancellation callbacks are connected; live database concurrency and rollback acceptance remain pending.
 
   /sales/orders/{order_number}/update:
     parameters:
@@ -1237,6 +1288,13 @@ paths:
       tags:
         - Logistics - Vehicles
       summary: Update a vehicle
+      description: >
+        An assigned Vehicle cannot be deactivated or have its capacity changed.
+        DRAFT and DISPATCHED Trips are active assignments. A rejected
+        deactivation leaves the Vehicle and all submitted fields unchanged.
+        Vehicles with only DELIVERED or CANCELLED Trip history may be
+        deactivated. The update returns HTTP 409 while an active assignment
+        prevents the requested change.
       operationId: updateVehicle
       requestBody:
         required: true
@@ -1326,7 +1384,16 @@ paths:
           $ref: '#/components/responses/NotFound'
   /logistics/trip-lines/{id}:
     parameters:
-      - $ref: '#/components/parameters/Id'
+      - name: id
+        in: path
+        required: true
+        description: >
+          Positive integer TripLine ID within the supported integer range.
+          Syntactically invalid IDs return 400; a valid ID with no matching
+          TripLine returns 404.
+        schema:
+          type: integer
+          minimum: 1
     get:
       tags:
         - Logistics - Trip Lines
@@ -1339,6 +1406,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlanningTripLineEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -1654,6 +1723,22 @@ components:
         remaining_capacity_kg:
           type: number
 
+    EligibleTripSalesOrder:
+      type: object
+      required: [order_id, order_number, status, customer_code]
+      properties:
+        order_id:
+          type: string
+          pattern: '^[1-9][0-9]{0,14}$'
+        order_number:
+          type: string
+          maxLength: 20
+        status:
+          type: string
+          const: Submitted
+        customer_code:
+          type: string
+
     VehicleEnvelope:
       allOf:
         - $ref: '#/components/schemas/GenericSuccess'
@@ -1758,6 +1843,24 @@ components:
                   type: array
                   items:
                     $ref: '#/components/schemas/Trip'
+                page:
+                  type: integer
+                page_size:
+                  type: integer
+
+    EligibleTripSalesOrderListEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccess'
+        - type: object
+          properties:
+            result:
+              type: object
+              required: [items, page, page_size]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/EligibleTripSalesOrder'
                 page:
                   type: integer
                 page_size:
@@ -2472,6 +2575,14 @@ components:
         - document_total
         - available_actions
       type: object
+      description: >
+        Logistics assigns every saved Order line to one current Trip, with the
+        same Trip reference and status on each line. Only Submitted Orders with
+        saved lines and no current Trip assignment are eligible for a new Trip.
+        Draft assignment keeps the Order Submitted; complete dispatch moves it
+        to In Progress; complete delivery closes it. Cancelling the complete
+        Draft Trip clears the assignment and leaves the Order Submitted. Invoice
+        creation is a separate Sales action.
       allOf:
         - { $ref: "#/components/schemas/OrderSummary" }
         - type: object
@@ -2480,24 +2591,50 @@ components:
         - if: { required: [ status ], properties: { status: { const: Closed } } }
           then:
             properties:
-              lines: { items: { properties: { trip_assigned: { const: true }, trip_status: { const: Delivered } } } }
+              lines:
+                items:
+                  required: [ trip_assigned, trip_reference, trip_status ]
+                  properties:
+                    trip_assigned: { const: true }
+                    trip_reference: { type: string, minLength: 1 }
+                    trip_status: { const: Delivered }
         - if: { required: [ status ], properties: { status: { const: Draft } } }
-          then: { properties: { lines: { items: { properties: { trip_assigned: { const: false } } } } } }
+          then:
+            properties:
+              lines:
+                items:
+                  required: [ trip_assigned, trip_reference, trip_status ]
+                  properties:
+                    trip_assigned: { const: false }
+                    trip_reference: { type: "null" }
+                    trip_status: { enum: [ Cancelled, null ] }
         - if: { required: [ status ], properties: { status: { const: Submitted } } }
           then:
             properties:
               lines:
-                items: { properties: { trip_status: { enum: [ Draft, Cancelled, null ] } } }
-                anyOf:
-                  - { items: { properties: { trip_assigned: { const: false } } } }
-                  - { items: { properties: { trip_assigned: { const: true }, trip_status: { const: Draft } } } }
+                oneOf:
+                  - items:
+                      required: [ trip_assigned, trip_reference, trip_status ]
+                      properties:
+                        trip_assigned: { const: false }
+                        trip_reference: { type: "null" }
+                        trip_status: { enum: [ Cancelled, null ] }
+                  - items:
+                      required: [ trip_assigned, trip_reference, trip_status ]
+                      properties:
+                        trip_assigned: { const: true }
+                        trip_reference: { type: string, minLength: 1 }
+                        trip_status: { const: Draft }
         - if: { required: [ status ], properties: { status: { const: In Progress } } }
           then:
             properties:
               lines:
-                items: { properties: { trip_assigned: { const: true }, trip_status: { const: Dispatched } } }
-                contains: { properties: { trip_assigned: { const: true }, trip_status: { enum: [ Dispatched, Delivered ] } } }
-                not: { items: { properties: { trip_assigned: { const: true }, trip_status: { const: Delivered } } } }
+                items:
+                  required: [ trip_assigned, trip_reference, trip_status ]
+                  properties:
+                    trip_assigned: { const: true }
+                    trip_reference: { type: string, minLength: 1 }
+                    trip_status: { const: Dispatched }
     OrderResponse:
       allOf:
         - { $ref: "#/components/schemas/ApiSuccess" }
@@ -2887,12 +3024,18 @@ components:
         trip_reference:
           type: [ string, "null" ]
           readOnly: true
-          description: Public reference to the current Logistics Trip; maps to the agreed Logistics identifier for TRIP_ID. Every line of the Order belongs to the same current Trip. Clear all on cancellation; replace together on whole-Order reassignment. Logistics owns assignment history.
-        trip_assigned: { type: boolean, readOnly: true }
+          description: Public reference to the single current Logistics Trip assigned to the complete Order. Every saved line has the same current reference and status. Cleared for every line when the Draft Trip is cancelled.
         trip_status:
           type: [ string, "null" ]
           enum: [ Draft, Dispatched, Delivered, Cancelled, null ]
           readOnly: true
+          description: >
+            Draft, Dispatched or Delivered when this line is currently assigned;
+            null or Cancelled when it has no current assignment.
+        trip_assigned:
+          type: boolean
+          readOnly: true
+          description: True only when this line has a current Trip reference and active Trip status.
       if: { required: [ trip_assigned ], properties: { trip_assigned: { const: true } } }
       then:
         properties:

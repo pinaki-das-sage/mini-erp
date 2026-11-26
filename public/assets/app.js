@@ -462,13 +462,22 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
   const tripOrderSearch = document.querySelector('#trip-order-search');
   const tripOrderStatus = document.querySelector('#trip-order-status');
   const searchTripOrdersButton = document.querySelector('#search-trip-orders');
-  let loadingSubmittedOrders = false;
-  const loadSubmittedOrders = async () => {
-    if (loadingSubmittedOrders) return;
-    loadingSubmittedOrders = true;
+  let loadingEligibleOrders = false;
+  let tripSubmit = null;
+  let tripDriverSelect = null;
+  let loadingEligibleTripDrivers = false;
+  const updateTripSubmitState = () => {
+    const creatingWithoutOrder = tripForm.dataset.mode === 'create' && tripOrderSelect.value === '';
+    tripSubmit.disabled = loadingEligibleOrders || loadingEligibleTripDrivers
+      || tripDriverSelect.disabled || tripDriverSelect.value === '' || creatingWithoutOrder;
+  };
+  const loadEligibleOrders = async () => {
+    if (loadingEligibleOrders) return;
+    loadingEligibleOrders = true;
     searchTripOrdersButton.disabled = true;
     tripOrderSelect.disabled = true;
-    tripOrderStatus.textContent = 'Loading Submitted Sales Orders...';
+    updateTripSubmitState();
+    tripOrderStatus.textContent = 'Loading eligible Sales Orders...';
     const query = new URLSearchParams({ page: '1', page_size: '100' });
     const searchTerm = tripOrderSearch.value.trim();
     if (searchTerm !== '') query.set('search', searchTerm);
@@ -478,17 +487,18 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
       tripOrderSelect.replaceChildren();
       const placeholder = document.createElement('option');
       placeholder.value = '';
-      placeholder.textContent = result.items.length === 0 ? 'No eligible Submitted Sales Orders' : 'Select a Submitted Sales Order';
+      placeholder.textContent = result.items.length === 0 ? 'No eligible Submitted Sales Orders' : 'Select an eligible Sales Order';
       placeholder.disabled = true;
       placeholder.selected = true;
       tripOrderSelect.append(placeholder);
       for (const order of result.items) {
         const option = document.createElement('option');
         option.value = String(order.order_number);
-        option.textContent = `${order.order_number} | ${order.customer_code}`;
+        option.dataset.status = order.status;
+        option.textContent = `${order.order_number} | ${order.customer_code} | ${order.status}`;
         tripOrderSelect.append(option);
       }
-      tripOrderStatus.textContent = `${result.items.length} Submitted Sales Order${result.items.length === 1 ? '' : 's'} loaded.`;
+      tripOrderStatus.textContent = `${result.items.length} eligible Sales Order${result.items.length === 1 ? '' : 's'} loaded.`;
     } catch (error) {
       tripOrderSelect.replaceChildren();
       const option = document.createElement('option');
@@ -499,16 +509,24 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
       tripOrderSelect.append(option);
       tripOrderStatus.textContent = errorMessage(error);
     } finally {
-      loadingSubmittedOrders = false;
+      loadingEligibleOrders = false;
       searchTripOrdersButton.disabled = false;
       tripOrderSelect.disabled = false;
+      updateTripSubmitState();
     }
   };
-  searchTripOrdersButton.addEventListener('click', loadSubmittedOrders);
+  searchTripOrdersButton.addEventListener('click', loadEligibleOrders);
+  tripOrderSelect.addEventListener('change', () => {
+    const selectedOrder = tripOrderSelect.options[tripOrderSelect.selectedIndex];
+    tripOrderStatus.textContent = selectedOrder?.value
+      ? `${selectedOrder.dataset.status} Sales Order selected. All saved Order lines will be assigned automatically.`
+      : '';
+    updateTripSubmitState();
+  });
   tripOrderSearch.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
-      loadSubmittedOrders();
+      loadEligibleOrders();
     }
   });
 
@@ -535,11 +553,10 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
   const tripOrderLabel = tripForm.elements.order_number.closest('label');
   const tripOrderSearchLabel = tripOrderSearch.closest('label');
   const tripCodeLabel = tripForm.elements.trip_code.closest('label');
-  const tripSubmit = document.querySelector('#trip-submit-button');
-  const tripDriverSelect = tripForm.elements.driver_id;
+  tripSubmit = document.querySelector('#trip-submit-button');
+  tripDriverSelect = tripForm.elements.driver_id;
   const tripDriverStatus = document.querySelector('#trip-driver-status');
   let driverLookupSequence = 0;
-  let loadingEligibleTripDrivers = false;
 
   const refreshEligibleTripDrivers = async (selectedDriverId = tripDriverSelect.value || null, tripId = tripForm.dataset.tripId || null) => {
     const sequence = ++driverLookupSequence;
@@ -549,7 +566,7 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
     if (departureValue === '') {
       fillResourceSelect(tripDriverSelect, [], 'Driver');
       tripDriverStatus.textContent = 'Choose a planned departure to load eligible Drivers.';
-      tripSubmit.disabled = false;
+      updateTripSubmitState();
       return;
     }
 
@@ -589,7 +606,7 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
     } finally {
       if (sequence === driverLookupSequence) {
         loadingEligibleTripDrivers = false;
-        tripSubmit.disabled = false;
+        updateTripSubmitState();
       }
     }
   };
@@ -618,13 +635,13 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
       if (mode === 'update') {
         tripForm.elements.planned_departure_at.value = toLocalDateTimeInput(trip.planned_departure_at);
       } else {
-        await loadSubmittedOrders();
+        await loadEligibleOrders();
       }
       await refreshEligibleTripDrivers(trip?.driver_id ?? null, trip?.id ?? null);
     } catch (error) {
       setFormError(document.querySelector('#trip-form-error'), errorMessage(error));
     } finally {
-      tripSubmit.disabled = false;
+      updateTripSubmitState();
     }
   };
 
@@ -632,7 +649,7 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
   tripForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     setFormError(document.querySelector('#trip-form-error'), '');
-    if (loadingSubmittedOrders) return;
+    if (loadingEligibleOrders) return;
     if (loadingEligibleTripDrivers || tripDriverSelect.disabled || tripDriverSelect.value === '') {
       setFormError(document.querySelector('#trip-form-error'), 'Choose a planned departure and an eligible Driver before saving.');
       return;
@@ -671,6 +688,8 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
       tripSubmit.disabled = false;
     }
   });
+
+  tripDriverSelect.addEventListener('change', updateTripSubmitState);
 
   const cancelDialog = document.querySelector('#cancel-trip-dialog');
   const cancelForm = document.querySelector('#cancel-trip-form');
@@ -1000,7 +1019,8 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
     if (typeof result.sales_orders_read !== 'boolean') throw new Error('The server returned invalid Sales Order permissions.');
     capabilities.sales_orders_read = result.sales_orders_read;
     const canReadTripResources = capabilities.vehicles.read && capabilities.drivers.read;
-    capabilities.trips.create = capabilities.trips.create && capabilities.sales_orders_read && canReadTripResources;
+    capabilities.trips.create = capabilities.trips.create && capabilities.trips.read
+      && capabilities.sales_orders_read && canReadTripResources;
     capabilities.trips.update = capabilities.trips.update && canReadTripResources;
     document.querySelector('#create-trip-button').hidden = !capabilities.trips.create;
     document.querySelector('#create-driver-button').hidden = !capabilities.drivers.create;

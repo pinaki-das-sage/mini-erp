@@ -98,13 +98,22 @@ final class VehicleService
             if ($changes === []) {
                 throw new AppError('VALIDATION_ERROR', 'At least one field must actually change.', 400);
             }
+            $deactivating = $vehicle['ISACTIVE'] === 'T' && ($values['ISACTIVE'] ?? null) === 'F';
+            $assigned = ($deactivating || isset($changes['CAPACITY']))
+                && $this->repository->hasActiveTrip($actor->companyId, $id);
+            if ($deactivating && $assigned) {
+                throw new AppError(
+                    'RESOURCE_IN_USE',
+                    'Vehicle cannot be deactivated while assigned to a Draft or Dispatched Trip.',
+                    409
+                );
+            }
             $trips = $this->repository->tripStatuses($actor->companyId, $id);
             if ($trips !== [] && (isset($changes['VEHICLE_CODE']) || isset($changes['REGISTRATION_NUMBER']))) {
                 throw new AppError('REFERENCED_RECORD', 'Vehicle code and registration cannot change after first Trip use.', 409);
             }
-            $assigned = array_filter($trips, static fn(array $trip): bool => in_array($trip['STATUS'], ['D', 'S'], true)) !== [];
-            if ($assigned && (isset($changes['CAPACITY']) || (($changes['ISACTIVE'] ?? null) === 'F'))) {
-                throw new AppError('RESOURCE_IN_USE', 'An assigned vehicle cannot change capacity or be deactivated.', 409);
+            if ($assigned && isset($changes['CAPACITY'])) {
+                throw new AppError('RESOURCE_IN_USE', 'An assigned vehicle cannot change capacity.', 409);
             }
             if (isset($changes['VEHICLE_CODE']) || isset($changes['REGISTRATION_NUMBER'])) {
                 if ($this->repository->duplicateExists(

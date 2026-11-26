@@ -34,7 +34,7 @@ final class TripLineService
         ];
     }
 
-    public function getTripLine(Actor $actor, int $id): array
+    public function getTripLine(Actor $actor, string $id): array
     {
         $this->authorize($actor, 'read');
         return $this->present($this->repository->find($actor->companyId, $this->validator->id($id)));

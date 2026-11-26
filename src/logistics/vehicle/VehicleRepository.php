@@ -12,45 +12,20 @@ final class VehicleRepository
 {
     public function __construct(private Connection $connection) {}
 
-    /** Accept pagination and filters normalized by VehicleValidator. */
+    /** Return the paginated company vehicle list with current availability. */
     public function findAll(int $companyId, array $pagination): array
     {
-        $where = ['V.COMPANY_ID = :company_id'];
         $parameters = [
             'company_id' => $companyId,
             'offset' => ($pagination['page'] - 1) * $pagination['page_size'],
             'page_size' => $pagination['page_size'],
         ];
-        $filters = $pagination['filters'];
-        if (array_key_exists('active', $filters)) {
-            $where[] = 'V.ISACTIVE = :active';
-            $parameters['active'] = $filters['active'] === 'true' ? 'T' : 'F';
-        }
-        if (array_key_exists('assignment_status', $filters)) {
-            $assignment = "EXISTS (
-                SELECT 1 FROM ME_LOG_TRIPS T
-                WHERE T.COMPANY_ID = V.COMPANY_ID AND T.VEHICLE_ID = V.ID AND T.STATUS IN ('D', 'S')
-            )";
-            $where[] = $filters['assignment_status'] === 'ASSIGNED'
-                ? $assignment
-                : 'NOT ' . $assignment;
-        }
-        if (isset($filters['search']) && $filters['search'] !== '') {
-            $parameters['search'] = '%' . str_replace(
-                ['!', '%', '_'],
-                ['!!', '!%', '!_'],
-                mb_strtoupper($filters['search'], 'UTF-8')
-            ) . '%';
-            $where[] = "(UPPER(TO_CHAR(V.VEHICLE_CODE)) LIKE :search ESCAPE '!'
-                OR UPPER(V.REGISTRATION_NUMBER) LIKE :search ESCAPE '!'
-                OR UPPER(V.DESCRIPTION) LIKE :search ESCAPE '!')";
-        }
         $sql = "SELECT V.ID, V.VEHICLE_CODE, V.REGISTRATION_NUMBER, V.DESCRIPTION, V.CAPACITY, V.ISACTIVE,
                        CASE WHEN EXISTS (
                            SELECT 1 FROM ME_LOG_TRIPS T
                            WHERE T.COMPANY_ID = V.COMPANY_ID AND T.VEHICLE_ID = V.ID AND T.STATUS IN ('D', 'S')
                        ) THEN 'ASSIGNED' ELSE 'AVAILABLE' END AS ASSIGNMENT_STATUS
-                FROM ME_LOG_VEHICLES V WHERE " . implode(' AND ', $where) . '
+                FROM ME_LOG_VEHICLES V WHERE V.COMPANY_ID = :company_id
                 ORDER BY V.VEHICLE_CODE, V.ID OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY';
         return $this->connection->query($sql, $parameters);
     }
@@ -163,6 +138,18 @@ final class VehicleRepository
             'SELECT STATUS FROM ME_LOG_TRIPS WHERE COMPANY_ID = :company_id AND VEHICLE_ID = :vehicle_id',
             ['company_id' => $companyId, 'vehicle_id' => $id]
         );
+    }
+
+    /** The caller holds the Vehicle row lock shared by Trip resource assignment. */
+    public function hasActiveTrip(int $companyId, int $id): bool
+    {
+        return $this->connection->query(
+            "SELECT ID FROM ME_LOG_TRIPS
+             WHERE COMPANY_ID = :company_id AND VEHICLE_ID = :vehicle_id
+               AND STATUS IN ('D', 'S')
+             FETCH FIRST 1 ROWS ONLY",
+            ['company_id' => $companyId, 'vehicle_id' => $id]
+        ) !== [];
     }
 
     public function hasTripHistory(int $companyId, int $id): bool
