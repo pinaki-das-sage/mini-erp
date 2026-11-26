@@ -1493,14 +1493,11 @@ components:
             properties:
               lines:
                 items: { properties: { trip_status: { enum: [ Draft, Cancelled, null ] } } }
-                anyOf:
-                  - { items: { properties: { trip_assigned: { const: false } } } }
-                  - { items: { properties: { trip_assigned: { const: true }, trip_status: { const: Draft } } } }
         - if: { required: [ status ], properties: { status: { const: In Progress } } }
           then:
             properties:
               lines:
-                items: { properties: { trip_assigned: { const: true }, trip_status: { const: Dispatched } } }
+                items: { properties: { trip_status: { enum: [ Draft, Dispatched, Delivered, Cancelled, null ] } } }
                 contains: { properties: { trip_assigned: { const: true }, trip_status: { enum: [ Dispatched, Delivered ] } } }
                 not: { items: { properties: { trip_assigned: { const: true }, trip_status: { const: Delivered } } } }
     OrderResponse:
@@ -1920,8 +1917,9 @@ components:
           type: [ string, "null" ]
           readOnly: true
           description: Public reference to the current Logistics Trip; maps to the agreed Logistics identifier for
-            TRIP_ID. Every line of the Order belongs to the same current Trip. Clear all on cancellation;
-            replace together on whole-Order reassignment. Logistics owns assignment history.
+            TRIP_ID. Different whole lines may belong to different Trips. Each line has at most one active
+            assignment for its full quantity. Cancellation clears only the affected Draft Trip's references.
+            Logistics owns assignment history.
         trip_assigned: { type: boolean, readOnly: true }
         trip_status:
           type: [ string, "null" ]

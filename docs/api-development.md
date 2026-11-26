@@ -17,13 +17,15 @@ exposed by the Create Invoice button on a Submitted Order. It copies the saved O
 linked Draft Invoice. Invoice Date uses Order Date; Due Date follows payment terms. Order Submit does
 not return an Invoice number. Draft Invoice creation has no Customer debt or stock effect.
 
-One whole Sales Order belongs to one current Trip, including every line and full quantity. Draft
-Trip assignment leaves the Order Submitted. Successful dispatch consumes all reservations and makes
-the Order In Progress. Full delivery makes it Closed. Whole Draft assignment cancellation clears every
-Trip reference and leaves stock reserved. Partial line selections and mixed Trip IDs/statuses are rejected. Delivery
-does not create or modify the Invoice. Logistics does not wait for Invoice submission.
-Logistics selects whole Submitted Orders whose lines are all unassigned; Submitted status alone does
-not mean no Trip exists. The full detail API exposes each line's Trip state.
+Different whole lines of one Sales Order may use different Trips. Each line has one current Trip and
+travels for its full saved quantity. Every callback supplies all lines belonging to its affected Trip;
+getAssignments returns the complete current assignment snapshot across all Trips. Draft assignment
+leaves the Order Submitted. First dispatch starts In Progress and consumes only that Trip's line
+reservations. All Order lines must be delivered before the Order becomes Closed. Cancelling one
+Draft Trip clears only its assignments and leaves reservations active; other Trips keep their progress.
+Undispatched lines can still be planned while the Order is In Progress. Delivery does not create or
+modify the Invoice. Logistics must update its planning/writer code to this contract before using the
+extension. See [the Sales–Logistics handoff](sales-logistics-handoff.md).
 
 An unassigned Submitted Order can return to Draft when it has no Invoice, or its linked Invoice is Draft without payments
 or downstream references. Delete that Invoice/link, release reservations and return the Order atomically.

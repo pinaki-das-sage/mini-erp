@@ -219,8 +219,8 @@ test('Order progress and Trip responses match the three-document model', () => {
   assert.equal(orderRules[4].if.properties.status.const, 'Submitted');
   assert.deepEqual(orderRules[4].then.properties.lines.items.properties.trip_status.enum, ['Draft', 'Cancelled', null]);
   assert.deepEqual(orderRules[5].then.properties.lines.contains.properties.trip_status.enum, ['Dispatched', 'Delivered']);
-  assert.deepEqual(orderRules[4].then.properties.lines.anyOf[0].items.properties.trip_assigned, { const: false });
-  assert.equal(orderRules[5].then.properties.lines.items.properties.trip_status.const, 'Dispatched');
+  assert.equal(orderRules[4].then.properties.lines.anyOf, undefined);
+  assert.deepEqual(orderRules[5].then.properties.lines.items.properties.trip_status.enum, ['Draft', 'Dispatched', 'Delivered', 'Cancelled', null]);
 });
 
 test('Order flow requires a Quote and Invoice creation is separate from Order Submit', () => {

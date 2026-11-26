@@ -65,7 +65,7 @@ final class LogisticsOrderAdapterTest extends TestCase
         $this->reject(fn () => $service->assertEvent($tx, $actor, 'delivery', '11', '7', $mapping, 'logtrip_delivery_event_2'), 'FORBIDDEN');
     }
 
-    public function testProviderRejectsMultipleTripsOrMixedProgressForOneOrder(): void
+    public function testProviderAcceptsMultipleTripsWithDifferentProgressAndKeepsClaimsPerLine(): void
     {
         [$db, $service, $tx, $actor] = $this->setupProvider();
         $db->assignmentRows = [
@@ -73,8 +73,15 @@ final class LogisticsOrderAdapterTest extends TestCase
             ['LINE_ID' => 124, 'TRIP_ID' => 8, 'TRIP_LINE_ID' => 502, 'PRODUCT_ID' => 268, 'QUANTITY_TEXT' => '3', 'STATUS' => 'S'],
             ['LINE_ID' => 125, 'TRIP_ID' => 9, 'TRIP_LINE_ID' => 503, 'PRODUCT_ID' => 37, 'QUANTITY_TEXT' => '1', 'STATUS' => 'C'],
         ];
-        $this->reject(fn () => $service->getAssignments($tx, $actor, '11'), 'INVALID_STATE');
-        $this->reject(fn () => $service->getPlannedQuantity($actor, $tx, 11, 123), 'INVALID_STATE');
+        $facts = $service->getAssignments($tx, $actor, '11');
+        self::assertSame(['7', '8', '9'], array_column($facts, 'trip_id'));
+        self::assertSame(['Draft', 'Dispatched', 'Delivered'], array_column($facts, 'trip_status'));
+        self::assertSame(2, $service->getPlannedQuantity($actor, $tx, 11, 123));
+        self::assertSame(0, $service->getPlannedQuantity($actor, $tx, 11, 124));
+        self::assertSame(0, $service->getPlannedQuantity($actor, $tx, 11, 125));
+        $service->assertEvent($tx, $actor, 'assignment', '11', '7',
+            [['line_id' => '123', 'trip_line_id' => '501']], 'logtrip_assignment_trip_7');
+        $this->reject(fn () => $service->assertUnassigned($tx, $actor, '11'), 'INVALID_STATE');
         foreach ($db->assignmentRows as &$row) { $row['TRIP_ID'] = 7; }
         unset($row);
         $this->reject(fn () => $service->getAssignments($tx, $actor, '11'), 'INVALID_STATE');

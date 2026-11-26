@@ -1,5 +1,10 @@
 # Team 4: Logistics
 
+Current Sales integration extension: [whole-line, multiple-Trip handoff](sales-logistics-handoff.md).
+For that integration, different whole lines of an Order may use different Trips. This supersedes the
+whole-Order-only planning restriction below; splitting one line's quantity remains unsupported.
+The Logistics planning and dispatch writers must adopt the handoff before the extension is live.
+
 **Team:** 2 developers + 1 QA. **Timebox:** 10 working days.  
 **Read with:** [project rules and acceptance mapping](../README.md) and [shared contracts and fixtures](./shared-contracts.md).  
 **People:** developers and QA assigned below; assign PM and primary/backup reviewer before kickoff.
