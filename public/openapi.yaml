@@ -347,7 +347,7 @@ paths:
     post:
       tags: [ Drivers ]
       summary: Update a driver profile
-      operationId: updateDriverLegacy
+      operationId: updateDriverById
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -399,8 +399,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
-      deprecated: true
-      description: Compatibility alias for POST /logistics/drivers/{id}/update.
+      description: Updates a driver by ID. POST /logistics/drivers/{id}/update is also supported.
   /logistics/drivers/{id}/delete:
     parameters:
       - $ref: '#/components/parameters/Id'
