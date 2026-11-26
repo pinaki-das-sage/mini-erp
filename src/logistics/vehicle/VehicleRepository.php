@@ -26,7 +26,7 @@ final class VehicleRepository
                            WHERE T.COMPANY_ID = V.COMPANY_ID AND T.VEHICLE_ID = V.ID AND T.STATUS IN ('D', 'S')
                        ) THEN 'ASSIGNED' ELSE 'AVAILABLE' END AS ASSIGNMENT_STATUS
                 FROM ME_LOG_VEHICLES V WHERE V.COMPANY_ID = :company_id
-                ORDER BY V.VEHICLE_CODE, V.ID OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY';
+                ORDER BY V.VEHICLE_CODE, V.ID OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY";
         return $this->connection->query($sql, $parameters);
     }
 
@@ -46,7 +46,7 @@ final class VehicleRepository
                AND NOT EXISTS (
                    SELECT 1 FROM ME_LOG_TRIPS T
                    WHERE T.COMPANY_ID = V.COMPANY_ID AND T.VEHICLE_ID = V.ID
-                     AND T.STATUS IN ('D', 'S')$excludeTrip
+                     AND T.STATUS IN ('D', 'S')" . $excludeTrip . "
                )
              ORDER BY V.VEHICLE_CODE, V.ID OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY",
             $parameters

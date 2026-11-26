@@ -40,7 +40,9 @@ final class Kernel
                 if ($path !== '/api/v1/auth/login') {
                     Api::bearer($headers);
                 }
-                return (new Api($this->db(), $this->config, $this->clientAddress))->handle($method, $path, $input, $headers, $query);
+                $registerModules = $path !== '/api/v1/auth/login';
+                return (new Api($this->db(), $this->config, $this->clientAddress, $registerModules))
+                    ->handle($method, $path, $input, $headers, $query);
             }
             // Keep the browser session bridge separate from bearer-only /api/v1.
             if (str_starts_with($path, '/ui-api/logistics')) {

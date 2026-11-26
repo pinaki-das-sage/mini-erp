@@ -16,7 +16,12 @@ final class Api
     private array $routes = [];
     private readonly TokenService $tokens;
 
-    public function __construct(private readonly Connection $connection, Config $config, private readonly string $clientAddress = 'unknown')
+    public function __construct(
+        private readonly Connection $connection,
+        Config $config,
+        private readonly string $clientAddress = 'unknown',
+        bool $registerModules = true,
+    )
     {
         $this->tokens = new TokenService($connection, $config->apiTokenTtl());
         $this->register(
@@ -101,14 +106,16 @@ final class Api
                 return ['id' => $params['id'], 'current_version' => $version + 1];
             }
         );
-        foreach (['inventory', 'purchasing', 'sales', 'logistics'] as $module) {
-            $file = dirname(__DIR__) . '/' . $module . '/api.php';
-            if (is_file($file)) {
-                $register = require $file;
-                if (!$register instanceof \Closure) {
-                    throw new \LogicException('Module api.php must return a route-registration closure.');
+        if ($registerModules) {
+            foreach (['inventory', 'purchasing', 'sales', 'logistics'] as $module) {
+                $file = dirname(__DIR__) . '/' . $module . '/api.php';
+                if (is_file($file)) {
+                    $register = require $file;
+                    if (!$register instanceof \Closure) {
+                        throw new \LogicException('Module api.php must return a route-registration closure.');
+                    }
+                    $register($this, $connection);
                 }
-                $register($this, $connection);
             }
         }
     }
