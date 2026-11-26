@@ -114,10 +114,19 @@ final class VehicleRepository
         }
         $set[] = 'UPDATED_AT = SYSTIMESTAMP';
         $set[] = 'UPDATED_BY = :updated_by';
+        $requiresFreeVehicle = isset($changes['CAPACITY']) || (($changes['ISACTIVE'] ?? null) === 'F');
+        $freeVehicleCondition = $requiresFreeVehicle
+            ? " AND NOT EXISTS (SELECT 1 FROM ME_LOG_TRIPS T
+                 WHERE T.COMPANY_ID = V.COMPANY_ID AND T.VEHICLE_ID = V.ID AND T.STATUS IN ('D', 'S'))"
+            : '';
+        // Enforce the same rule at the write, even if an assignment appeared after an earlier check.
         $count = $this->connection->execute(
-            'UPDATE ME_LOG_VEHICLES SET ' . implode(', ', $set) . ' WHERE COMPANY_ID = :company_id AND ID = :id',
+            'UPDATE ME_LOG_VEHICLES V SET ' . implode(', ', $set) . ' WHERE V.COMPANY_ID = :company_id AND V.ID = :id' . $freeVehicleCondition,
             $parameters
         );
+        if ($count === 0 && $requiresFreeVehicle) {
+            throw new AppError('RESOURCE_IN_USE', 'Vehicle must be free of Draft and Dispatched trips before changing capacity or setting is_active to F.', 409);
+        }
         if ($count !== 1) {
             throw new \LogicException('Unexpected vehicle update count.');
         }
@@ -129,6 +138,16 @@ final class VehicleRepository
             'SELECT STATUS FROM ME_LOG_TRIPS WHERE COMPANY_ID = :company_id AND VEHICLE_ID = :vehicle_id',
             ['company_id' => $companyId, 'vehicle_id' => $id]
         );
+    }
+
+    public function hasActiveTrip(int $companyId, int $id): bool
+    {
+        // D = Draft (reserved), S = Dispatched. C = Delivered and X = Cancelled are free.
+        return $this->connection->query(
+            "SELECT ID FROM ME_LOG_TRIPS WHERE COMPANY_ID = :company_id AND VEHICLE_ID = :vehicle_id
+             AND STATUS IN ('D', 'S') FETCH FIRST 1 ROWS ONLY",
+            ['company_id' => $companyId, 'vehicle_id' => $id]
+        ) !== [];
     }
 
     public function hasTripHistory(int $companyId, int $id): bool

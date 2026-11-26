@@ -1157,6 +1157,11 @@ paths:
       tags:
         - Logistics - Vehicles
       summary: Update a vehicle
+      description: >
+        A vehicle assigned to any Draft (D) or Dispatched (S) trip cannot be
+        deactivated or have its capacity changed. is_active may be set to F only
+        when no such assignment exists. Delivered (C) and Cancelled (X) trips do
+        not block deactivation. Blocked changes return 409 RESOURCE_IN_USE.
       operationId: updateVehicle
       requestBody:
         required: true

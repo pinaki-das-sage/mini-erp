@@ -76,13 +76,15 @@ final class VehicleService
             if ($changes === []) {
                 throw new AppError('VALIDATION_ERROR', 'At least one field must actually change.', 400);
             }
-            $trips = $this->repository->tripStatuses($actor->companyId, $id);
-            if ($trips !== [] && (isset($changes['VEHICLE_CODE']) || isset($changes['REGISTRATION_NUMBER']))) {
+            if ((isset($changes['VEHICLE_CODE']) || isset($changes['REGISTRATION_NUMBER']))
+                && $this->repository->hasTripHistory($actor->companyId, $id)
+            ) {
                 throw new AppError('REFERENCED_RECORD', 'Vehicle code and registration cannot change after first Trip use.', 409);
             }
-            $assigned = array_filter($trips, static fn(array $trip): bool => in_array($trip['STATUS'], ['D', 'S'], true)) !== [];
-            if ($assigned && (isset($changes['CAPACITY']) || (($changes['ISACTIVE'] ?? null) === 'F'))) {
-                throw new AppError('RESOURCE_IN_USE', 'An assigned vehicle cannot change capacity or be deactivated.', 409);
+            // Draft already reserves the vehicle. Only Delivered/Cancelled trips release it.
+            $requiresFreeVehicle = isset($changes['CAPACITY']) || (($changes['ISACTIVE'] ?? null) === 'F');
+            if ($requiresFreeVehicle && $this->repository->hasActiveTrip($actor->companyId, $id)) {
+                throw new AppError('RESOURCE_IN_USE', 'Vehicle is assigned to a Draft or Dispatched trip. It must be free before changing capacity or setting is_active to F.', 409);
             }
             if (isset($changes['VEHICLE_CODE']) || isset($changes['REGISTRATION_NUMBER'])) {
                 // Preserve the existing duplicate-check scope during this structural refactor.
