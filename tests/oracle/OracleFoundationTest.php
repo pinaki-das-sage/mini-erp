@@ -294,7 +294,7 @@ final class OracleFoundationTest extends TestCase
             self::assertSame(200, $api->handle('GET', '/api/v1/note', [], $userHeaders)['status']);
             $list = $api->handle('GET', '/api/v1/users', [], $headers, ['page' => '2', 'page_size' => '2']);
             self::assertCount(2, json_decode($list['body'], true)['result']['items']);
-            self::assertSame(200, $api->handle('PATCH', '/api/v1/users/' . $id,
+            self::assertSame(200, $api->handle('POST', '/api/v1/users/' . $id . '/update',
                 ['expected_version' => 3, 'display_name' => 'Disabled fixture', 'is_admin' => false, 'active' => false], $headers)['status']);
             self::assertSame(401, $api->handle('GET', '/api/v1/auth/me', [], $userHeaders)['status']);
             self::assertSame(200, $api->handle('POST', '/api/v1/auth/logout', [], $headers)['status']);

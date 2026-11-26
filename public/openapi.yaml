@@ -3,9 +3,7 @@ openapi: 3.1.0
 info:
   title: Mini ERP Logistics API
   description: >
-    OpenAPI contract for the Mini ERP Logistics module. This document describes
-    API routes and payloads. It does not implement the backend. Confirm the
-    deployed application base URL, credentials, and permission names with the team.
+    OpenAPI contract for the Mini ERP Logistics module. This document describes API routes and payloads. It does not implement the backend. Confirm the deployed application base URL, credentials, and permission names with the team.
   version: 1.0.0
 
 servers:
@@ -29,7 +27,7 @@ security:
 paths:
   /auth/login:
     post:
-      tags: [Authentication]
+      tags: [ Authentication ]
       summary: Login to Mini ERP
       description: Authenticate a user and generate an access token.
       operationId: login
@@ -40,7 +38,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [company, username, password]
+              required: [ company, username, password ]
               properties:
                 company:
                   type: string
@@ -70,7 +68,7 @@ paths:
 
   /auth/me:
     get:
-      tags: [Authentication]
+      tags: [ Authentication ]
       summary: Get the current user
       description: Verify the bearer token and return the caller's identity, roles and permissions.
       operationId: getCurrentUser
@@ -90,7 +88,7 @@ paths:
 
   /meta/permissions:
     get:
-      tags: [Metadata]
+      tags: [ Metadata ]
       summary: List registered permissions
       operationId: getPermissions
       responses:
@@ -103,7 +101,7 @@ paths:
 
   /meta/enums:
     get:
-      tags: [Metadata]
+      tags: [ Metadata ]
       summary: Get API enumeration values
       operationId: getEnums
       responses:
@@ -116,7 +114,7 @@ paths:
 
   /meta/contract:
     get:
-      tags: [Metadata]
+      tags: [ Metadata ]
       summary: Get API contract metadata
       operationId: getContract
       responses:
@@ -129,7 +127,7 @@ paths:
 
   /logistics/vehicles:
     post:
-      tags: [Vehicles]
+      tags: [ Vehicles ]
       summary: Create a vehicle
       operationId: createVehicle
       requestBody:
@@ -140,7 +138,7 @@ paths:
               allOf:
                 - $ref: '#/components/schemas/Command'
                 - type: object
-                  required: [vehicle_code, registration_number, capacity]
+                  required: [ vehicle_code, registration_number, capacity ]
                   properties:
                     vehicle_code:
                       type: integer
@@ -153,7 +151,7 @@ paths:
                     capacity:
                       $ref: '#/components/schemas/PositiveKilograms'
                     description:
-                      type: [string, 'null']
+                      type: [ string, 'null' ]
                       maxLength: 255
                     is_active:
                       type: string
@@ -174,7 +172,7 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
     get:
-      tags: [Vehicles]
+      tags: [ Vehicles ]
       summary: List vehicles
       operationId: listVehicles
       parameters:
@@ -188,7 +186,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [AVAILABLE, ASSIGNED]
+            enum: [ AVAILABLE, ASSIGNED ]
         - name: search
           in: query
           schema:
@@ -209,7 +207,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     get:
-      tags: [Vehicles]
+      tags: [ Vehicles ]
       summary: Get a vehicle
       operationId: getVehicle
       responses:
@@ -225,7 +223,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     post:
-      tags: [Vehicles]
+      tags: [ Vehicles ]
       summary: Update a vehicle
       operationId: updateVehicle
       requestBody:
@@ -246,11 +244,11 @@ paths:
                     capacity:
                       $ref: '#/components/schemas/PositiveKilograms'
                     description:
-                      type: [string, 'null']
+                      type: [ string, 'null' ]
                       maxLength: 255
                     is_active:
                       type: string
-                      enum: ['T', 'F']
+                      enum: [ 'T', 'F' ]
       responses:
         '200':
           description: Vehicle updated
@@ -268,7 +266,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     post:
-      tags: [Vehicles]
+      tags: [ Vehicles ]
       summary: Delete a never-used vehicle
       operationId: deleteVehicle
       requestBody:
@@ -291,7 +289,7 @@ paths:
 
   /logistics/drivers:
     post:
-      tags: [Drivers]
+      tags: [ Drivers ]
       summary: Create a driver profile
       operationId: createDriver
       requestBody:
@@ -301,13 +299,13 @@ paths:
             schema:
               allOf:
                 - type: object
-                  required: [driver_code, first_name, last_name, licence_number, licence_expiry]
+                  required: [ driver_code, first_name, last_name, licence_number, licence_expiry ]
                   properties:
                     driver_code:
                       type: string
                       maxLength: 30
                     user_id:
-                      type: [integer, 'null']
+                      type: [ integer, 'null' ]
                       minimum: 1
                     first_name:
                       type: string
@@ -316,7 +314,7 @@ paths:
                       type: string
                       maxLength: 100
                     phone:
-                      type: [string, 'null']
+                      type: [ string, 'null' ]
                       maxLength: 30
                     licence_number:
                       type: string
@@ -326,7 +324,7 @@ paths:
                       format: date
                     isactive:
                       type: string
-                      enum: ['T', 'F']
+                      enum: [ 'T', 'F' ]
                       default: 'T'
       responses:
         '201':
@@ -344,7 +342,7 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
     get:
-      tags: [Drivers]
+      tags: [ Drivers ]
       summary: List drivers
       operationId: listDrivers
       parameters:
@@ -368,7 +366,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     get:
-      tags: [Drivers]
+      tags: [ Drivers ]
       summary: Get a driver
       operationId: getDriver
       responses:
@@ -387,42 +385,43 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     post:
-      tags: [Drivers]
+      tags: [ Drivers ]
       summary: Update a driver profile
-      operationId: updateDriver
+      operationId: updateDriverLegacy
+      parameters:
+        - $ref: '#/components/parameters/Id'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              allOf:
-                - type: object
-                  required: [driver_code, first_name, last_name, licence_number, licence_expiry]
-                  properties:
-                    driver_code:
-                      type: string
-                      maxLength: 30
-                    user_id:
-                      type: [integer, 'null']
-                      minimum: 1
-                    first_name:
-                      type: string
-                      maxLength: 100
-                    last_name:
-                      type: string
-                      maxLength: 100
-                    phone:
-                      type: [string, 'null']
-                      maxLength: 30
-                    licence_number:
-                      type: string
-                      maxLength: 50
-                    licence_expiry:
-                      type: string
-                      format: date
-                    isactive:
-                      type: string
-                      enum: ['T', 'F']
+              type: object
+              required: [ driver_code, first_name, last_name, licence_number, licence_expiry ]
+              properties:
+                driver_code:
+                  type: string
+                  maxLength: 30
+                user_id:
+                  type: [ integer, 'null' ]
+                  minimum: 1
+                first_name:
+                  type: string
+                  maxLength: 100
+                last_name:
+                  type: string
+                  maxLength: 100
+                phone:
+                  type: [ string, 'null' ]
+                  maxLength: 30
+                licence_number:
+                  type: string
+                  maxLength: 50
+                licence_expiry:
+                  type: string
+                  format: date
+                isactive:
+                  type: string
+                  enum: [ 'T', 'F' ]
       responses:
         '200':
           description: Driver updated
@@ -440,16 +439,16 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+      deprecated: true
+      description: Compatibility alias for POST /logistics/drivers/{id}/update.
   /logistics/drivers/{id}/delete:
     parameters:
       - $ref: '#/components/parameters/Id'
     post:
-      tags: [Drivers]
+      tags: [ Drivers ]
       summary: Delete or deactivate a driver profile
       description: >
-        A driver never referenced by a Trip may be deleted. A driver with
-        historical Trip references is deactivated. A driver assigned to an
-        active Trip cannot be deleted or deactivated.
+        A driver never referenced by a Trip may be deleted. A driver with historical Trip references is deactivated. A driver assigned to an active Trip cannot be deleted or deactivated.
       operationId: deleteDriver
       requestBody:
         required: true
@@ -481,7 +480,7 @@ paths:
 
   /logistics/driver-users:
     get:
-      tags: [Drivers]
+      tags: [ Drivers ]
       summary: List eligible same-company driver user accounts
       operationId: listEligibleDriverUsers
       parameters:
@@ -505,7 +504,7 @@ paths:
 
   /logistics/resources/availability:
     get:
-      tags: [Resources]
+      tags: [ Resources ]
       summary: Check vehicle or driver availability
       operationId: getResourceAvailability
       parameters:
@@ -514,7 +513,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [vehicle, driver]
+            enum: [ vehicle, driver ]
         - name: planned_departure_at
           in: query
           required: true
@@ -540,7 +539,7 @@ paths:
 
   /logistics/dispatchable-orders:
     get:
-      tags: [Orders]
+      tags: [ Orders ]
       summary: List eligible Sales Order lines available for trip planning
       operationId: listDispatchableOrders
       parameters:
@@ -568,7 +567,7 @@ paths:
 
   /logistics/trip-lines:
     get:
-      tags: [Trips]
+      tags: [ Trips ]
       summary: List saved company trip lines
       operationId: listPlanningTripLines
       parameters:
@@ -594,7 +593,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     get:
-      tags: [Trips]
+      tags: [ Trips ]
       summary: Get a saved company trip line
       operationId: getPlanningTripLine
       responses:
@@ -609,32 +608,37 @@ paths:
 
   /logistics/trips:
     post:
-      tags: [Trips]
-      summary: Create an empty Draft trip and reserve its Vehicle and Driver pair
+      tags: [ Trips ]
+      summary: Create a Draft Trip from one complete Submitted Sales Order
+      description: >
+        One whole Submitted Sales Order becomes one Draft Trip and every Sales Order line becomes a TripLine. Draft creation leaves Sales Submitted. Line weight and load are derived from Inventory, never supplied by the client.
       operationId: createTrip
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              allOf:
-                - $ref: '#/components/schemas/Command'
-                - type: object
-                  required: [trip_reference, vehicle_id, driver_id, planned_departure_at]
-                  properties:
-                    trip_reference:
-                      type: integer
-                      minimum: 1
-                      example: 1001
-                    vehicle_id:
-                      type: integer
-                      minimum: 1
-                    driver_id:
-                      type: integer
-                      minimum: 1
-                    planned_departure_at:
-                      type: string
-                      format: date-time
+              type: object
+              additionalProperties: false
+              required: [ order_number, trip_reference, vehicle_id, driver_id, planned_departure_at ]
+              properties:
+                order_number:
+                  type: string
+                  example: SO-1001
+                trip_reference:
+                  type: integer
+                  minimum: 1
+                  example: 1001
+                vehicle_id:
+                  type: integer
+                  minimum: 1
+                driver_id:
+                  type: integer
+                  minimum: 1
+                planned_departure_at:
+                  type: string
+                  format: date-time
+                  example: '2026-11-26T10:00:00+05:30'
       responses:
         '201':
           description: Draft trip created
@@ -651,26 +655,12 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
     get:
-      tags: [Trips]
+      tags: [ Trips ]
       summary: List trips
       operationId: listTrips
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PageSize'
-        - name: status
-          in: query
-          schema:
-            type: string
-            enum: [DRAFT, DISPATCHED, DELIVERED, CANCELLED]
-        - name: trip_reference
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-        - name: assigned_to_me
-          in: query
-          schema:
-            type: boolean
       responses:
         '200':
           description: Paged trips
@@ -687,78 +677,41 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     get:
-      tags: [Trips]
-      summary: Get trip details, assigned Sales lines and derived weight totals
+      tags: [ Trips ]
+      summary: Get a trip
       operationId: getTrip
-      parameters:
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/PageSize'
       responses:
         '200':
           description: Trip detail
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TripDetailEnvelope'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    patch:
-      tags: [Trips]
-      summary: Edit a Draft trip or replace its resources
-      operationId: updateTrip
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              allOf:
-                - $ref: '#/components/schemas/VersionedCommand'
-                - type: object
-                  properties:
-                    vehicle_id:
-                      type: integer
-                      minimum: 1
-                    driver_id:
-                      type: integer
-                      minimum: 1
-                    planned_departure_at:
-                      type: string
-                      format: date-time
-      responses:
-        '200':
-          description: Draft trip updated
-          content:
-            application/json:
-              schema:
                 $ref: '#/components/schemas/TripEnvelope'
-        '400':
-          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
 
   /logistics/trips/{id}/cancel:
     parameters:
       - $ref: '#/components/parameters/Id'
     post:
-      tags: [Trips]
+      tags: [ Trips ]
       summary: Cancel a Draft trip
+      description: Notifies Sales in the same transaction; the Sales Order must be Submitted and stays Submitted.
       operationId: cancelTrip
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              allOf:
-                - $ref: '#/components/schemas/VersionedCommand'
-                - type: object
-                  required: [reason]
-                  properties:
-                    reason:
-                      type: string
-                      minLength: 1
-                      maxLength: 500
+              type: object
+              additionalProperties: false
+              required: [ reason ]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                  example: Vehicle unavailable
       responses:
         '200':
           description: Trip cancelled and resources released
@@ -775,30 +728,33 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     post:
-      tags: [Dispatch and Delivery]
-      summary: Dispatch all assigned TripLines atomically
+      tags: [ Trips ]
+      summary: Dispatch a Draft trip
       description: >
-        Dispatch is allowed only after every Sales Order line has been assigned
-        across its planned Draft Trips. The first dispatch advances Sales to
-        IN_PROGRESS.
+        Draft -> Dispatched. Consumes the Inventory reservations, records the dispatch with Sales (Submitted -> In Progress) in one transaction shared by Logistics, Inventory and Sales.
       operationId: dispatchTrip
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/VersionedCommand'
+              type: object
+              additionalProperties: false
+              maxProperties: 0
+              example: {}
       responses:
         '200':
           description: Trip dispatched
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TripDispatchEnvelope'
+                $ref: '#/components/schemas/TripEnvelope'
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
         '503':
@@ -808,7 +764,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     get:
-      tags: [Dispatch and Delivery]
+      tags: [ Dispatch and Delivery ]
       summary: Read the derived dispatch summary
       description: Read-only projection from Trip, TripLine, Vehicle, Driver, Product and Sales Order data.
       operationId: getTripManifest
@@ -831,11 +787,10 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     post:
-      tags: [Dispatch and Delivery]
+      tags: [ Dispatch and Delivery ]
       summary: Record full successful delivery on a TripLine
       description: >
-        Only the authenticated assigned driver may record delivery. Partial,
-        excess, fractional and duplicate delivery are rejected.
+        Only the authenticated assigned driver may record delivery. Partial, excess, fractional and duplicate delivery are rejected.
       operationId: recordDelivery
       requestBody:
         required: true
@@ -845,7 +800,7 @@ paths:
               allOf:
                 - $ref: '#/components/schemas/VersionedCommand'
                 - type: object
-                  required: [trip_line_id, delivered_quantity]
+                  required: [ trip_line_id, delivered_quantity ]
                   properties:
                     trip_line_id:
                       type: integer
@@ -867,7 +822,7 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
     get:
-      tags: [Dispatch and Delivery]
+      tags: [ Dispatch and Delivery ]
       summary: Read delivery fields from TripLines
       operationId: listDeliveries
       parameters:
@@ -889,11 +844,10 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     post:
-      tags: [Trips]
+      tags: [ Trips ]
       summary: Close a fully delivered and reconciled Trip
       description: >
-        Validates every TripLine delivery and the Sales in-transit balance,
-        marks the Trip DELIVERED and releases the current Vehicle and Driver.
+        Validates every TripLine delivery and the Sales in-transit balance, marks the Trip DELIVERED and releases the current Vehicle and Driver.
       operationId: closeTrip
       requestBody:
         required: true
@@ -917,7 +871,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     get:
-      tags: [History and Reconciliation]
+      tags: [ History and Reconciliation ]
       summary: Read sanitized trip history
       operationId: getTripHistory
       parameters:
@@ -935,7 +889,7 @@ paths:
 
   /logistics/reconciliation:
     get:
-      tags: [History and Reconciliation]
+      tags: [ History and Reconciliation ]
       summary: Read logistics reconciliation
       operationId: getReconciliation
       parameters:
@@ -957,6 +911,138 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /logistics/drivers/{id}/update:
+    post:
+      tags: [ Drivers ]
+      summary: Update a driver profile
+      operationId: updateDriver
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ driver_code, first_name, last_name, licence_number, licence_expiry ]
+              properties:
+                driver_code:
+                  type: string
+                  maxLength: 30
+                user_id:
+                  type: [ integer, 'null' ]
+                  minimum: 1
+                first_name:
+                  type: string
+                  maxLength: 100
+                last_name:
+                  type: string
+                  maxLength: 100
+                phone:
+                  type: [ string, 'null' ]
+                  maxLength: 30
+                licence_number:
+                  type: string
+                  maxLength: 50
+                licence_expiry:
+                  type: string
+                  format: date
+                isactive:
+                  type: string
+                  enum: [ 'T', 'F' ]
+      responses:
+        '200':
+          description: Driver updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriverEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    parameters:
+      - $ref: '#/components/parameters/Id'
+  /logistics/trips/{id}/update:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [ Trips ]
+      summary: Update a Draft trip's Vehicle, Driver and planned departure
+      operationId: updateTrip
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [ vehicle_id, driver_id, planned_departure_at ]
+              properties:
+                vehicle_id:
+                  type: integer
+                  minimum: 1
+                driver_id:
+                  type: integer
+                  minimum: 1
+                planned_departure_at:
+                  type: string
+                  format: date-time
+                  example: '2026-11-26T11:00:00+05:30'
+      responses:
+        '200':
+          description: Draft trip updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /logistics/trips/{id}/deliver:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [ Trips ]
+      summary: Complete delivery of a Dispatched trip
+      description: >
+        Dispatched -> Delivered. Notifies Sales through recordDelivery() in the same transaction (In Progress -> Closed). No invoice is created during delivery.
+      operationId: deliverTrip
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              maxProperties: 0
+              example: {}
+      responses:
+        '200':
+          description: Trip delivered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/Unavailable'
 
 components:
   securitySchemes:
@@ -993,10 +1079,8 @@ components:
     PlanningTripLine:
       type: object
       description: >
-        Saved line snapshot with current related details. For cancelled trips (X),
-        only trip details are expanded; sales_line and product are null. Snapshot
-        source IDs, quantities and weights remain available at the top level.
-      required: [id, trip_id, sales_line_id, product_id, quantity, total_weight, line_load, created_at, updated_at, trip, sales_line, product]
+        Saved line snapshot with current related details. For cancelled trips (X), only trip details are expanded; sales_line and product are null. Snapshot source IDs, quantities and weights remain available at the top level.
+      required: [ id, trip_id, sales_line_id, product_id, quantity, total_weight, line_load, created_at, updated_at, trip, sales_line, product ]
       properties:
         id:
           type: integer
@@ -1020,7 +1104,7 @@ components:
           type: string
           format: date-time
         updated_at:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         trip:
           anyOf:
@@ -1053,7 +1137,7 @@ components:
           type: integer
         status:
           type: string
-          enum: [D, S, C, X]
+          enum: [ D, S, C, X ]
         planned_departure_at:
           type: string
           format: date-time
@@ -1061,29 +1145,29 @@ components:
           type: string
           format: date-time
         assigned_by:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         cancelled_at:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         cancelled_by:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         cancellation_reason:
-          type: [string, 'null']
+          type: [ string, 'null' ]
         dispatched_at:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         dispatched_by:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         delivered_at:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         delivered_by:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         created_at:
           type: string
           format: date-time
         updated_at:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
 
     TripLineSalesDetails:
@@ -1099,20 +1183,20 @@ components:
         product_id:
           type: integer
         description:
-          type: [string, 'null']
+          type: [ string, 'null' ]
         quantity:
           type: integer
         unit_price:
           type: number
           format: double
         source_line_record_id:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         trip_id:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         logistics_trip_line_id:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         trip_status:
-          type: [string, 'null']
+          type: [ string, 'null' ]
         whencreated:
           type: string
           format: date-time
@@ -1143,7 +1227,7 @@ components:
           type: string
           format: date-time
         when_updated:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         stock_balance:
           description: Current company/product balance, not historical stock at delivery; null if no balance row exists.
@@ -1153,7 +1237,7 @@ components:
 
     TripLineStockBalance:
       type: object
-      required: [product_id, on_hand, reserved, available, when_updated]
+      required: [ product_id, on_hand, reserved, available, when_updated ]
       properties:
         product_id:
           type: integer
@@ -1175,7 +1259,7 @@ components:
           properties:
             result:
               type: object
-              required: [items, page, page_size]
+              required: [ items, page, page_size ]
               properties:
                 items:
                   type: array
@@ -1196,7 +1280,7 @@ components:
 
     Command:
       type: object
-      required: [action_reference]
+      required: [ action_reference ]
       properties:
         action_reference:
           type: string
@@ -1209,7 +1293,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/Command'
         - type: object
-          required: [expected_version]
+          required: [ expected_version ]
           properties:
             expected_version:
               type: integer
@@ -1235,9 +1319,9 @@ components:
           type: boolean
           example: true
         operation_id:
-          type: [string, 'null']
+          type: [ string, 'null' ]
         current_version:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         result:
           type: object
           properties:
@@ -1255,7 +1339,7 @@ components:
             must_change_password:
               type: boolean
         error:
-          type: [object, 'null']
+          type: [ object, 'null' ]
 
     GenericSuccess:
       type: object
@@ -1264,16 +1348,16 @@ components:
           type: boolean
           example: true
         operation_id:
-          type: [string, 'null']
+          type: [ string, 'null' ]
         current_version:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         result: {}
         error:
-          type: [object, 'null']
+          type: [ object, 'null' ]
 
     Vehicle:
       type: object
-      required: [id, vehicle_code, registration_number, capacity_kg, active, assignment_status, current_version]
+      required: [ id, vehicle_code, registration_number, capacity_kg, active, assignment_status, current_version ]
       properties:
         id:
           type: integer
@@ -1285,7 +1369,7 @@ components:
           type: string
           maxLength: 40
         description:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           maxLength: 255
         capacity_kg:
           $ref: '#/components/schemas/PositiveKilograms'
@@ -1293,16 +1377,16 @@ components:
           type: boolean
         assignment_status:
           type: string
-          enum: [AVAILABLE, ASSIGNED]
+          enum: [ AVAILABLE, ASSIGNED ]
         active_trip_id:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         current_version:
           type: integer
           minimum: 1
 
     Driver:
       type: object
-      required: [id, driver_code, first_name, last_name, licence_number, licence_expiry, isactive]
+      required: [ id, driver_code, first_name, last_name, licence_number, licence_expiry, isactive ]
       properties:
         id:
           type: integer
@@ -1311,7 +1395,7 @@ components:
           type: string
           maxLength: 30
         user_id:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
           minimum: 1
         first_name:
           type: string
@@ -1320,7 +1404,7 @@ components:
           type: string
           maxLength: 100
         phone:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           maxLength: 30
         licence_number:
           type: string
@@ -1330,11 +1414,11 @@ components:
           format: date
         isactive:
           type: string
-          enum: ['T', 'F']
+          enum: [ 'T', 'F' ]
 
     Trip:
       type: object
-      required: [id, trip_reference, vehicle_id, driver_id, planned_departure_at, status, sales_order_id, planned_load_kg, capacity_kg, remaining_capacity_kg, current_version]
+      required: [ id, trip_reference, vehicle_id, driver_id, planned_departure_at, status, sales_order_id, assigned_at, assigned_by, cancelled_at, cancelled_by, cancellation_reason, dispatched_at, dispatched_by, delivered_at, delivered_by, planned_load_kg, capacity_kg, remaining_capacity_kg ]
       properties:
         id:
           type: integer
@@ -1353,51 +1437,45 @@ components:
           format: date-time
         status:
           type: string
-          enum: [DRAFT, DISPATCHED, DELIVERED, CANCELLED]
+          enum: [ DRAFT, DISPATCHED, DELIVERED, CANCELLED ]
         sales_order_id:
-          type: [string, 'null']
-        assigned_at:
-          type: [string, 'null']
-          format: date-time
-        assigned_by:
-          type: [string, 'null']
-        cancelled_at:
-          type: [string, 'null']
-          format: date-time
-        cancelled_by:
-          type: [string, 'null']
-        cancellation_reason:
-          type: [string, 'null']
-          maxLength: 500
-        dispatched_at:
-          type: [string, 'null']
-          format: date-time
-        dispatched_by:
-          type: [string, 'null']
-        delivered_at:
-          type: [string, 'null']
-          format: date-time
-        delivered_by:
-          type: [string, 'null']
-        planned_load_kg:
-          oneOf:
-            - $ref: '#/components/schemas/Kilograms'
-            - type: 'null'
-        capacity_kg:
-          oneOf:
-            - $ref: '#/components/schemas/Kilograms'
-            - type: 'null'
-        remaining_capacity_kg:
-          oneOf:
-            - $ref: '#/components/schemas/Kilograms'
-            - type: 'null'
-        current_version:
           type: integer
           minimum: 1
+        assigned_at:
+          type: [ string, 'null' ]
+          format: date-time
+        assigned_by:
+          type: [ integer, 'null' ]
+          description: Numeric ME_USERS.ID.
+        cancelled_at:
+          type: [ string, 'null' ]
+          format: date-time
+        cancelled_by:
+          type: [ integer, 'null' ]
+        cancellation_reason:
+          type: [ string, 'null' ]
+          maxLength: 500
+        dispatched_at:
+          type: [ string, 'null' ]
+          format: date-time
+        dispatched_by:
+          type: [ integer, 'null' ]
+        delivered_at:
+          type: [ string, 'null' ]
+          format: date-time
+        delivered_by:
+          type: [ integer, 'null' ]
+        planned_load_kg:
+          type: number
+          description: SUM(ME_LOG_TRIP_LINES.LINE_LOAD) in kilograms.
+        capacity_kg:
+          type: number
+        remaining_capacity_kg:
+          type: number
 
     TripLine:
       type: object
-      required: [id, trip_id, sales_line_id, product_id, quantity, unit_weight_kg, line_load_kg]
+      required: [ id, trip_id, sales_line_id, product_id, quantity, unit_weight_kg, line_load_kg ]
       properties:
         id:
           type: integer
@@ -1420,21 +1498,21 @@ components:
         line_load_kg:
           $ref: '#/components/schemas/Kilograms'
         delivery_status:
-          type: [string, 'null']
-          enum: [SUCCESS, null]
+          type: [ string, 'null' ]
+          enum: [ SUCCESS, null ]
         delivered_quantity:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
           minimum: 1
         delivered_at:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         delivered_by_driver_id:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         recorded_by_user_id:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           maxLength: 40
         source_reference:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           maxLength: 100
         product:
           type: object
@@ -1459,13 +1537,13 @@ components:
             address_line1:
               type: string
             address_line2:
-              type: [string, 'null']
+              type: [ string, 'null' ]
             city:
               type: string
             state:
-              type: [string, 'null']
+              type: [ string, 'null' ]
             postal_code:
-              type: [string, 'null']
+              type: [ string, 'null' ]
             country_code:
               type: string
               maxLength: 2
@@ -1504,7 +1582,7 @@ components:
 
     DispatchableSalesLine:
       type: object
-      required: [sales_order_id, sales_order_version, sales_order_status, sales_line_id, product_id, quantity, unit_weight_kg, line_load_kg]
+      required: [ sales_order_id, sales_order_version, sales_order_status, sales_line_id, product_id, quantity, unit_weight_kg, line_load_kg ]
       properties:
         sales_order_id:
           type: string
@@ -1515,7 +1593,7 @@ components:
           minimum: 1
         sales_order_status:
           type: string
-          enum: [SUBMITTED, IN_PROGRESS]
+          enum: [ SUBMITTED, IN_PROGRESS ]
         sales_line_id:
           type: string
           maxLength: 40
@@ -1552,13 +1630,13 @@ components:
             address_line1:
               type: string
             address_line2:
-              type: [string, 'null']
+              type: [ string, 'null' ]
             city:
               type: string
             state:
-              type: [string, 'null']
+              type: [ string, 'null' ]
             postal_code:
-              type: [string, 'null']
+              type: [ string, 'null' ]
             country_code:
               type: string
               maxLength: 2
@@ -1570,7 +1648,7 @@ components:
           properties:
             result:
               type: object
-              required: [items, page, page_size]
+              required: [ items, page, page_size ]
               properties:
                 items:
                   type: array
@@ -1588,7 +1666,7 @@ components:
           properties:
             result:
               type: object
-              required: [items, page, page_size]
+              required: [ items, page, page_size ]
               properties:
                 items:
                   type: array
@@ -1606,7 +1684,7 @@ components:
           properties:
             result:
               type: object
-              required: [items, page, page_size]
+              required: [ items, page, page_size ]
               properties:
                 items:
                   type: array
@@ -1624,7 +1702,7 @@ components:
           properties:
             result:
               type: object
-              required: [items, page, page_size]
+              required: [ items, page, page_size ]
               properties:
                 items:
                   type: array
@@ -1637,7 +1715,7 @@ components:
 
     TripLinePage:
       type: object
-      required: [items, page, page_size]
+      required: [ items, page, page_size ]
       properties:
         items:
           type: array
@@ -1669,7 +1747,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/Trip'
         - type: object
-          required: [vehicle, driver, lines, total_lines]
+          required: [ vehicle, driver, lines, total_lines ]
           properties:
             vehicle:
               $ref: '#/components/schemas/Vehicle'
@@ -1691,7 +1769,7 @@ components:
 
     TripDispatchResult:
       type: object
-      required: [trip, vehicle, driver, lines, total_lines, total_load_kg]
+      required: [ trip, vehicle, driver, lines, total_lines, total_load_kg ]
       properties:
         trip:
           $ref: '#/components/schemas/Trip'
@@ -1717,24 +1795,24 @@ components:
 
     IdentityResponse:
       type: object
-      required: [success, operation_id, current_version, result, error]
+      required: [ success, operation_id, current_version, result, error ]
       properties:
         success:
           type: boolean
         operation_id:
-          type: [string, 'null']
+          type: [ string, 'null' ]
         current_version:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         result:
           type: object
-          required: [id, username, company_id, company_name, roles, is_admin, must_change_password, permissions]
+          required: [ id, username, company_id, company_name, roles, is_admin, must_change_password, permissions ]
           properties:
             id:
-              type: [string, integer]
+              type: [ string, integer ]
             username:
               type: string
             company_id:
-              type: [string, integer]
+              type: [ string, integer ]
             company_name:
               type: string
             roles:
@@ -1750,7 +1828,7 @@ components:
               items:
                 type: string
         error:
-          type: [object, 'null']
+          type: [ object, 'null' ]
 
     ErrorResponse:
       type: object
@@ -1759,11 +1837,11 @@ components:
           type: boolean
           example: false
         operation_id:
-          type: [string, 'null']
+          type: [ string, 'null' ]
         current_version:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
         result:
-          type: [object, 'null']
+          type: [ object, 'null' ]
         error:
           type: object
           properties:

@@ -1,6 +1,234 @@
 # API-first development
 
-The shared framework implements bearer authentication, permission-checked route registration, JSON responses and input/pagination helpers. The note and user-administration APIs are working examples. Inventory, Purchasing, Sales and Logistics endpoints remain team work.
+The shared framework implements bearer authentication, permission-checked route registration, JSON responses and input/pagination helpers. The note and user-administration APIs are working examples. Customer routes and the Quote backend are implemented; Quote Inventory validation is pending. Other domain endpoints remain team work.
+
+## Agreed Order increment: linear source flow
+
+The current Order contract in `public/openapi.yaml` narrows the broader future workflow described below:
+Submitted Quote -> Draft Order -> Submitted Order -> In Progress -> Closed plus an automatically created Draft Invoice.
+Standalone Orders/Invoices and manual Invoice creation are outside this increment. Order sources cannot
+be cleared or replaced. Customer, Warehouse, address and terms remain locked; the copied lines become
+editable Draft Order lines. The Quote is the starting point and remains unchanged when the Order is edited.
+
+Order Submit reserves final saved demand, marks the Order Submitted, and creates exactly one linked
+Draft Invoice using `src/sales/invoices/OrderInvoiceService.php`, all in the Order transaction.
+Invoice Date uses Order Date; Due Date follows payment terms. The Submit result includes `invoice_number`.
+Any failure rolls back stock, Invoice, Order status/version, audit and replay records. Exact retries
+return the original result. Draft creation has no Customer debt effect and does not deduct stock.
+
+Logistics assignment makes the Order In Progress. Dispatch consumes reservations. Whole-Order delivery
+makes it Closed; delivery does not create or modify the Invoice. Logistics does not wait for Invoice submission.
+
+An unassigned Submitted Order can return to Draft when its linked Invoice is Draft without payments
+or downstream references. Delete that Invoice/link, release reservations and return the Order atomically.
+Invoice creation requires sales.invoices:create; deletion requires sales.invoices:delete. Older Submitted
+Orders with no Invoice can still return. Keep the original Quote link. In Progress/Closed cannot return.
+
+Kavya's Invoice API/backend branch remains unmerged. This internal integration uses existing Sales tables
+and numbering; no public Invoice CRUD/payment endpoints are added. Future Invoice writers must use a
+consistent Order-before-Invoice lock order, including Invoice Submit/update/delete, before integration.
+Live Oracle transaction/concurrency acceptance remains pending.
+
+## Order backend and dependency status
+
+`src/sales/orders/OrderService.php` implements Quote-backed create/list/get/update/delete and an eligible
+Quote lookup. All Order routes are registered in `src/sales/api.php`; standalone Order creation is rejected.
+Order listing filters to same-company Quote-backed Orders before pagination. Legacy standalone Orders and
+records missing a valid Quote source do not break the page or consume its slots. They are left untouched;
+direct detail/actions still reject missing or wrong-type sources. Do not guess links or delete old records
+to work around the error; any historical data correction requires verified source evidence.
+Create requires `sales.orders:create` and `sales.quotes:read`. Eligible lookup uses those same permissions.
+Reads require `sales.orders:read`; edits require Update, deletion Delete, and lifecycle actions use the named
+`submit` / `return_to_draft` grants. Submit also requires current Quote Read, including on retries.
+
+Create requires only `source_quote_number`; the server copies the entire authoritative Quote line set,
+Customer, Warehouse, shipping address and payment terms. Do not send those inherited fields or `lines`
+when creating an Order. Optional Order-specific fields are Order Date, requested delivery date, Customer
+PO Number and notes, plus the optional retry reference.
+
+Draft updates allow editing Products, descriptions, quantities and prices, adding/removing lines and
+reordering them. `expected_version` is required; `lines` is optional. Omit `lines` for notes/date-only edits.
+If supplied, send the entire intended Order line set: retain `line_id` to edit/reorder an existing line,
+omit `line_id` to add a new line, and omit a saved row from the collection to remove it. An empty collection
+is invalid. Every submitted line requires numeric `product_id`, description, positive whole-number quantity
+and nonnegative unit price with at most two decimals. Unknown/duplicate IDs and read-only fields are rejected.
+Totals are calculated exactly and header/lines/version/audit/retry result are saved atomically. No stock
+check or reservation happens during Draft edits; Inventory validates and reserves the final saved demand
+on Submit. Product existence/company is enforced by the existing database FK. Submitted/In Progress/Closed
+Orders cannot be edited, nor can referenced or Trip-assigned Drafts.
+
+The server preserves original `source_line_id` provenance on quantity/price/description changes. Added
+lines have null provenance; replacing a Product clears its original Quote-line reference. Clients may
+omit this field or echo the current saved value but cannot forge/reassign it. The Order's Quote header link
+always remains, even if all original lines are replaced. Customer, Warehouse, shipping address and terms
+come from the source, preserving its snapshots. Order Date defaults to the
+business date and must be on/after Quote Date. On create, copy the Quote's requested delivery date only if
+it is on/after Order Date; an earlier default is left unset (null), preserving the Quote unchanged. Explicit
+non-null delivery dates must be on/after Order Date. The mutable
+Order header fields are dates, Customer PO Number and notes. Use the returned `current_version` as
+`expected_version` for each saved change. Optional `action_reference` supports exact retries.
+
+```json
+{
+  "source_quote_number": "SQ-000000000000044",
+  "action_reference": "order-from-quote-044"
+}
+```
+
+Example Draft update (use current Order line IDs/version from GET; omitted saved rows are removed):
+
+```json
+{
+  "expected_version": 1,
+  "notes": "Updated order notes",
+  "lines": [
+    {"line_id": "122", "product_id": "163", "description": "Sagar Testing order update", "quantity": "12", "unit_price": "9818.00"}
+  ]
+}
+```
+
+A notes-only update can be `{"expected_version": 1, "notes": "Deliver before noon"}`. No line array is needed.
+
+Replace the example Quote number with an eligible Submitted Quote. Order numbers use `SO-` plus 15 digits
+from the existing migration 009 sequence; gaps are expected and numbers are not reused. No new migration
+is needed. Verify sales migrations 005-011 and the Inventory Product FK prerequisite before use; do not
+edit applied migrations or reset numbering. Draft deletion releases its Quote link under the Quote parent
+lock, enabling the Quote to be used again.
+
+Order Submit is now connected to the supplied `src/inventory/ReservationService.php`, preserved byte-for-byte
+from the Inventory handoff. `InventoryOrderAdapter` implements `OrderInventory` and is injected by
+`src/sales/api.php`. It locks Sales lines by numeric record ID, rechecks authoritative demand, validates
+active same-company Products/W01 through the existing Quote validator and calls Inventory `reserveStock`
+using numeric internal Order/line/Product IDs (not the public SO number). Calls sort by Product ID then
+line ID; repeated Product quantities consume availability cumulatively under Inventory balance locks.
+Every saved line must be fully reserved before Submitted commits. Exact stock is sufficient; later-line
+shortages, provider errors and Sales audit failures roll back all Inventory/Sales effects together. On-hand
+stock does not decrease during reservation. No internal HTTP, Inventory-table access from Sales or runtime
+fake is used. Submit requires `inventory.reservations:reserve` in addition to Sales Submit and Quote Read.
+
+The adapter also calls Inventory `getReservationDetail` and `releaseReservation`, requiring Inventory
+reservation Read and Release grants. The simplified return flow uses `SalesTripAssignmentGuard` as its
+assignment authority: any saved `TRIP_ID`, `LOGISTICS_TRIP_LINE_ID`, or active Trip status blocks return.
+`trip_status` stores Draft/Dispatched/Delivered, not a boolean. Cancelled status is unassigned only after
+both references are cleared. The guard locks the same-company Order and its lines and supplies Inventory's
+planned-quantity callback from those saved fields. Successful verification yields zero for unassigned
+lines; Draft/unclear assignments conservatively report the saved quantity. This is not a constant-zero
+fallback. Missing Orders/lines and query failures are errors. All failures preserve state/reservations;
+later-line release failures roll back earlier releases as well. Eligible Submitted Orders now advertise
+`move_to_draft`; source Invoice references and versions are still checked before release.
+
+This simpler contract requires Logistics to save assignments/claims and mirror Sales Trip fields through
+the same transaction/callbacks and parent/line locks. A hidden Logistics-only claim is unsupported. No
+Logistics HTTP/provider lookup is needed on return. Keep the original Quote unchanged. Release retains
+Inventory history and resubmission creates a fresh reservation cycle without duplicating active records.
+For Logistics' dispatch/event verification, use its own authoritative claim callback as proposed in the
+handoff; do not reuse an intermediate pre-refresh Sales-field snapshot for dispatch detail checks.
+
+Deploy `src/inventory/ReservationService.php`, `src/sales/orders/InventoryOrderAdapter.php`,
+`src/sales/orders/SalesTripAssignmentGuard.php`, `src/sales/invoices/OrderInvoiceService.php`, the matching `OrderService.php` and `src/sales/api.php`
+together, plus the updated OpenAPI document. Regenerate Composer autoload files if using
+an authoritative class map. This change introduces no Sales migration. Inventory's owning migrations must
+already provide `ME_INV_PRODUCTS`, `ME_INV_STOCK_BALANCE`, `ME_INV_RESERVATION`, `ME_INV_RESERVATION_SEQ` and
+the registered `inventory.reservations` Read/Reserve/Release permissions. Missing objects or ungranted
+operations are real deployment errors; do not replace them with invented balances or automatic grants.
+
+Lock order for this increment is source Quote -> Order parent -> Customer -> sorted Sales lines ->
+Inventory calls ordered by Product ID/line ID, each locking balance before reservation.
+Source identity is immutable and rechecked after locking. Lists release each record's locks before the next
+record. Every future Logistics assignment/cancellation and Invoice source claim must coordinate on the
+same Order parent; review the complete Trip/balance lock order with both provider teams before integration.
+Draft deletion relies on the invariant that Logistics cannot assign Draft Orders. Existing Sales Trip fields
+are presentation facts only; they are not an authoritative replacement for a Logistics return check.
+
+The proposed `SalesFulfillment` event methods and provider/Invoice interfaces are ready for team review:
+see [the Sales–Logistics handoff](sales-logistics-handoff.md). They are not wired into production; real
+Logistics event facts remain integration work; submit-time Invoice creation is connected. The current
+return-to-Draft path uses the saved-field protocol above. No UI or live
+Oracle/concurrency acceptance is claimed. Adapter tests execute the real
+supplied reservation service with transactional database doubles; other Sales tests also use provider
+doubles. They cannot prove actual Oracle locks or persisted stock effects. Run:
+
+```text
+php vendor/bin/phpunit --filter OrderServiceTest
+php vendor/bin/phpunit --filter InventoryOrderAdapterTest
+php vendor/bin/phpunit --filter SalesFulfillmentTest
+php vendor/bin/phpunit --filter SalesTripAssignmentGuardTest
+php vendor/bin/phpunit --testsuite unit
+php bin/lint.php
+node --test tests/unit/sales/sales-openapi.test.cjs
+```
+
+Local verification for this increment: 294 focused PHPUnit tests passed (OrderService, QuoteService,
+CustomerService, SalesRules, InventoryQuoteValidator, InventoryOrderAdapter, SalesFulfillment and SalesTripAssignmentGuard), with 1,469 assertions
+on PHP 8.4.27 WebAssembly. This includes the supplied ReservationService executing against a transactional
+database double for exact stock, cumulative shortages, permission checks, audit rollback and release/resubmit cycles.
+PHP parser checks passed for 85 application/test/migration PHP files. Native PHP execution is blocked on
+this Windows host; the full subprocess-dependent unit suite was not completed. OpenAPI checks have 12
+passes and three pre-existing failures in Customer metadata and shared Product
+definitions. Order-specific checks pass. No Oracle, provider concurrency or real stock effects were tested.
+
+## Sales backend folders
+
+Customer-only classes live in `src/sales/customers/` (`MiniErp\sales\customers`), and Quote-only classes live in `src/sales/quotes/` (`MiniErp\sales\quotes`). Shared `Validation.php`, `DocumentRules.php`, `SalesPermissions.php`, and the module route entry point `api.php` remain directly in `src/sales/`. Migrations and fixtures remain under `database/`; API URLs and JSON fields are unchanged.
+
+Deploy both new directories and the matching `src/sales/api.php` together when upgrading the old flat layout. Retire the superseded root-level Customer/Quote class files after deployment. Composer's existing PSR-4 mapping supports the new folders; regenerate autoload files with `composer dump-autoload` if the server uses an optimized or authoritative class map. There are no database changes for this reorganization.
+
+## Customer Code generation
+
+Customer creation generates an immutable code such as `CUST-001`, `CUST-002`, and `CUST-1000`. Omit `customer_code` from the create body; supplying it is rejected. A single Oracle sequence serves all companies, and rollbacks or cached sequence values can leave gaps. Numeric Customer URL IDs remain separate. Existing codes remain unchanged.
+
+Pause Customer creation while deploying the matching backend and applying `php bin/console.php migrate --module=sales` with the configured schema confirmation when required. Migration `011_oe_customer_code_sequence.php` starts above the largest existing uppercase `CUST-` code with a 1 to 15 digit suffix across all companies (or at 1 if none exist). Resume creation after both steps finish. Do not reset or cycle the sequence. Missing or exhausted numbering returns `NUMBERING_UNAVAILABLE` (503).
+
+`action_reference` remains optional: the same explicit reference and input replay the original result without consuming another Customer Code. Repeated requests without a reference create separate Customers with separate codes.
+
+## Sales Quote implementation and Inventory handoff
+
+The supplied Sales and Order Entry requirements and five-table OE design govern Quotes. Older starter briefs describe a different Sales workflow; do not copy their allocation states or exclude Quotes from this implementation.
+
+Quote routes under `/api/v1/sales/quotes` support create/list/get, POST `/{quote_number}/update`, and POST actions `submit`, `move-to-draft`, `delete`. Create uses Create authorization; edits, submit and return use Update; reads use Read; deletion uses Delete. Legacy named submit/return grants do not independently authorize Quote workflow. Every saved-document change requires `expected_version`. `action_reference` is optional, matching Customers: omit it for an independent request; preserve an explicit reference and payload for retries. All update endpoints use POST with an `/update` suffix because the hosting environment restricts HTTP methods.
+
+```json
+{
+  "customer_code": "CUST-001",
+  "warehouse_id": "W01",
+  "lines": [
+    {"product_id": "163", "description": "Sample product", "quantity": "5", "unit_price": "250.00"}
+  ]
+}
+```
+
+Shipping Address and Payment Terms default from the active Customer and remain saved snapshots. Customer Code and Name in responses come from the current Customer master. Quantities are positive whole-number strings with up to 9 digits. Prices allow 10 whole digits and 2 decimals; amounts and totals allow 16 whole digits and 2 decimals. Every edit supplies all intended lines, retaining saved `line_id` values for edits. Array order controls line display positions. Line validation errors identify the affected line.
+
+Sales migrations 005/006 install headers/lines. `007_oe_source_links.php` and `008_oe_payments.php` restore the supplied table migrations, already applied on the target database. `009_oe_document_numbering.php` creates separate Quote, Order, Invoice and Payment sequences together. The separate Quote numbering migration was consolidated into 009 at the requester's direction. If an earlier version of 009 or either former Quote numbering filename is already recorded as applied, reconcile migration history against existing sequences before the next run; do not recreate or reset sequences. The runner uses complete filenames and checksums as migration identities.
+
+Before running migrations on an existing installation, restore byte-for-byte originals of already-applied files from the server or your teammate if their recorded checksums differ from these pasted-source copies. The runner hashes entire files, including formatting and line endings. Do not change ledger checksums or rerun table creation to bypass a mismatch. Check `SELECT VERSION, CHECKSUM, STATUS FROM ME_MIGRATIONS WHERE COMPONENT = 'sales' ORDER BY VERSION` against the originals. If tables were created manually without ledger entries, reconcile their installation history before using the runner.
+
+After deploying matching files and verifying applied history, apply pending migrations with `php bin/console.php migrate --module=sales` against the intended Oracle schema. Already-applied table migrations are skipped. The Quote backend formats `SQ-` plus a 15-digit sequence. Future Order/Invoice/Payment services will format `SO-`, `SI-` and `PAY-` plus 15 digits; the new migration only creates their sequences. These numbers are never reused and fit within 20 characters. Check imported numbering namespaces before deployment.
+
+Migration `010_oe_inventory_product_reference.php` requires Inventory's `ME_INV_PRODUCTS` table and its `(COMPANY_ID, PRODUCT_ID)` primary key in the same schema. With application writes stopped, it adds numeric `PRODUCT_ID NUMBER(10)` and applies the approved mapping for company 1, document RECORD# 1, line RECORD# 1: `ITEM-001` becomes Product 163 (SKU RF-001, Bolt). It preserves line IDs, descriptions, quantities and prices; the affected unreferenced Draft Quote receives Warehouse W01 and one version increment. The migration verifies that Product 163 is active in company 1/W01 and rejects any other existing lines before schema changes, since they have no approved mapping. An empty line table is also supported. It makes PRODUCT_ID required, adds the company-scoped Product foreign key, and only then drops ITEM_CODE. Do not delete records or guess mappings to bypass preflight checks. Oracle DDL is not transactional, so inspect the ledger/schema and follow recovery if a run fails; do not blindly retry a partially applied migration. Deploy the matching Quote backend together with this migration. Quote requests and responses now use `product_id` (replacing `item_code`), carrying the Inventory Product ID as a positive decimal string of up to 10 digits, not a SKU. Update clients together with the backend; the old field is rejected. Quote Warehouse is W01. No direct stock-table access or stock columns are added to Sales.
+
+The source-link table is authoritative for downstream usage, including a Draft Order. Future Order services must lock the source Quote parent before claiming or releasing its link, validate source/target types and company, and save the link and complete copied lines atomically. The unique source and target constraints enforce one current target per source and one source per target. Returning a Quote to Draft or deleting it rechecks usage under that same parent lock.
+
+Inventory integration follows [the shared contract boundary](./shared-contracts.md#contract-matrix): call the owning PHP service using the trusted Actor/company and shared transaction. Do not query Inventory's private tables in runtime services, perform internal HTTP calls or store another stock balance in OE. Product references use Inventory's numeric PRODUCT_ID; its single Warehouse is W01. Exact provider signatures still need agreement. The foreign key enforces Product existence/company; the provider validates active status and Warehouse.
+
+| Workflow | Inventory involvement |
+| --- | --- |
+| Quote create/edit | Validate local fields, active Customer, dates, complete lines and totals. Save Draft without calling Inventory; Item/Warehouse reference validation is deferred to Submit. |
+| Quote submit | Validate active, same-company Item and Warehouse references. No availability check, reservation or stock change. |
+| Future Order submission | Use `getAvailability` for the company/Warehouse and combined Item quantities; the result is a snapshot. Inventory must confirm all reservations through `reserveStock` before the Order becomes Submitted. |
+| Eligible Order return/deletion | Coordinate `releaseReservation` and confirm release before the action completes. |
+
+`QuoteInventory::validate` is the integration interface. The `QuoteService` in `src/sales/api.php` receives Inventory's supplied implementation directly: `new MiniErp\inventory\QuoteInventoryValidator()`. Direct service construction also defaults to this real validator. Drafts can be created and edited without Inventory service validation; Submit always validates against Inventory through the existing transaction. There is no runtime test adapter, fixture loader or mode switch.
+
+### Real Inventory validation
+
+Deploy `src/inventory/QuoteInventoryValidator.php`, `src/sales/quotes/QuoteService.php` and the matching `src/sales/api.php` together. No Inventory mode configuration, additional transaction, endpoint or database migration is needed. Keep application settings and credentials unchanged. Inventory's `ME_INV_PRODUCTS` table must be accessible through Sales' existing database connection. Inventory's implementation selects `PRODUCT_ID`, `WAREHOUSE_ID` and `IS_ACTIVE` using the trusted `COMPANY_ID`, checks numeric Product ID strings and deduplicates/chunks lookups. It does not query stock, write data, open a connection, commit or roll back.
+
+Provider limitations: Warehouse validation currently accepts the fixed `W01` identifier. Inventory has no Warehouse master or Warehouse active flag, so separate Warehouse existence/active checks are not implemented. Products must match the Warehouse and have `IS_ACTIVE = 'Y'`. The provider SELECT does not lock Product rows; teams must still agree behavior for concurrent Product deactivation. Merely sharing a transaction is not evidence that such races have been tested.
+
+Inventory returns `VALIDATION_ERROR` (400) for malformed/missing/wrong-company/wrong-Warehouse Product references, `INVALID_STATE` (409) for inactive Products, and `INVENTORY_UNAVAILABLE` (503) for query failures. These pass through Sales' existing handling; submission rolls back and the saved Draft/version remain unchanged. After successful Submit, use the returned version for Move to Draft. The provider and POST lifecycle are covered locally with database doubles; live Oracle Submit/rollback verification must be run after deployment.
+
+Before the Inventory handoff can be completed, agree active Item/Warehouse lookup, identifier mapping, exact signatures, company checks, error codes and lock order. For Order stock integration, also agree reservation source identity, replay/version behavior and all-or-nothing rollback on a later-line failure. Real concurrent-order and rollback acceptance tests require Inventory's implementation on the shared connection. This section specifies the integration requirement; it does not claim availability or reservations are connected.
 
 ## 1. Required story order
 
@@ -96,7 +324,7 @@ Collection script/contract checks: `node --test tests/unit/bruno-collection.test
 | `POST /note` | `text`, `action_reference`, positive integer `expected_version`; requires `shared.note:update` |
 | `GET /users?page=1&page_size=25` | Admin-only paged user list; requires `shared.user:read` |
 | `POST /users` | Admin-only create: `username`, `display_name`, `password`, boolean `is_admin`; HTTP 201 |
-| `PATCH /users/{id}` | Admin-only edit: `display_name`, booleans `is_admin`/`active`, positive integer `expected_version` |
+| `POST /users/{id}/update` | Admin-only edit: `display_name`, booleans `is_admin`/`active`, positive integer `expected_version` |
 | `POST /users/{id}/permissions` | Admin-only: `grants` array of `object:operation` strings, `expected_version` |
 | `POST /users/{id}/reset-password` | Admin-only: `password`, `expected_version`; next login requires password change |
 
