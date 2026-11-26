@@ -5,29 +5,32 @@ The shared framework implements bearer authentication, permission-checked route 
 ## Agreed Order increment: linear source flow
 
 The current Order contract in `public/openapi.yaml` narrows the broader future workflow described below:
-Submitted Quote -> Draft Order -> Submitted Order -> In Progress -> Closed plus an automatically created Draft Invoice.
-Standalone Orders/Invoices and manual Invoice creation are outside this increment. Order sources cannot
+Submitted Quote -> Draft Order -> Submitted Order -> In Progress -> Closed. A Draft Invoice is created separately from a Submitted Order.
+Standalone Orders/Invoices are outside this increment. Order sources cannot
 be cleared or replaced. Customer, Warehouse, address and terms remain locked; the copied lines become
 editable Draft Order lines. The Quote is the starting point and remains unchanged when the Order is edited.
 
-Order Submit reserves final saved demand, marks the Order Submitted, and creates exactly one linked
-Draft Invoice using `src/sales/invoices/OrderInvoiceService.php`, all in the Order transaction.
-Invoice Date uses Order Date; Due Date follows payment terms. The Submit result includes `invoice_number`.
-Any failure rolls back stock, Invoice, Order status/version, audit and replay records. Exact retries
-return the original result. Draft creation has no Customer debt effect and does not deduct stock.
+Order Submit reserves final saved demand and marks the Order Submitted in one transaction.
+Any submission failure rolls back stock, Order status/version, audit and replay records. Exact retries
+return the original result. Invoice creation is a separate action using the existing Invoice service,
+exposed by the Create Invoice button on a Submitted Order. It copies the saved Order and creates one
+linked Draft Invoice. Invoice Date uses Order Date; Due Date follows payment terms. Order Submit does
+not return an Invoice number. Draft Invoice creation has no Customer debt or stock effect.
 
-One whole Sales Order belongs to one current Trip, including every line and full quantity. Draft
-Trip assignment leaves the Order Submitted. Successful dispatch consumes all reservations and makes
-the Order In Progress. Full delivery makes it Closed. Whole Draft assignment cancellation clears every
-Trip reference and leaves stock reserved. Partial line selections and mixed Trip IDs/statuses are rejected. Delivery
-does not create or modify the Invoice. Logistics does not wait for Invoice submission.
-Logistics selects whole Submitted Orders whose lines are all unassigned; Submitted status alone does
-not mean no Trip exists. The full detail API exposes each line's Trip state.
+Different whole lines of one Sales Order may use different Trips. Each line has one current Trip and
+travels for its full saved quantity. Every callback supplies all lines belonging to its affected Trip;
+getAssignments returns the complete current assignment snapshot across all Trips. Draft assignment
+leaves the Order Submitted. First dispatch starts In Progress and consumes only that Trip's line
+reservations. All Order lines must be delivered before the Order becomes Closed. Cancelling one
+Draft Trip clears only its assignments and leaves reservations active; other Trips keep their progress.
+Undispatched lines can still be planned while the Order is In Progress. Delivery does not create or
+modify the Invoice. Logistics must update its planning/writer code to this contract before using the
+extension. See [the Sales–Logistics handoff](sales-logistics-handoff.md).
 
-An unassigned Submitted Order can return to Draft when its linked Invoice is Draft without payments
+An unassigned Submitted Order can return to Draft when it has no Invoice, or its linked Invoice is Draft without payments
 or downstream references. Delete that Invoice/link, release reservations and return the Order atomically.
-Invoice creation requires sales.invoices:create; deletion requires sales.invoices:delete. Older Submitted
-Orders with no Invoice can still return. Keep the original Quote link. In Progress/Closed cannot return.
+Invoice creation requires sales.invoices:create; deleting an existing linked Invoice requires sales.invoices:delete.
+Keep the original Quote link. In Progress/Closed cannot return.
 
 Kavya's Invoice API/backend branch remains unmerged. This internal integration uses existing Sales tables
 and numbering; no public Invoice CRUD/payment endpoints are added. Future Invoice writers must use a
@@ -147,7 +150,7 @@ are presentation facts only; they are not an authoritative replacement for a Log
 
 The proposed `SalesFulfillment` event methods and provider/Invoice interfaces are ready for team review:
 see [the Sales–Logistics handoff](sales-logistics-handoff.md). They are not wired into production; real
-Logistics event facts remain integration work; submit-time Invoice creation is connected. The current
+Logistics event facts remain integration work; Invoice creation is a separate Submitted Order action. The current
 return-to-Draft path uses the saved-field protocol above. No UI or live
 Oracle/concurrency acceptance is claimed. Adapter tests execute the real
 supplied reservation service with transactional database doubles; other Sales tests also use provider

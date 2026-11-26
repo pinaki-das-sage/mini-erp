@@ -67,6 +67,21 @@ final class SalesTripAssignmentGuardTest extends TestCase
         self::assertSame($draft, $service->action($this->actor(), $order['order_number'], 'return_to_draft', $request));
     }
 
+    public function testMixedTripsKeepDraftClaimsPerLineAndAnyRemainingAssignmentBlocksReturn(): void
+    {
+        [$db, $guard, , $order] = $this->setupOrder();
+        [$first, $second] = array_column($order['lines'], 'line_id');
+        $db->sales->lines[(int) $first] = [...$db->sales->lines[(int) $first], 'TRIP_ID' => 7, 'LOGISTICS_TRIP_LINE_ID' => 701, 'TRIP_STATUS' => 'Dispatched'];
+        $db->sales->lines[(int) $second] = [...$db->sales->lines[(int) $second], 'TRIP_ID' => 8, 'LOGISTICS_TRIP_LINE_ID' => 802, 'TRIP_STATUS' => 'Draft'];
+        (new TransactionManager($db))->run(function (TransactionContext $tx) use ($db, $guard, $first, $second): void {
+            self::assertSame(0, $guard->getPlannedQuantity($this->actor(), $tx, 11, (int) $first));
+            self::assertSame(1, $guard->getPlannedQuantity($this->actor(), $tx, 11, (int) $second));
+            $db->sales->lines[(int) $second] = [...$db->sales->lines[(int) $second], 'TRIP_ID' => null, 'LOGISTICS_TRIP_LINE_ID' => null, 'TRIP_STATUS' => 'Cancelled'];
+            self::assertSame(0, $guard->getPlannedQuantity($this->actor(), $tx, 11, (int) $second));
+            $this->reject(fn () => $guard->assertUnassigned($tx, $this->actor(), '11'), 'INVALID_STATE');
+        });
+    }
+
     public function testCallbackUsesSavedDraftClaimQuantityAndValidatesOwnership(): void
     {
         [$db, $guard, , $order] = $this->setupOrder();

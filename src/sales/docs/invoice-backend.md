@@ -10,10 +10,12 @@ Warehouse, shipping address, terms, notes and ordered lines, and derives Due Dat
 from that copied date and terms. Document and line source links are preserved.
 Existing linked Invoices cannot clear or replace their Order source.
 
-Order Submit already creates a Draft Invoice in the same transaction as Inventory
-reservation and returns `invoice_number`. Use that number to read the Invoice;
-calling create again for that Order is rejected. The public create operation covers
-previously submitted Orders without an Invoice. Explicit action references replay
+Order Submit reserves Inventory and leaves Invoice creation to a separate action.
+The Submitted Order page provides a CSRF-protected Create Invoice button that calls
+the existing Invoice creation service with its Order number. Once an Invoice exists,
+the page offers View Invoice instead. Create the Invoice while the Order is Submitted;
+new creation from In Progress or Closed Orders is not currently supported.
+Explicit action references replay
 the original result; without one, the unique source claim prevents duplicates.
 Creation adds no Customer debt; Invoice Submit adds debt once.
 

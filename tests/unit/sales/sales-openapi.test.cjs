@@ -10,6 +10,17 @@ const spec = yaml.parse(raw, { uniqueKeys: true });
 const schemas = spec.components.schemas;
 const operation = (route, method = 'post') => spec.paths[route][method];
 
+test('document number filters are documented as optional query parameters', () => {
+  for (const kind of ['quote', 'order', 'invoice']) {
+    const parameters = operation(`/sales/${kind}s`, 'get').parameters.map(parameter =>
+      parameter.$ref ? spec.components.parameters[parameter.$ref.split('/').at(-1)] : parameter);
+    const number = parameters.find(parameter => parameter.name === `${kind}_number`);
+    assert.equal(number?.in, 'query');
+    assert.notEqual(number.required, true);
+    assert.equal(number.schema.maxLength, 20);
+  }
+});
+
 test('all local references resolve and operation IDs remain unique', () => {
   function visit(node) {
     if (!node || typeof node !== 'object') return;
@@ -214,11 +225,12 @@ test('Order progress and Trip responses match the three-document model', () => {
   assert.equal(orderRules[4].if.properties.status.const, 'Submitted');
   assert.deepEqual(orderRules[4].then.properties.lines.items.properties.trip_status.enum, ['Draft', 'Cancelled', null]);
   assert.deepEqual(orderRules[5].then.properties.lines.contains.properties.trip_status.enum, ['Dispatched', 'Delivered']);
-  assert.deepEqual(orderRules[4].then.properties.lines.anyOf[0].items.properties.trip_assigned, { const: false });
-  assert.equal(orderRules[5].then.properties.lines.items.properties.trip_status.const, 'Dispatched');
+  assert.equal(orderRules[4].then.properties.lines.anyOf, undefined);
+  assert.deepEqual(orderRules[5].then.properties.lines.items.properties.trip_status.enum, ['Draft', 'Dispatched', 'Delivered', 'Cancelled', null]);
 });
 
-test('Order flow requires a Quote and creates its Draft Invoice with reservations on Submit', () => {
+test('Order flow requires a Quote and Invoice creation is separate from Order Submit', () => {
+  assert.equal(schemas.OrderSummary.allOf[1].properties.invoice_number, undefined);
   assert(schemas.OrderCreateRequest.required.includes('source_quote_number'));
   assert.equal(schemas.OrderFields.properties.source_quote_number.$ref, '#/components/schemas/SalesDocumentNumber');
   assert.equal(schemas.InvoiceFields.properties.source_order_number.$ref, '#/components/schemas/SalesDocumentNumber');

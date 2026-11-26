@@ -35,8 +35,13 @@ final readonly class InventoryOrderAdapter implements OrderInventory
         if ($expected !== []) { throw new AppError('INVALID_STATE', 'Order demand has changed.', 409); }
         $this->references->validate($tx, $actor, $warehouseId, array_values(array_unique(array_column($saved, 'product_id'))));
         foreach ($this->byProduct($saved) as $line) {
-            $result = $this->reservations->reserveStock($actor, $tx, $id, (int) $line['line_id'],
-                (int) $line['product_id'], (int) $line['quantity']);
+            try {
+                $result = $this->reservations->reserveStock($actor, $tx, $id, (int) $line['line_id'],
+                    (int) $line['product_id'], (int) $line['quantity']);
+            } catch (AppError $error) {
+                if ($error->errorCode !== 'INSUFFICIENT_STOCK') { throw $error; }
+                throw new AppError($error->errorCode, 'Product ID ' . $line['product_id'] . ': ' . $error->getMessage(), $error->status);
+            }
             if (($result['status'] ?? null) !== 'ACTIVE' || ($result['sales_order_id'] ?? null) !== $id ||
                 ($result['sales_line_id'] ?? null) !== (int) $line['line_id'] || ($result['product_id'] ?? null) !== (int) $line['product_id'] ||
                 ($result['reserved_quantity'] ?? null) !== (int) $line['quantity'] || ($result['reservation_id'] ?? 0) < 1) {

@@ -8,6 +8,8 @@ use MiniErp\inventory\ReservationService;
 use MiniErp\sales\orders\InventoryOrderAdapter;
 use MiniErp\sales\orders\OrderService;
 use MiniErp\sales\orders\SalesTripAssignmentGuard;
+use MiniErp\sales\invoices\OrderInvoiceService;
+use MiniErp\shared\database\TransactionManager;
 use MiniErp\shared\AppError;
 use MiniErp\shared\database\DatabaseError;
 use MiniErp\shared\security\Actor;
@@ -28,7 +30,15 @@ final class OrderInvoiceServiceTest extends TestCase
         return [$db, $service, $actor, $order];
     }
 
-    public function testSubmitCopiesFinalOrderAndReturnResubmitReplacesDraftInvoice(): void
+    private function createInvoice(ReservationMemoryConnection $db, Actor $actor, string $number): string
+    {
+        $orders = array_values(array_filter($db->sales->documents, static fn (array $row): bool =>
+            $row['CNY#'] === $actor->companyId && $row['DOCUMENT_TYPE'] === 'SALES_ORDER' && $row['DOCUMENT_NUMBER'] === $number));
+        return (new TransactionManager($db))->run(fn ($tx): string =>
+            (new OrderInvoiceService($db))->createDraftFromSubmittedOrder($tx, $actor, (string) $orders[0]['RECORD#']));
+    }
+
+    public function testSeparateCreationCopiesFinalOrderAndReturnRemovesDraftInvoice(): void
     {
         [$db, $service, $actor, $order] = $this->setupOrder();
         $number = $order['order_number']; $line = $order['lines'][0];
@@ -37,7 +47,9 @@ final class OrderInvoiceServiceTest extends TestCase
             'quantity' => '2', 'unit_price' => '7.25']]]);
         $request = ['expected_version' => 2, 'action_reference' => 'submit-with-invoice'];
         $submitted = $service->action($actor, $number, 'submit', $request);
-        self::assertSame('SI-000000000000001', $submitted['invoice_number']);
+        self::assertArrayNotHasKey('invoice_number', $submitted);
+        self::assertCount(2, $db->sales->documents);
+        self::assertSame('SI-000000000000001', $this->createInvoice($db, $actor, $number));
         self::assertSame($submitted, $service->action($actor, $number, 'submit', $request));
         $invoice = $db->sales->documents[12];
         self::assertSame('DRAFT', $invoice['STATUS']); self::assertSame('2026-12-25', $invoice['DUE_DATE_TEXT']);
@@ -53,24 +65,34 @@ final class OrderInvoiceServiceTest extends TestCase
         self::assertSame('Draft', $returned['status']); self::assertArrayNotHasKey(12, $db->sales->documents);
         self::assertCount(1, $db->sales->links); self::assertSame(['ON_HAND' => 20, 'RESERVED' => 0], $db->balances[163]);
         $again = $service->action($actor, $number, 'submit', ['expected_version' => 4]);
-        self::assertSame('SI-000000000000002', $again['invoice_number']); self::assertCount(3, $db->sales->documents);
+        self::assertArrayNotHasKey('invoice_number', $again); self::assertCount(2, $db->sales->documents);
+        self::assertSame('SI-000000000000002', $this->createInvoice($db, $actor, $number));
     }
 
-    public function testInvoiceLineFailureAndAuditFailureRollBackReservationAndOrder(): void
+    public function testSeparateInvoiceFailureKeepsSubmittedOrderAndReservations(): void
     {
-        foreach (['line', 'audit'] as $failure) {
-            [$db, $service, $actor, $order] = $this->setupOrder();
-            if ($failure === 'line') { $db->sales->failOnLineWrite = $db->sales->lineWrites + 2; }
-            else { $db->sales->failAudit = true; }
-            try {
-                $service->action($actor, $order['order_number'], 'submit', ['expected_version' => 1, 'action_reference' => 'failed-submit']);
-                self::fail('Failure must roll back.');
-            } catch (AppError|DatabaseError) {
-                self::assertSame($order, $service->get($actor, $order['order_number']));
-                self::assertCount(2, $db->sales->documents); self::assertCount(1, $db->sales->links);
-                self::assertSame([], $db->reservations); self::assertSame(0, $db->balances[163]['RESERVED']);
-                self::assertCount(1, $db->sales->actions);
-            }
+        [$db, $service, $actor, $order] = $this->setupOrder();
+        $submitted = $service->action($actor, $order['order_number'], 'submit', ['expected_version' => 1]);
+        $db->sales->failOnLineWrite = $db->sales->lineWrites + 1;
+        try { $this->createInvoice($db, $actor, $order['order_number']); self::fail('Invoice creation must fail.'); }
+        catch (AppError|DatabaseError) {
+            self::assertSame($submitted, $service->get($actor, $order['order_number']));
+            self::assertCount(2, $db->sales->documents);
+            self::assertCount(1, $db->sales->links);
+            self::assertSame(4, $db->balances[163]['RESERVED']);
+        }
+    }
+
+    public function testOrderAuditFailureRollsBackReservationAndOrder(): void
+    {
+        [$db, $service, $actor, $order] = $this->setupOrder();
+        $db->sales->failAudit = true;
+        try { $service->action($actor, $order['order_number'], 'submit', ['expected_version' => 1]); self::fail('Submission must fail.'); }
+        catch (AppError|DatabaseError) {
+            self::assertSame($order, $service->get($actor, $order['order_number']));
+            self::assertCount(2, $db->sales->documents);
+            self::assertSame([], $db->reservations);
+            self::assertSame(0, $db->balances[163]['RESERVED']);
         }
     }
 
@@ -79,6 +101,7 @@ final class OrderInvoiceServiceTest extends TestCase
         foreach (['submitted', 'payment', 'downstream', 'line-reference'] as $failure) {
             [$db, $service, $actor, $order] = $this->setupOrder();
             $service->action($actor, $order['order_number'], 'submit', ['expected_version' => 1]);
+        $this->createInvoice($db, $actor, $order['order_number']);
             if ($failure === 'submitted') { $db->sales->documents[12]['STATUS'] = 'SUBMITTED'; }
             elseif ($failure === 'payment') { $db->sales->payments[] = ['CNY#' => 7, 'INVOICE_RECORD#' => 12]; }
             elseif ($failure === 'downstream') { $db->sales->links[] = ['CNY#' => 7, 'SOURCE_DOCUMENT_RECORD#' => 12, 'TARGET_DOCUMENT_RECORD#' => 99]; }
@@ -98,6 +121,7 @@ final class OrderInvoiceServiceTest extends TestCase
     {
         [$db, $service, $actor, $order] = $this->setupOrder();
         $service->action($actor, $order['order_number'], 'submit', ['expected_version' => 1]);
+        $this->createInvoice($db, $actor, $order['order_number']);
         $documents = $db->sales->documents; $lines = $db->sales->lines; $links = $db->sales->links;
         $db->failTripLookupAt = $db->tripLookupCount + 3;
         try { $service->action($actor, $order['order_number'], 'return_to_draft', ['expected_version' => 2]); self::fail('Release lookup must fail.'); }
@@ -111,6 +135,7 @@ final class OrderInvoiceServiceTest extends TestCase
     {
         [$db, $service, $actor, $order] = $this->setupOrder();
         $service->action($actor, $order['order_number'], 'submit', ['expected_version' => 1]);
+        $this->createInvoice($db, $actor, $order['order_number']);
         $db->sales->grants = ['sales.orders:return_to_draft', 'sales.orders:read'];
         $restricted = new Actor('admin', 'admin', [], 7);
         self::assertSame([], $service->get($restricted, $order['order_number'])['available_actions']);

@@ -16,14 +16,15 @@ interface LogisticsOrderProvider extends OrderLogistics
     /** Recheck the real authorized Logistics event/history, including assigned-driver authorization on delivery.
      * Cancellation rows/history must still exist until Sales clears its current FK references.
      * @param 'assignment'|'cancellation'|'delivery' $event
-     * @param list<array{line_id: string, trip_line_id: string}> $lines Every saved Order line, each mapped to this same Trip.
+     * @param list<array{line_id: string, trip_line_id: string}> $lines Every affected line on this Trip, each for its full saved quantity.
      */
     public function assertEvent(TransactionContext $tx, Actor $actor, string $event, string $orderId,
         string $tripId, array $lines, string $eventReference): void;
 
     /** Current valid assignments only; exclude Cancelled Trips. Returns [] only after an authoritative check.
-     * Return the complete Order assignment, including Dispatched/Delivered lines, on one Trip with
-     * one shared status. Reject mixed Trip IDs/statuses; omit Cancelled/unassigned lines.
+     * Return all current Order assignments across Trips, including Dispatched/Delivered lines.
+     * Different Trips may have different statuses. Each Sales line has at most one current assignment.
+     * Each individual Trip has one shared status. Omit Cancelled/unassigned lines.
      * IDs/quantities are decimal strings. Every Sales line is assigned for its full saved quantity.
      * No HTTP calls, commits, or writes to Sales tables.
      * @return list<array{line_id: string, trip_id: string, trip_line_id: string, product_id: string,

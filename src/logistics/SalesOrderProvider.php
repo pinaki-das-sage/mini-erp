@@ -141,6 +141,8 @@ final readonly class SalesOrderProvider implements LogisticsOrderProviderContrac
         );
         $result = [];
         $seen = [];
+        $tripStatuses = [];
+        $tripLines = [];
 
         foreach ($rows as $row) {
             $status = match ($row['STATUS']) {
@@ -158,17 +160,17 @@ final readonly class SalesOrderProvider implements LogisticsOrderProviderContrac
                 'trip_status' => $status
             ];
 
-            if (isset($seen[$fact['line_id']])) {
+            if (isset($seen[$fact['line_id']]) || isset($tripLines[$fact['trip_line_id']])) {
                 throw new AppError('INVALID_STATE', 'An Order line has multiple current Trip assignments.', 409);
+            }
+            if (isset($tripStatuses[$fact['trip_id']]) && $tripStatuses[$fact['trip_id']] !== $status) {
+                throw new AppError('INVALID_STATE', 'Lines on the same Trip must have the same Trip status.', 409);
             }
 
             $seen[$fact['line_id']] = true;
+            $tripLines[$fact['trip_line_id']] = true;
+            $tripStatuses[$fact['trip_id']] = $status;
             $result[] = $fact;
-        }
-
-        if (count(array_unique(array_column($result, 'trip_id'))) > 1 ||
-            count(array_unique(array_column($result, 'trip_status'))) > 1) {
-            throw new AppError('INVALID_STATE', 'The whole Order must belong to one Trip with the same status on every line.', 409);
         }
 
         return $result;

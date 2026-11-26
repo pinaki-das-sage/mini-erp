@@ -1,0 +1,9 @@
+.sales-date-range { position: relative; min-width: 0; max-width: 35rem; }
+.sales-date-range label { max-width: none; margin-bottom: .4rem; }
+.sales-date-range summary { cursor: pointer; color: #075a80; padding: .2rem 0; }
+.sales-date-range small { display: block; color: #536575; margin-top: .3rem; }
+.sales-date-popup { position: absolute; z-index: 5; background: white; padding: 1rem; border: 1px solid #d4dfe8; border-radius: .4rem; box-shadow: 0 4px 16px #18283826; width: min(24rem, calc(100vw - 6rem)); }
+.sales-date-popup label { margin-top: 0; }
+@media (max-width: 700px) {
+    .app-layout > main { width: 100%; box-sizing: border-box; }
+}

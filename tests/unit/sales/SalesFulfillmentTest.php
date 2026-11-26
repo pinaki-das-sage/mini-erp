@@ -9,6 +9,7 @@ use MiniErp\sales\orders\InventoryOrderAdapter;
 use MiniErp\sales\orders\LogisticsOrderProvider;
 use MiniErp\sales\orders\OrderService;
 use MiniErp\sales\orders\SalesFulfillment;
+use MiniErp\sales\invoices\OrderInvoiceService;
 use MiniErp\shared\AppError;
 use MiniErp\shared\database\Connection;
 use MiniErp\shared\database\TransactionContext;
@@ -21,14 +22,24 @@ require_once __DIR__ . '/InventoryOrderAdapterTest.php';
 final class SalesFulfillmentTest extends TestCase
 {
     private function actor(): Actor { return new Actor('admin', 'admin', [], 7, true); }
-    private function setupOrder(): array
+    private function setupOrder(bool $withInvoice = true, int $lineCount = 2): array
     {
         $db = new FulfillmentMemoryConnection(); $provider = $db->logistics;
         $reservations = new ReservationService($db, $provider->getPlannedQuantity(...));
         $orders = new OrderService($db, new InventoryOrderAdapter($reservations, new QuoteInventoryValidator()), $provider,
             static fn (): string => '2026-11-25');
         $order = $orders->create($this->actor(), ['source_quote_number' => 'SQ-000000000000010']);
-        $order = $orders->action($this->actor(), $order['order_number'], 'submit', ['expected_version' => 1]);
+        if ($lineCount === 3) {
+            $lines = array_map(static fn (array $line): array => array_intersect_key($line,
+                array_flip(['line_id', 'product_id', 'description', 'quantity', 'unit_price'])), $order['lines']);
+            $lines[] = ['product_id' => '163', 'description' => 'Third line', 'quantity' => '2', 'unit_price' => '4.50'];
+            $order = $orders->update($this->actor(), $order['order_number'], ['expected_version' => 1, 'lines' => $lines]);
+        }
+        $order = $orders->action($this->actor(), $order['order_number'], 'submit', ['expected_version' => $order['current_version']]);
+        if ($withInvoice) {
+            (new TransactionManager($db))->run(fn (TransactionContext $tx): string =>
+                (new OrderInvoiceService($db))->createDraftFromSubmittedOrder($tx, $this->actor(), '11'));
+        }
         return [$db, $provider, $reservations, $orders, new SalesFulfillment($db, $provider, $reservations), $order];
     }
     private function input(array $order, int $version, string $reference): array
@@ -122,7 +133,20 @@ final class SalesFulfillmentTest extends TestCase
         self::assertCount(3, $db->inventory->sales->documents);
     }
 
-    public function testDeliveryPreservesTheInvoiceCreatedAtOrderSubmission(): void
+    public function testDeliveryWithoutAnInvoiceDoesNotCreateOne(): void
+    {
+        $setup = $this->setupOrder(false); [$db, $provider, , , $service, $order] = $setup;
+        $this->assign($setup); $this->dispatch($setup);
+        $closed = (new TransactionManager($db))->run(function (TransactionContext $tx) use ($provider, $service, $order): array {
+            $service->lockOrderForEvent($tx, $this->actor(), $order['order_number'], 'delivery');
+            $provider->assignments = $this->facts($order, 'Delivered');
+            return $service->recordDelivery($tx, $this->actor(), $order['order_number'], $this->input($order, 4, 'delivery-no-invoice'));
+        });
+        self::assertSame('Closed', $closed['status']);
+        self::assertCount(2, $db->inventory->sales->documents);
+    }
+
+    public function testDeliveryPreservesTheManuallyCreatedInvoice(): void
     {
         $setup = $this->setupOrder(); [$db, $provider, , , $service, $order] = $setup;
         self::assertSame('DRAFT', $db->inventory->sales->documents[12]['STATUS']);
@@ -149,7 +173,7 @@ final class SalesFulfillmentTest extends TestCase
                 if ($failure === 'partial') { array_pop($input['lines']); }
                 if ($failure === 'owner-denied') { $provider->denyEvent = true; }
                 return $service->recordTripAssignment($tx, $this->actor(), $order['order_number'], $input);
-            }), match ($failure) { 'quantity' => 'INVALID_STATE', 'partial' => 'VALIDATION_ERROR', 'stale' => 'STALE_VERSION', default => 'FORBIDDEN' });
+            }), match ($failure) { 'quantity', 'partial' => 'INVALID_STATE', 'stale' => 'STALE_VERSION', default => 'FORBIDDEN' });
             self::assertSame([], $provider->assignments);
             self::assertSame('Submitted', $orders->get($this->actor(), $order['order_number'])['status']);
             self::assertSame(4, $db->inventory->balances[163]['RESERVED']); self::assertCount(2, $db->inventory->sales->actions);
@@ -247,22 +271,22 @@ final class SalesFulfillmentTest extends TestCase
         });
     }
 
-    public function testEveryEventRequiresAllOrderLinesAndRollsBackPartialRequests(): void
+    public function testEventsCannotOmitOtherLinesOnTheAffectedTrip(): void
     {
         foreach (['Draft', 'Dispatched', 'Cancelled', 'Delivered'] as $status) {
             $setup = $this->setupOrder(); [$db, $provider, , $orders, , $order] = $setup;
-            if ($status !== 'Draft') { $this->assign($setup); }
+            $this->assign($setup);
             if ($status === 'Delivered') { $this->dispatch($setup); }
             $before = $orders->get($this->actor(), $order['order_number']);
             $balances = $db->inventory->balances; $assignments = $provider->assignments; $movements = $db->movements;
-            $this->reject(fn () => $this->selectedEvent($setup, [0], 7, $status, 'partial-' . $status), 'VALIDATION_ERROR');
+            $this->reject(fn () => $this->selectedEvent($setup, [0], 7, $status, 'partial-' . $status), 'INVALID_STATE');
             self::assertSame($before, $orders->get($this->actor(), $order['order_number']));
             self::assertSame($balances, $db->inventory->balances); self::assertSame($assignments, $provider->assignments);
             self::assertSame($movements, $db->movements); self::assertSame('DRAFT', $db->inventory->sales->documents[12]['STATUS']);
         }
     }
 
-    public function testWholeOrderRejectsMixedTripIdsAndMixedProgress(): void
+    public function testSingleTripEventRejectsMappingsFromOtherTripsAndMixedTripProgress(): void
     {
         foreach (['trip_id', 'trip_status'] as $field) {
             $setup = $this->setupOrder(); [$db, $provider, , $orders, $service, $order] = $setup;
@@ -355,6 +379,113 @@ final class SalesFulfillmentTest extends TestCase
             $service->recordTripCancellation($tx, $this->actor(), $order['order_number'], $this->input($order, 3, 'claims-still-present'))), 'INVALID_STATE');
         self::assertSame(['7', '7'], array_column($orders->get($this->actor(), $order['order_number'])['lines'], 'trip_reference'));
         self::assertSame(4, $db->inventory->balances[163]['RESERVED']);
+    }
+
+    public function testThreeLinesCanUseDifferentTripsAndCloseOnlyAfterAllDeliveries(): void
+    {
+        $setup = $this->setupOrder(true, 3); [$db, , , $orders, $service, $order] = $setup;
+        $invoice = $db->inventory->sales->documents[12];
+        self::assertSame(6, $db->inventory->balances[163]['RESERVED']);
+        $first = $this->selectedEvent($setup, [0], 7, 'Draft', 'line-a-plan');
+        self::assertSame('Submitted', $first['status']);
+        self::assertSame('In Progress', $this->selectedEvent($setup, [0], 7, 'Dispatched', 'line-a-dispatch')['status']);
+        self::assertSame(['ON_HAND' => 17, 'RESERVED' => 3], $db->inventory->balances[163]);
+        // Planning and cancellation of other lines stay possible after dispatch.
+        self::assertSame('In Progress', $this->selectedEvent($setup, [1], 8, 'Draft', 'line-b-plan')['status']);
+        $this->selectedEvent($setup, [2], 9, 'Draft', 'line-c-plan');
+        $cancelled = $this->selectedEvent($setup, [1], 8, 'Cancelled', 'line-b-cancel');
+        self::assertSame('In Progress', $cancelled['status']);
+        $read = $orders->get($this->actor(), $order['order_number']);
+        self::assertSame(['7', null, '9'], array_column($read['lines'], 'trip_reference'));
+        self::assertSame(['Dispatched', 'Cancelled', 'Draft'], array_column($read['lines'], 'trip_status'));
+        self::assertSame([], $read['available_actions']);
+        self::assertSame(['ON_HAND' => 17, 'RESERVED' => 3], $db->inventory->balances[163]);
+        $this->selectedEvent($setup, [1], 10, 'Draft', 'line-b-replan');
+        self::assertSame('In Progress', $this->selectedEvent($setup, [0], 7, 'Delivered', 'line-a-delivery')['status']);
+        self::assertSame('In Progress', $this->selectedEvent($setup, [2], 9, 'Dispatched', 'line-c-dispatch')['status']);
+        self::assertSame('In Progress', $this->selectedEvent($setup, [2], 9, 'Delivered', 'line-c-delivery')['status']);
+        self::assertSame('In Progress', $this->selectedEvent($setup, [1], 10, 'Dispatched', 'line-b-dispatch')['status']);
+        self::assertSame('Closed', $this->selectedEvent($setup, [1], 10, 'Delivered', 'line-b-delivery')['status']);
+        $closed = $orders->get($this->actor(), $order['order_number']);
+        self::assertSame(['7', '10', '9'], array_column($closed['lines'], 'trip_reference'));
+        self::assertSame(['Delivered', 'Delivered', 'Delivered'], array_column($closed['lines'], 'trip_status'));
+        self::assertSame(['ON_HAND' => 14, 'RESERVED' => 0], $db->inventory->balances[163]);
+        self::assertCount(3, $db->movements);
+        self::assertSame($invoice, $db->inventory->sales->documents[12]);
+        self::assertCount(3, $db->inventory->sales->documents);
+        $input = ['expected_version' => $order['current_version'], 'event_reference' => 'line-a-plan', 'trip_id' => '7',
+            'lines' => [['line_id' => $order['lines'][0]['line_id'], 'trip_line_id' => '701']]];
+        $replayed = (new TransactionManager($db))->run(fn (TransactionContext $tx): array =>
+            $service->recordTripAssignment($tx, $this->actor(), $order['order_number'], $input));
+        self::assertSame($first, $replayed);
+        self::assertSame($closed, $orders->get($this->actor(), $order['order_number']));
+        self::assertCount(3, $db->movements);
+    }
+
+    public function testCancellingOneDraftTripPreservesOtherTripAndReservations(): void
+    {
+        $setup = $this->setupOrder(false); [$db, , , $orders, , $order] = $setup;
+        $this->selectedEvent($setup, [0], 7, 'Draft', 'plan-a');
+        $this->selectedEvent($setup, [1], 8, 'Draft', 'plan-b');
+        self::assertSame('Submitted', $this->selectedEvent($setup, [0], 7, 'Cancelled', 'cancel-a')['status']);
+        $read = $orders->get($this->actor(), $order['order_number']);
+        self::assertSame([null, '8'], array_column($read['lines'], 'trip_reference'));
+        self::assertSame([], $read['available_actions']);
+        $this->reject(fn () => $orders->action($this->actor(), $order['order_number'], 'return_to_draft',
+            ['expected_version' => $read['current_version']]), 'INVALID_STATE');
+        $last = $this->selectedEvent($setup, [1], 8, 'Cancelled', 'cancel-b');
+        self::assertSame('Submitted', $last['status']);
+        self::assertSame(['ON_HAND' => 20, 'RESERVED' => 4], $db->inventory->balances[163]);
+        self::assertSame([], $db->movements);
+        $draft = $orders->action($this->actor(), $order['order_number'], 'return_to_draft', ['expected_version' => $last['current_version']]);
+        self::assertSame('Draft', $draft['status']);
+        self::assertSame(['ON_HAND' => 20, 'RESERVED' => 0], $db->inventory->balances[163]);
+    }
+
+    public function testOtherTripsCannotBeChangedByAnUnrelatedEventAndStaleDispatchRollsBack(): void
+    {
+        $setup = $this->setupOrder(); [$db, $provider, , $orders, $service, $order] = $setup;
+        $this->selectedEvent($setup, [0], 7, 'Draft', 'safe-a');
+        $this->selectedEvent($setup, [1], 8, 'Draft', 'safe-b');
+        $before = $orders->get($this->actor(), $order['order_number']);
+        $this->reject(fn () => $this->selectedEvent($setup, [1], 7, 'Draft', 'steal-b'), 'INVALID_STATE');
+        $this->reject(fn () => $this->selectedEvent($setup, [1], 9, 'Cancelled', 'wrong-b-trip'), 'INVALID_STATE');
+        $this->reject(fn () => $this->selectedEvent($setup, [0], 7, 'Dispatched', 'stale-a', true, 2), 'STALE_VERSION');
+        $this->reject(fn () => (new TransactionManager($db))->run(function (TransactionContext $tx) use ($provider, $service, $order, $before): array {
+            $provider->assignments[0]['quantity'] = '999';
+            return $service->recordTripAssignment($tx, $this->actor(), $order['order_number'], [
+                'expected_version' => $before['current_version'], 'event_reference' => 'corrupt-other-trip', 'trip_id' => '8',
+                'lines' => [['line_id' => $order['lines'][1]['line_id'], 'trip_line_id' => '802']],
+            ]);
+        }), 'INVALID_STATE');
+        self::assertSame($before, $orders->get($this->actor(), $order['order_number']));
+        self::assertSame(['ON_HAND' => 20, 'RESERVED' => 4], $db->inventory->balances[163]);
+        self::assertSame([], $db->movements);
+        $this->selectedEvent($setup, [0], 7, 'Dispatched', 'valid-a-dispatch');
+        $this->reject(fn () => $this->selectedEvent($setup, [0], 7, 'Cancelled', 'undo-a-dispatch'), 'INVALID_STATE');
+        $this->reject(fn () => $this->selectedEvent($setup, [0], 9, 'Draft', 'replan-a-dispatch'), 'INVALID_STATE');
+        self::assertSame(['ON_HAND' => 17, 'RESERVED' => 1], $db->inventory->balances[163]);
+    }
+
+    public function testSecondTripDispatchFailureDoesNotUndoFirstTripOrConsumeSecondReservation(): void
+    {
+        $setup = $this->setupOrder(); [$db, $provider, , $orders, , $order] = $setup;
+        $this->selectedEvent($setup, [0], 7, 'Draft', 'first-plan');
+        $this->selectedEvent($setup, [1], 8, 'Draft', 'second-plan');
+        $this->selectedEvent($setup, [0], 7, 'Dispatched', 'first-dispatch');
+        $before = $orders->get($this->actor(), $order['order_number']);
+        $assignments = $provider->assignments;
+        $db->inventory->sales->failAudit = true;
+        try { $this->selectedEvent($setup, [1], 8, 'Dispatched', 'second-dispatch-fails'); self::fail('Audit must fail.'); }
+        catch (\MiniErp\shared\database\DatabaseError) {
+            self::assertSame($before, $orders->get($this->actor(), $order['order_number']));
+            self::assertSame($assignments, $provider->assignments);
+            self::assertSame(['ON_HAND' => 17, 'RESERVED' => 1], $db->inventory->balances[163]);
+            self::assertCount(1, $db->movements);
+        }
+        $db->inventory->sales->failAudit = false;
+        self::assertSame('In Progress', $this->selectedEvent($setup, [1], 8, 'Dispatched', 'second-dispatch-fails')['status']);
+        self::assertCount(2, $db->movements);
     }
 
 }

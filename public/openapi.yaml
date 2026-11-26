@@ -136,6 +136,7 @@ paths:
       summary: List Sales Quotes
       operationId: listQuotes
       parameters:
+        - { $ref: "#/components/parameters/QuoteNumberFilter" }
         - { $ref: "#/components/parameters/CustomerCode" }
         - { $ref: "#/components/parameters/WarehouseId" }
         - { $ref: "#/components/parameters/DraftSubmittedStatus" }
@@ -237,6 +238,7 @@ paths:
       summary: List Sales Orders
       operationId: listOrders
       parameters:
+        - { $ref: "#/components/parameters/OrderNumberFilter" }
         - { $ref: "#/components/parameters/CustomerCode" }
         - { $ref: "#/components/parameters/WarehouseId" }
         - { $ref: "#/components/parameters/DocumentStatus" }
@@ -255,6 +257,7 @@ paths:
       summary: List eligible Quote sources
       operationId: listOrderQuoteSources
       parameters:
+        - { $ref: "#/components/parameters/QuoteNumberFilter" }
         - { $ref: "#/components/parameters/CustomerCode" }
         - { $ref: "#/components/parameters/WarehouseId" }
         - { $ref: "#/components/parameters/FromDate" }
@@ -275,7 +278,7 @@ paths:
       operationId: getOrder
       responses: { "200": { $ref: "#/components/responses/Order" }, default: { $ref: "#/components/responses/Error" } }
       x-implementation-status: implemented
-      x-integration-status: Submit-time Invoice creation is connected; Logistics event writers require team integration.
+      x-integration-status: Submit reserves Inventory. Invoice creation is a separate action for Submitted Orders.
 
   /sales/orders/{order_number}/update:
     parameters:
@@ -375,6 +378,7 @@ paths:
       summary: List Sales Invoices
       operationId: listInvoices
       parameters:
+        - { $ref: "#/components/parameters/InvoiceNumberFilter" }
         - { $ref: "#/components/parameters/CustomerCode" }
         - { $ref: "#/components/parameters/WarehouseId" }
         - { $ref: "#/components/parameters/DraftSubmittedStatus" }
@@ -524,6 +528,9 @@ components:
       scheme: bearer
       description: Paste only result.access_token from login. Swagger adds the Bearer prefix.
   parameters:
+    QuoteNumberFilter: { name: quote_number, in: query, schema: { type: string, minLength: 1, maxLength: 20, pattern: '^[A-Za-z0-9_-]+$' } }
+    OrderNumberFilter: { name: order_number, in: query, schema: { type: string, minLength: 1, maxLength: 20, pattern: '^[A-Za-z0-9_-]+$' } }
+    InvoiceNumberFilter: { name: invoice_number, in: query, schema: { type: string, minLength: 1, maxLength: 20, pattern: '^[A-Za-z0-9_-]+$' } }
     CustomerCode: { name: customer_code, in: query, schema: { $ref: "#/components/schemas/CustomerCode" } }
     WarehouseId: { name: warehouse_id, in: query, schema: { type: string, minLength: 1, maxLength: 20 } }
     DocumentStatus:
@@ -1379,10 +1386,6 @@ components:
             order_number:
               $ref: "#/components/schemas/SalesDocumentNumber"
               readOnly: true
-            invoice_number:
-              $ref: "#/components/schemas/SalesDocumentNumber"
-              readOnly: true
-              description: Draft Invoice number returned by successful Order Submit, including exact retries.
             status:
               type: string
               enum:
@@ -1516,14 +1519,11 @@ components:
             properties:
               lines:
                 items: { properties: { trip_status: { enum: [ Draft, Cancelled, null ] } } }
-                anyOf:
-                  - { items: { properties: { trip_assigned: { const: false } } } }
-                  - { items: { properties: { trip_assigned: { const: true }, trip_status: { const: Draft } } } }
         - if: { required: [ status ], properties: { status: { const: In Progress } } }
           then:
             properties:
               lines:
-                items: { properties: { trip_assigned: { const: true }, trip_status: { const: Dispatched } } }
+                items: { properties: { trip_status: { enum: [ Draft, Dispatched, Delivered, Cancelled, null ] } } }
                 contains: { properties: { trip_assigned: { const: true }, trip_status: { enum: [ Dispatched, Delivered ] } } }
                 not: { items: { properties: { trip_assigned: { const: true }, trip_status: { const: Delivered } } } }
     OrderResponse:
@@ -1943,8 +1943,9 @@ components:
           type: [ string, "null" ]
           readOnly: true
           description: Public reference to the current Logistics Trip; maps to the agreed Logistics identifier for
-            TRIP_ID. Every line of the Order belongs to the same current Trip. Clear all on cancellation;
-            replace together on whole-Order reassignment. Logistics owns assignment history.
+            TRIP_ID. Different whole lines may belong to different Trips. Each line has at most one active
+            assignment for its full quantity. Cancellation clears only the affected Draft Trip's references.
+            Logistics owns assignment history.
         trip_assigned: { type: boolean, readOnly: true }
         trip_status:
           type: [ string, "null" ]

@@ -18,7 +18,7 @@ use MiniErp\shared\security\Authorization;
 
 /** Reviewable implementation for the proposed Logistics handoff; no public HTTP endpoints.
  * Logistics owns the outer transaction and Trip locks. Propagate all errors to its TransactionManager.
- * Every event contains the entire Order, assigned to one Trip with one shared fulfillment status.
+ * Each event contains the affected Trip's whole Order lines. Other lines may use other Trips.
  * No stock mutation occurs in these Sales methods. Order status is derived across all saved lines.
  */
 final readonly class SalesFulfillment
@@ -55,22 +55,22 @@ final readonly class SalesFulfillment
                 'trip_status' => $line['TRIP_STATUS']], $lines)];
     }
 
-    /** All Order lines on one Trip. Draft assignment leaves Submitted; dispatch starts In Progress.
-     * Logistics consumes all reservations before the dispatch callback in the same transaction.
+    /** Selected whole lines on this Trip. Draft assignment leaves Submitted; first dispatch starts In Progress.
+     * Logistics consumes only this Trip's line reservations before dispatch callbacks in the same transaction.
      */
     public function recordTripAssignment(TransactionContext $tx, Actor $actor, string $orderNumber, array $input): array
     {
         return $this->event($tx, $actor, 'assignment', $orderNumber, $input);
     }
 
-    /** Clear the whole Order's Draft Trip assignment. Reservations remain ACTIVE until Order return. */
+    /** Clear this Trip's Draft assignments only. Reservations remain ACTIVE until reassignment/Order return. */
     public function recordTripCancellation(TransactionContext $tx, Actor $actor, string $orderNumber, array $input): array
     {
         return $this->event($tx, $actor, 'cancellation', $orderNumber, $input);
     }
 
-    /** All dispatched Order lines delivered in full on the same Trip; close the Order.
-     * Invoice creation belongs to Order Submit and has no dependency on this callback.
+    /** Mark this Trip's dispatched lines delivered; close only after every Order line is delivered.
+     * Invoice creation is a separate action for Submitted Orders and has no dependency on this callback.
      */
     public function recordDelivery(TransactionContext $tx, Actor $actor, string $orderNumber, array $input): array
     {
@@ -116,9 +116,6 @@ final readonly class SalesFulfillment
             WHERE CNY# = :company_id AND DOCUMENT_RECORD# = :id ORDER BY RECORD# FOR UPDATE",
             ['company_id' => $actor->companyId, 'id' => $order['RECORD#']]);
         if ($lines === []) { throw new AppError('INVALID_STATE', 'Order has no saved lines.', 409); }
-        if (count($lines) !== count($input['lines'])) {
-            throw new AppError('VALIDATION_ERROR', 'Provide every saved Order line exactly once; the whole Order must use one Trip.');
-        }
         $mapping = array_column($input['lines'], 'trip_line_id', 'line_id');
         $nextLines = array_column($lines, null, 'RECORD#');
         foreach ($mapping as $lineId => $_) {
@@ -129,11 +126,11 @@ final readonly class SalesFulfillment
             $this->logistics->assertEvent($tx, $actor, $event, $orderId, $tripId, $input['lines'], $reference);
             $facts = $this->facts($this->logistics->getAssignments($tx, $actor, $orderId));
         } catch (DatabaseError) { throw new AppError('LOGISTICS_UNAVAILABLE', 'Logistics event facts could not be verified.', 503); }
+        $tripFacts = array_filter($facts, static fn (array $fact): bool => $fact['trip_id'] === $tripId);
         if ($event === 'cancellation') {
-            if ($facts !== []) { throw new AppError('INVALID_STATE', 'Remove the whole Order\'s Draft Trip claims before cancellation.', 409); }
-        } elseif (count($facts) !== count($lines) || array_values(array_unique(array_column($facts, 'trip_id'))) !== [$tripId] ||
-            count(array_unique(array_column($facts, 'trip_status'))) !== 1) {
-            throw new AppError('INVALID_STATE', 'Logistics must confirm every Order line on one Trip with the same status.', 409);
+            if ($tripFacts !== []) { throw new AppError('INVALID_STATE', 'Remove this Draft Trip\'s claims before cancellation.', 409); }
+        } elseif (count($tripFacts) !== count($mapping) || count(array_unique(array_column($tripFacts, 'trip_status'))) !== 1) {
+            throw new AppError('INVALID_STATE', 'Provide every assigned line for the affected Trip with its matching status.', 409);
         }
         $updates = [];
         foreach ($mapping as $mappedId => $tripLineId) {
@@ -163,7 +160,7 @@ final readonly class SalesFulfillment
                     throw new AppError('INVALID_STATE', 'Line is already assigned, belongs to another Trip, or would skip/reverse progress.', 409);
                 }
             } elseif (!$sameAssignment || $previous !== 'Draft' || isset($facts[$lineId])) {
-                throw new AppError('INVALID_STATE', 'Cancel only the whole Order\'s saved Draft Trip assignment after Logistics removes its claims.', 409);
+                throw new AppError('INVALID_STATE', 'Cancel only this Trip\'s saved Draft line assignments after Logistics removes its claims.', 409);
             }
             try { $reservation = $this->reservations->getReservationDetail($actor, $tx, (int) $orderId, (int) $lineId); }
             catch (DatabaseError) { throw new AppError('INVENTORY_UNAVAILABLE', 'Inventory fulfillment facts could not be verified.', 503); }
@@ -243,7 +240,7 @@ final readonly class SalesFulfillment
 
     private function mapping(mixed $lines): array
     {
-        if (!is_array($lines) || !array_is_list($lines) || $lines === []) { throw new AppError('VALIDATION_ERROR', 'Provide all Order lines and their mapping to the same Trip.'); }
+        if (!is_array($lines) || !array_is_list($lines) || $lines === []) { throw new AppError('VALIDATION_ERROR', 'Provide the affected Trip\'s Order lines and their mappings.'); }
         $result = []; $seen = []; $tripLines = [];
         foreach ($lines as $line) {
             if ($line instanceof \stdClass) { $line = get_object_vars($line); }

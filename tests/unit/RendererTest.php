@@ -145,7 +145,7 @@ final class RendererTest extends TestCase
             'salesUrls' => $salesUrls,
         ]);
 
-        foreach (['customers', 'quotes', 'invoices', 'payments'] as $section) {
+        foreach (['customers', 'quotes', 'orders', 'invoices', 'payments'] as $section) {
             self::assertStringContainsString(
                 'href="' . $salesUrls[$section] . '"',
                 $html,
@@ -154,11 +154,7 @@ final class RendererTest extends TestCase
 
         self::assertStringContainsString('<h2>Customers</h2>', $html);
         self::assertStringContainsString('<h2>Invoices</h2>', $html);
-        self::assertStringContainsString('Under construction', $html);
+        self::assertStringContainsString('View orders', $html);
         self::assertStringNotContainsString('href=""', $html);
-        self::assertStringNotContainsString(
-            'href="' . $salesUrls['orders'] . '"',
-            $html,
-        );
     }
 }

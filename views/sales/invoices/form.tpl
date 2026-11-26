@@ -4,7 +4,7 @@
         <input type="hidden" name="csrf_token" value="{$csrf}">
         <input type="hidden" name="action_reference" value="{$data.actionReference}">
         {if $data.isNew}
-            <p>Invoices are generated when Orders are submitted. Use this form for a Submitted Order that has no Invoice.</p>
+            <p>Create a Draft Invoice from a Submitted Order that has no Invoice. Its saved details and item lines will be copied.</p>
             <label>
                 Submitted Order number *
                 <input type="text" name="source_order_number" maxlength="20" required
@@ -23,7 +23,6 @@
                 <dt>Invoice number</dt><dd>{$data.invoice.invoice_number}</dd>
                 <dt>Source Order</dt><dd>{$data.invoice.source_order_number}</dd>
                 <dt>Customer</dt><dd>{$data.invoice.customer_code}</dd>
-                <dt>Warehouse</dt><dd>{$data.invoice.warehouse_id}</dd>
                 <dt>Payment terms</dt><dd>{$data.invoice.payment_terms}</dd>
             </dl>
             <div class="filters">
