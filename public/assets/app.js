@@ -451,14 +451,11 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
 
   const loadTripResources = async (tripId = null) => {
     const exclude = tripId === null ? '' : `&exclude_trip_id=${encodeURIComponent(tripId)}`;
-    const [vehicles, drivers] = await Promise.all([
-      apiRequest(`/eligible-vehicles?page=1&page_size=100${exclude}`),
-      apiRequest(`/eligible-drivers?page=1&page_size=100${exclude}`),
-    ]);
-    if (!Array.isArray(vehicles?.items) || !Array.isArray(drivers?.items)) {
+    const vehicles = await apiRequest(`/eligible-vehicles?page=1&page_size=100${exclude}`);
+    if (!Array.isArray(vehicles?.items)) {
       throw new Error('The server returned an unexpected resources response. Refresh and try again.');
     }
-    return { vehicles: vehicles.items, drivers: drivers.items };
+    return { vehicles: vehicles.items };
   };
 
   const tripOrderSelect = document.querySelector('#trip-order-number');
@@ -539,6 +536,67 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
   const tripOrderSearchLabel = tripOrderSearch.closest('label');
   const tripCodeLabel = tripForm.elements.trip_code.closest('label');
   const tripSubmit = document.querySelector('#trip-submit-button');
+  const tripDriverSelect = tripForm.elements.driver_id;
+  const tripDriverStatus = document.querySelector('#trip-driver-status');
+  let driverLookupSequence = 0;
+  let loadingEligibleTripDrivers = false;
+
+  const refreshEligibleTripDrivers = async (selectedDriverId = tripDriverSelect.value || null, tripId = tripForm.dataset.tripId || null) => {
+    const sequence = ++driverLookupSequence;
+    const departureValue = tripForm.elements.planned_departure_at.value;
+    loadingEligibleTripDrivers = false;
+    tripDriverSelect.disabled = true;
+    if (departureValue === '') {
+      fillResourceSelect(tripDriverSelect, [], 'Driver');
+      tripDriverStatus.textContent = 'Choose a planned departure to load eligible Drivers.';
+      tripSubmit.disabled = false;
+      return;
+    }
+
+    loadingEligibleTripDrivers = true;
+    tripSubmit.disabled = true;
+    try {
+      const departure = localDateTimeWithOffset(departureValue);
+      const query = new URLSearchParams({
+        page: '1',
+        page_size: '100',
+        planned_departure_at: departure,
+      });
+      if (tripId !== null && tripId !== '') query.set('exclude_trip_id', tripId);
+      tripDriverStatus.textContent = 'Loading Drivers with licences valid for the planned departure...';
+      const result = await apiRequest(`/eligible-drivers?${query.toString()}`);
+      if (sequence !== driverLookupSequence) return;
+      if (!Array.isArray(result?.items)) throw new Error('The server returned an unexpected eligible Driver list. Refresh and try again.');
+
+      const retained = selectedDriverId !== null
+        && result.items.some((driver) => String(getField(driver, 'id')) === String(selectedDriverId))
+        ? selectedDriverId
+        : null;
+      fillResourceSelect(tripDriverSelect, result.items, 'Driver', retained);
+      tripDriverSelect.disabled = false;
+      if (selectedDriverId !== null && retained === null) {
+        tripDriverStatus.textContent = 'The selected Driver is not eligible for this departure. Select another Driver.';
+      } else {
+        tripDriverStatus.textContent = result.items.length === 0
+          ? 'No Drivers are eligible for this planned departure.'
+          : `${result.items.length} Driver${result.items.length === 1 ? '' : 's'} eligible for this planned departure.`;
+      }
+    } catch (error) {
+      if (sequence !== driverLookupSequence) return;
+      fillResourceSelect(tripDriverSelect, [], 'Driver');
+      tripDriverSelect.disabled = true;
+      tripDriverStatus.textContent = errorMessage(error);
+    } finally {
+      if (sequence === driverLookupSequence) {
+        loadingEligibleTripDrivers = false;
+        tripSubmit.disabled = false;
+      }
+    }
+  };
+
+  tripForm.elements.planned_departure_at.addEventListener('change', () => {
+    refreshEligibleTripDrivers();
+  });
 
   const openTripDialog = async (mode, trip = null) => {
     setFormError(document.querySelector('#trip-form-error'), '');
@@ -557,12 +615,12 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
     try {
       const resources = await loadTripResources(trip?.id ?? null);
       fillResourceSelect(tripForm.elements.vehicle_id, resources.vehicles, 'Vehicle', trip?.vehicle_id ?? null);
-      fillResourceSelect(tripForm.elements.driver_id, resources.drivers, 'Driver', trip?.driver_id ?? null);
       if (mode === 'update') {
         tripForm.elements.planned_departure_at.value = toLocalDateTimeInput(trip.planned_departure_at);
       } else {
         await loadSubmittedOrders();
       }
+      await refreshEligibleTripDrivers(trip?.driver_id ?? null, trip?.id ?? null);
     } catch (error) {
       setFormError(document.querySelector('#trip-form-error'), errorMessage(error));
     } finally {
@@ -575,6 +633,10 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
     event.preventDefault();
     setFormError(document.querySelector('#trip-form-error'), '');
     if (loadingSubmittedOrders) return;
+    if (loadingEligibleTripDrivers || tripDriverSelect.disabled || tripDriverSelect.value === '') {
+      setFormError(document.querySelector('#trip-form-error'), 'Choose a planned departure and an eligible Driver before saving.');
+      return;
+    }
     if (!tripForm.reportValidity()) return;
     const mode = tripForm.dataset.mode;
     const payload = {
@@ -725,7 +787,7 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
       for (const user of result.items.filter((item) => !currentDriverUser || String(item.id) !== String(currentDriverUser.id))) {
         const option = document.createElement('option');
         option.value = String(user.id);
-        option.textContent = `${user.display_name || user.username} (${user.username})`;
+        option.textContent = `${user.display_name || user.username} (${user.username}) - ${user.foundation_user_id}`;
         driverUserSelect.append(option);
       }
       if (currentDriverUser) driverUserSelect.value = String(currentDriverUser.id);

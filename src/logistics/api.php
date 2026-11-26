@@ -33,6 +33,37 @@ return static function (Api $api, Connection $connection): void {
 
     $api->register(
         'GET',
+        '/logistics/drivers/eligible',
+        'logistics.drivers',
+        'read',
+        static function (
+            Actor $actor,
+            array $input,
+            array $params,
+            array $query
+        ) use ($drivers): array {
+            $pagination = Api::pagination($query, ['exclude_trip_id', 'planned_departure_at']);
+            $plannedDepartureAt = $pagination['filters']['planned_departure_at'] ?? null;
+            if ($plannedDepartureAt === null) {
+                throw new \MiniErp\shared\AppError('VALIDATION_ERROR', 'planned_departure_at is required.');
+            }
+            $excludeTripId = null;
+            if (isset($pagination['filters']['exclude_trip_id'])) {
+                $excludeTripId = filter_var(
+                    $pagination['filters']['exclude_trip_id'],
+                    FILTER_VALIDATE_INT,
+                    ['options' => ['min_range' => 1]]
+                );
+                if ($excludeTripId === false) {
+                    throw new \MiniErp\shared\AppError('VALIDATION_ERROR', 'exclude_trip_id must be a positive integer.');
+                }
+            }
+            return $drivers->getEligibleDrivers($actor, $pagination, $plannedDepartureAt, $excludeTripId);
+        }
+    );
+
+    $api->register(
+        'GET',
         '/logistics/drivers/{id}',
         'logistics.drivers',
         'read',

@@ -105,6 +105,16 @@ class TripValidator
         }
     }
 
+    public function departureDate(mixed $value): string
+    {
+        try {
+            $normalized = $this->validatePlannedDepartureAt($value);
+            return (new \DateTimeImmutable($normalized))->format('Y-m-d');
+        } catch (\InvalidArgumentException $error) {
+            throw new AppError('VALIDATION_ERROR', $error->getMessage());
+        }
+    }
+
     private function validatePositiveInteger(mixed $value, string $label): int
     {
         if (filter_var($value, FILTER_VALIDATE_INT) === false || (int) $value <= 0) {

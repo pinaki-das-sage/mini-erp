@@ -144,12 +144,13 @@
     <label for="trip-vehicle-id">Vehicle
       <select id="trip-vehicle-id" name="vehicle_id" required></select>
     </label>
-    <label for="trip-driver-id">Driver
-      <select id="trip-driver-id" name="driver_id" required></select>
-    </label>
     <label for="trip-departure">Planned departure (your local time)
       <input id="trip-departure" name="planned_departure_at" type="datetime-local" required step="60">
     </label>
+    <label for="trip-driver-id">Eligible Driver
+      <select id="trip-driver-id" name="driver_id" required disabled></select>
+    </label>
+    <p id="trip-driver-status" class="logistics-help" role="status" aria-live="polite">Choose a planned departure to load eligible Drivers.</p>
     <div class="logistics-dialog-actions">
       <button type="submit" id="trip-submit-button">Create Trip</button>
       <button type="button" class="button-secondary" data-close-dialog>Close</button>

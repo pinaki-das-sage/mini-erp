@@ -134,6 +134,27 @@ class TripRepository
         return $result && $result[0]['COUNT'] > 0;
     }
 
+    public function driverLicenceValidForDate(
+        int $companyId,
+        int $driverId,
+        string $departureDate,
+        ?TransactionContext $tx = null
+    ): bool {
+        $rows = $this->query(
+            "SELECT ID FROM ME_LOG_DRIVERS
+             WHERE COMPANY_ID = :companyId AND ID = :driverId AND ISACTIVE = 'T'
+               AND TRUNC(LICENCE_EXPIRY) >= TO_DATE(:departureDate, 'YYYY-MM-DD')",
+            [
+                'companyId' => $companyId,
+                'driverId' => $driverId,
+                'departureDate' => $departureDate,
+            ],
+            $tx
+        );
+
+        return count($rows) === 1;
+    }
+
     public function lockVehicle(TransactionContext $tx, int $companyId, int $vehicleId): bool
     {
         $rows = $tx->query(

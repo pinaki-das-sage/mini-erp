@@ -246,6 +246,49 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /logistics/drivers/eligible:
+    get:
+      tags: ["Logistics - Drivers"]
+      summary: List Drivers eligible for Trip assignment
+      description: >
+        Returns active same-company Drivers with a valid active linked Foundation
+        account (when linked), no other active Draft/Dispatched Trip assignment,
+        and a licence expiry on or after the business date represented by
+        planned_departure_at. Licence eligibility is evaluated for the requested
+        departure date, not the current date.
+      operationId: listEligibleDrivers
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: planned_departure_at
+          in: query
+          required: true
+          description: ISO-8601 departure timestamp including its UTC offset.
+          schema:
+            type: string
+            format: date-time
+          example: '2026-11-30T09:00:00+05:30'
+        - name: exclude_trip_id
+          in: query
+          required: false
+          description: Exclude this Draft Trip when checking resource availability during edit.
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Eligible Drivers for the planned departure date
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriverListEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /logistics/drivers/{id}:
     parameters:
       - $ref: '#/components/parameters/Id'
@@ -367,22 +410,33 @@ paths:
   /logistics/driver-users:
     get:
       tags: ["Logistics - Drivers"]
-      summary: List eligible same-company driver user accounts
+      summary: List Foundation users eligible to link to a Driver profile
+      description: >
+        Returns active Foundation users in the authenticated company who are not
+        already linked to another active Driver profile. The numeric ME_USERS.ID
+        is returned as the Driver USER_ID foreign key; the Foundation USER_ID is
+        exposed only as identity/display/search information. This lookup is
+        separate from eligible Drivers used for Trip assignment. The company is
+        derived from the authenticated actor.
       operationId: listEligibleDriverUsers
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PageSize'
         - name: search
           in: query
+          description: Match Foundation USER_ID, username, or display name.
           schema:
             type: string
+            maxLength: 100
       responses:
         '200':
           description: Eligible driver user accounts
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GenericSuccess'
+                $ref: '#/components/schemas/DriverUserListEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -396,7 +450,8 @@ paths:
         One whole Submitted Sales Order becomes one Draft Trip and every Sales
         Order line becomes a TripLine. In the same transaction, Trip assignment
         changes the Sales Order from SUBMITTED to IN_PROGRESS. Line weight and
-        load are derived from Inventory, never supplied by the client.
+        load are derived from Inventory, never supplied by the client. The
+        selected Driver's licence must be valid on the planned departure date.
       operationId: createTrip
       requestBody:
         required: true
@@ -481,6 +536,7 @@ paths:
     post:
       tags: ["Logistics - Trips"]
       summary: Update a Draft trip's Vehicle, Driver and planned departure
+      description: The selected Driver's licence must be valid on the resulting planned departure date.
       operationId: updateTrip
       requestBody:
         required: true
@@ -1338,6 +1394,22 @@ components:
           type: string
           enum: ['T', 'F']
 
+    DriverUser:
+      type: object
+      required: [id, foundation_user_id, username, display_name]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+          description: Numeric ME_USERS.ID accepted by the Driver USER_ID foreign key.
+        foundation_user_id:
+          type: string
+          description: Foundation identity for display/search; never used as the Driver foreign key.
+        username:
+          type: string
+        display_name:
+          type: [string, 'null']
+
     Trip:
       type: object
       required: [id, trip_code, vehicle_id, driver_id, planned_departure_at, status, sales_order_id, assigned_at, assigned_by, cancelled_at, cancelled_by, cancellation_reason, dispatched_at, dispatched_by, delivered_at, delivered_by, planned_load_kg, capacity_kg, remaining_capacity_kg]
@@ -1463,6 +1535,24 @@ components:
                   type: array
                   items:
                     $ref: '#/components/schemas/Driver'
+                page:
+                  type: integer
+                page_size:
+                  type: integer
+
+    DriverUserListEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccess'
+        - type: object
+          properties:
+            result:
+              type: object
+              required: [items, page, page_size]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/DriverUser'
                 page:
                   type: integer
                 page_size:
