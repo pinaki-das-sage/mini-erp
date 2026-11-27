@@ -60,6 +60,18 @@ final readonly class VendorModel
      */
     public function create(Actor $actor, array $values): array
     {
+        // Give a clear conflict before inserting. The unique constraint also
+        // protects concurrent requests that both pass this lookup.
+        $existing = $this->connection->query(
+            'SELECT ID FROM ME_PUR_VENDOR
+             WHERE CNYID = :company_id AND VENDOR_ID = :vendor_id
+             FETCH FIRST 1 ROWS ONLY',
+            ['company_id' => $actor->companyId, 'vendor_id' => $values['vendor_id']],
+        );
+        if ($existing !== []) {
+            throw new AppError('CONFLICT', 'A vendor with this vendor_id already exists in this company.', 409);
+        }
+
         $id = bin2hex(random_bytes(16));
         try {
             (new TransactionManager($this->connection))->run(

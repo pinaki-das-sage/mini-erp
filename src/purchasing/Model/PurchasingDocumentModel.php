@@ -88,7 +88,7 @@ final readonly class PurchasingDocumentModel
             );
         } catch (DatabaseError $error) {
             if ($error->oracleCode === 1) {
-                throw new AppError('CONFLICT', 'The document number or line number already exists.', 409);
+                throw new AppError('CONFLICT', 'The document number, order_id, receiver_id, invoice_id or line number already exists in this company.', 409);
             }
             throw $error;
         }
