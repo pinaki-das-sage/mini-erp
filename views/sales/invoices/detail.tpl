@@ -1,6 +1,6 @@
 <link rel="stylesheet" href="{$basePath}/assets/sales/documents.css">
 <div class="sales-document document-detail">
-<p><a href="{$data.listUrl}">Back to invoices</a></p>
+<p><a href="{$data.listUrl}" data-document-back>Back to invoices</a></p>
 
 <div class="panel">
     <h2>Invoice information</h2>
@@ -95,3 +95,4 @@
 </div>
 
 </div>
+<script src="{$basePath}/assets/sales/document-navigation.js" defer></script>

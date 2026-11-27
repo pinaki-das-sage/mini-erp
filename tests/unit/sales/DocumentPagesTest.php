@@ -62,6 +62,8 @@ final class DocumentPagesTest extends TestCase
         $path = $base . '/' . $number;
         $html = $pages->handle('GET', $path, $this->actor(), [], [])['body'];
         self::assertStringContainsString('&lt;Item&gt;', $html);
+        self::assertStringContainsString('data-document-back', $html);
+        self::assertStringContainsString('src="/training/assets/sales/document-navigation.js"', $html);
         self::assertStringContainsString('<dt>Customer code</dt><dd>CUST-001</dd>', $html);
         self::assertStringContainsString('<dt>Customer name</dt><dd>Example Traders</dd>', $html);
         $form = $pages->handle('GET', $path . '/edit', $this->actor(), [], []);

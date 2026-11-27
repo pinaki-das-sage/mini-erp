@@ -1,6 +1,6 @@
 <link rel="stylesheet" href="{$data.styleUrl}">
 <link rel="stylesheet" href="{$data.dateRangeStyleUrl}">
-<div class="sales-document sales-list-page">
+<div class="sales-document sales-list-page" data-document-list="{$data.listUrl}">
     <div class="document-toolbar">
         <a href="{$data.salesUrl}">Back to Sales</a>
         {if $data.createUrl}<a class="button" href="{$data.createUrl}">New {$data.documentLabel}</a>{/if}
@@ -25,7 +25,7 @@
                 <th scope="col">Customer code</th>{if $data.kind === 'quote'}<th scope="col">Customer name</th>{/if}<th scope="col">Date</th>
                 <th scope="col">Delivery date</th><th scope="col">Status</th><th scope="col" class="document-money">Total</th></tr></thead>
             <tbody>{foreach $data.list.items as $document}
-                <tr><td><a href="{$document.viewUrl}">{$document.number}</a></td>
+                <tr><td><a href="{$document.viewUrl}" data-document-link>{$document.number}</a></td>
                     {if $data.kind === 'order'}<td>{$document.source_quote_number}</td>{/if}
                     <td>{$document.customer_code}</td>{if $data.kind === 'quote'}<td>{$document.customer_name}</td>{/if}
                     <td>{$document.date}</td><td>{$document.requested_delivery_date|default:'—'}</td>
@@ -40,3 +40,4 @@
     </nav>
 </div>
 <script src="{$data.dateRangeScriptUrl}" defer></script>
+<script src="{$basePath}/assets/sales/document-navigation.js" defer></script>

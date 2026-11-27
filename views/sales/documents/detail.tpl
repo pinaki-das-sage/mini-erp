@@ -1,6 +1,6 @@
 <link rel="stylesheet" href="{$data.styleUrl}">
 <div class="sales-document document-detail">
-    <p><a href="{$data.listUrl}">Back to {$data.kind}s</a></p>
+    <p><a href="{$data.listUrl}" data-document-back>Back to {$data.kind}s</a></p>
     <div class="panel">
         <div class="document-toolbar">
             <span class="document-status">{$data.document.status}</span>
@@ -51,3 +51,4 @@
     </table></div>
     <div class="panel"><h2>Notes</h2><p class="document-notes">{$data.document.notes|default:'No notes.'}</p></div>
 </div>
+<script src="{$basePath}/assets/sales/document-navigation.js" defer></script>

@@ -79,6 +79,8 @@ final class ListingFiltersTest extends TestCase
         self::assertSame(25, substr_count($first, 'href="/training/modules/sales/quotes/SQ-'));
         self::assertStringContainsString('Next &gt;</a>', $first);
         self::assertStringContainsString('rel="next"', $first);
+        self::assertStringContainsString('data-document-list="/training/modules/sales/quotes"', $first);
+        self::assertSame(25, substr_count($first, 'data-document-link'));
         self::assertStringContainsString('data-date-open="from"', $first);
         self::assertStringContainsString('data-date-open="to"', $first);
         self::assertStringContainsString('date_range=2026-11-24+to+2026-11-25&amp;page=2', $first);

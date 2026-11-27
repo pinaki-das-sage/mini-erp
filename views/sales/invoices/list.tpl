@@ -1,6 +1,6 @@
 <link rel="stylesheet" href="{$data.dateRangeStyleUrl}">
 <link rel="stylesheet" href="{$data.styleUrl}">
-<div class="sales-document sales-list-page">
+<div class="sales-document sales-list-page" data-document-list="{$data.listUrl}">
     <div class="document-toolbar">
         <a href="{$data.salesUrl}">Back to Sales</a>
         {if $data.createUrl}<a class="button" href="{$data.createUrl}">New Invoice</a>{/if}
@@ -76,7 +76,7 @@
             {foreach $data.invoices.items as $invoice}
                 <tr>
                     <td>
-                        <a href="{$invoice.viewUrl}">
+                        <a href="{$invoice.viewUrl}" data-document-link>
                             {$invoice.invoice_number}
                         </a>
                     </td>
@@ -109,3 +109,4 @@
 </nav>
 </div>
 <script src="{$data.dateRangeScriptUrl}" defer></script>
+<script src="{$basePath}/assets/sales/document-navigation.js" defer></script>
