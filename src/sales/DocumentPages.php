@@ -112,13 +112,18 @@ final readonly class DocumentPages
                 $actions[] = ['url' => $this->url($number, '/' . $path), 'label' => $label];
             }
         }
+        $createOrderUrl = null;
+        $createOrderDisabled = false;
+        if ($this->kind === 'quote' && $document['status'] === 'Submitted' &&
+            $this->can($actor, 'order', 'create') && $this->can($actor, 'quote', 'read')) {
+            $createOrderUrl = $this->paths->url('/modules/sales/orders/new') . '?' . http_build_query(['source_quote_number' => $number]);
+            $createOrderDisabled = $this->hasLinkedOrder($actor, $number);
+        }
         return $this->page('detail', $number, $actor, [
             'document' => $document, 'number' => $number, 'actions' => $actions, 'error' => $error,
             'invoiceAction' => $this->kind === 'order' ? $this->invoiceAction($actor, $number, $document['status']) : null,
             'editUrl' => in_array('edit', $document['available_actions'], true) ? $this->url($number, '/edit') : null,
-            'createOrderUrl' => $this->kind === 'quote' && $document['status'] === 'Submitted' &&
-                $this->can($actor, 'order', 'create') && $this->can($actor, 'quote', 'read')
-                ? $this->paths->url('/modules/sales/orders/new') . '?' . http_build_query(['source_quote_number' => $number]) : null,
+            'createOrderUrl' => $createOrderUrl, 'createOrderDisabled' => $createOrderDisabled,
         ], $status);
     }
 
@@ -283,6 +288,16 @@ final readonly class DocumentPages
     {
         $value = $input['action_reference'] ?? null;
         return is_string($value) && preg_match('/\A[A-Za-z0-9_-]{1,100}\z/D', $value) ? $value : bin2hex(random_bytes(16));
+    }
+
+    private function hasLinkedOrder(Actor $actor, string $number): bool
+    {
+        return $this->connection->query("SELECT O.RECORD# AS LINKED_ORDER_ID FROM ME_OE_SOURCE_LINKS L
+            JOIN ME_OE_DOCUMENTS Q ON Q.CNY# = L.CNY# AND Q.RECORD# = L.SOURCE_DOCUMENT_RECORD#
+            JOIN ME_OE_DOCUMENTS O ON O.CNY# = L.CNY# AND O.RECORD# = L.TARGET_DOCUMENT_RECORD#
+            WHERE L.CNY# = :company_id AND Q.DOCUMENT_TYPE = 'SALES_QUOTE' AND Q.DOCUMENT_NUMBER = :quote_number
+              AND O.DOCUMENT_TYPE = 'SALES_ORDER' FETCH FIRST 1 ROWS ONLY",
+            ['company_id' => $actor->companyId, 'quote_number' => $number]) !== [];
     }
 
     private function invoiceAction(Actor $actor, string $number, string $status): ?array

@@ -6,7 +6,13 @@
             <span class="document-status">{$data.document.status}</span>
             {if $data.editUrl}<a class="button" href="{$data.editUrl}">Edit Draft</a>{/if}
             {foreach $data.actions as $action}<a class="button" href="{$action.url}">{$action.label}</a>{/foreach}
-            {if $data.createOrderUrl}<a class="button" href="{$data.createOrderUrl}">Create Order</a>{/if}
+            {if $data.createOrderUrl}
+                {if $data.createOrderDisabled}
+                    <span class="document-disabled-action" title="An Order already exists for this Quote.">
+                        <button type="button" disabled title="An Order already exists for this Quote.">Create Order</button>
+                    </span>
+                {else}<a class="button" href="{$data.createOrderUrl}">Create Order</a>{/if}
+            {/if}
             {if $data.invoiceAction}
                 {if $data.invoiceAction.create}
                     <form method="post" action="{$data.invoiceAction.url}">

@@ -264,4 +264,68 @@ final class DocumentPagesTest extends TestCase
         $html = $pages->handle('GET', $path, $this->actor(false), [], [])['body'];
         self::assertStringNotContainsString('View Invoice</a>', $html);
     }
+
+    public function testCreateOrderIsDisabledOnlyWhenAnEligibleQuoteHasALinkedOrder(): void
+    {
+        $memory = new QuoteMemoryConnection();
+        $db = $this->connection($memory);
+        $pages = new DocumentPages($db, new WebPath('/training'), 'csrf', 'quote');
+        $created = $pages->handle('POST', '/modules/sales/quotes/new', $this->actor(), $this->quoteInput(), []);
+        $number = basename($created['headers']['Location']);
+        $path = '/modules/sales/quotes/' . $number;
+        $html = $pages->handle('GET', $path, $this->actor(), [], [])['body'];
+        self::assertStringNotContainsString('Create Order</', $html); // Draft Quotes cannot create Orders.
+        $memory->documents[1]['STATUS'] = 'SUBMITTED';
+        $html = $pages->handle('GET', $path, $this->actor(), [], [])['body'];
+        self::assertStringContainsString('href="/training/modules/sales/orders/new?source_quote_number=' . $number . '">Create Order</a>', $html);
+        self::assertStringNotContainsString('document-disabled-action', $html);
+
+        $memory->used = true;
+        $html = $pages->handle('GET', $path, $this->actor(), [], [])['body'];
+        self::assertStringContainsString('disabled title="An Order already exists for this Quote.">Create Order</button>', $html);
+        self::assertStringNotContainsString('source_quote_number=', $html); // No navigable creation link remains.
+        self::assertCount(1, $memory->documents); // Viewing does not create another document.
+        $memory->used = false; // Deleting the linked Draft Order makes the Quote eligible again.
+        $html = $pages->handle('GET', $path, $this->actor(), [], [])['body'];
+        self::assertStringContainsString('Create Order</a>', $html);
+
+        foreach ([false, true] as $used) {
+            $memory->used = $used;
+            $memory->grants = ['sales.quotes:read'];
+            $html = $pages->handle('GET', $path, $this->actor(false), [], [])['body'];
+            self::assertStringNotContainsString('Create Order</', $html);
+            $memory->grants[] = 'sales.orders:create';
+            $html = $pages->handle('GET', $path, $this->actor(false), [], [])['body'];
+            self::assertStringContainsString($used ? 'Create Order</button>' : 'Create Order</a>', $html);
+        }
+    }
+
+    public function testQuoteOrderLookupScopesBothDocumentsAndLinkToTheCompany(): void
+    {
+        $memory = new QuoteMemoryConnection();
+        $service = new QuoteService($memory);
+        $quote = $service->create($this->actor(), ['customer_code' => 'CUST-001', 'warehouse_id' => 'W01', 'quote_date' => '2026-11-23',
+            'lines' => [['product_id' => '163', 'description' => 'Item', 'quantity' => '1', 'unit_price' => '1.00']]]);
+        $memory->documents[1]['STATUS'] = 'SUBMITTED';
+        $lookups = 0;
+        $db = $this->createMock(Connection::class);
+        $db->method('query')->willReturnCallback(static function (string $sql, array $binds) use ($memory, $quote, &$lookups): array {
+            if (str_contains($sql, 'AS LINKED_ORDER_ID')) {
+                $lookups++;
+                self::assertSame(['company_id' => 7, 'quote_number' => $quote['quote_number']], $binds);
+                foreach (["Q.CNY# = L.CNY#", "O.CNY# = L.CNY#", "L.CNY# = :company_id",
+                    "Q.DOCUMENT_TYPE = 'SALES_QUOTE'", "Q.DOCUMENT_NUMBER = :quote_number",
+                    "O.DOCUMENT_TYPE = 'SALES_ORDER'", 'L.SOURCE_DOCUMENT_RECORD#', 'L.TARGET_DOCUMENT_RECORD#'] as $clause) {
+                    self::assertStringContainsString($clause, $sql);
+                }
+                self::assertStringNotContainsString($quote['quote_number'], $sql);
+                return [];
+            }
+            return $memory->query($sql, $binds);
+        });
+        $db->expects(self::never())->method('execute');
+        $pages = new DocumentPages($db, new WebPath('/training'), 'csrf', 'quote');
+        $pages->handle('GET', '/modules/sales/quotes/' . $quote['quote_number'], $this->actor(), [], []);
+        self::assertSame(1, $lookups);
+    }
 }
