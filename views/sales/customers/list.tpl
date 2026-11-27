@@ -4,7 +4,7 @@
 </div>
 <div class="panel">
     <form method="get" action="{$data.listUrl}">
-        <div class="filters">
+        <div class="sales-customer-filters">
             <label>
                 Search customers
                 <input type="search" name="search"

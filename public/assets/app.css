@@ -28,8 +28,11 @@ footer { padding: 2rem; text-align: center; color: #536575; }
 .checkbox input { width: auto; }
 .button { display: inline-block; padding: .65rem 1rem; background: #075a80; color: white; text-decoration: none; border-radius: .3rem; }
 .filters { display: flex; gap: 1rem; }
+.sales-customer-filters { display: grid; grid-template-columns: minmax(0, 280px) minmax(0, 200px); gap: 40px; align-items: end; margin-bottom: 20px; }
+.sales-customer-filters label { display: flex; flex-direction: column; gap: 8px; margin: 0; min-width: 0; max-width: none; }
+.sales-customer-filters input, .sales-customer-filters select { box-sizing: border-box; width: 100%; min-width: 0; height: 40px; padding: 0 12px; border: 1px solid #b6c6d4; border-radius: .4rem; background: white; color: inherit; }
 .sales-home-cards article { display: flex; flex-direction: column; min-width: 0; }
-.sales-home-cards article p { text-align: justify; text-justify: inter-word; hyphens: auto; }
+.sales-home-cards article p { text-align: left; }
 .sales-home-cards { grid-template-columns: repeat(auto-fit, minmax(min(100%, 214px), 1fr)); }
 .sales-home-cards .button { display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 180px; height: 40px; flex-shrink: 0; align-self: flex-start; margin-top: auto; padding: 0; text-align: center; white-space: nowrap; }
 .sales-customer-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 1rem; }
