@@ -14,7 +14,6 @@ final class ConsoleConnection implements Connection
     public static string $mode;
     public static string $iniPath;
     private bool $verified = false;
-    private bool $migrationTableExists = false;
 
     public static function connect(Config $config): self
     {
@@ -42,26 +41,6 @@ final class ConsoleConnection implements Connection
         if (!$this->verified) {
             throw new \LogicException('Migration started before checking connectivity.');
         }
-        if (str_contains($sql, 'FROM USER_TABLES')) {
-            return $this->migrationTableExists || in_array(self::$mode, ['migrations_applied', 'sales_base_applied', 'sales_upgrade_ddl_failure'], true)
-                ? [['TABLE_NAME' => 'ME_MIGRATIONS']] : [];
-        }
-        if (str_contains($sql, 'FROM ME_MIGRATIONS') && isset($parameters['component'])) {
-            if (in_array(self::$mode, ['migrations_applied', 'sales_base_applied', 'sales_upgrade_ddl_failure'], true)
-                || (self::$mode === 'shared_incomplete' && $parameters['component'] === 'shared')) {
-                $rows = [];
-                foreach (glob(dirname(__DIR__, 3) . '/database/migrations/' . $parameters['component'] . '/*.php') as $path) {
-                    if (in_array(self::$mode, ['sales_base_applied', 'sales_upgrade_ddl_failure'], true)
-                        && $parameters['component'] === 'sales' && strcmp(basename($path), '003_') >= 0) {
-                        continue;
-                    }
-                    $rows[] = ['VERSION' => basename($path), 'CHECKSUM' => hash_file('sha256', $path),
-                        'STATUS' => self::$mode === 'shared_incomplete' ? 'RUNNING' : 'APPLIED'];
-                }
-                return $rows;
-            }
-            return [];
-        }
         if (str_contains($sql, 'FROM ME_COMPANY')) {
             return [['ID' => 1]];
         }
@@ -84,15 +63,6 @@ final class ConsoleConnection implements Connection
     {
         if (!$this->verified) {
             throw new \LogicException('Migration wrote before checking connectivity.');
-        }
-        if (self::$mode === 'shared_ddl_failure' && str_starts_with($sql, 'CREATE TABLE ME_USERS')) {
-            throw new DatabaseError(955);
-        }
-        if (self::$mode === 'sales_upgrade_ddl_failure' && str_starts_with($sql, 'ALTER TABLE ME_OE_CUSTOMERS')) {
-            throw new DatabaseError(2266);
-        }
-        if (str_starts_with($sql, 'CREATE TABLE ME_MIGRATIONS')) {
-            $this->migrationTableExists = true;
         }
         file_put_contents(self::$iniPath . '.writes', $sql . "\n", FILE_APPEND);
     }

@@ -1,10 +1,8 @@
 <?php
-
 declare(strict_types=1);
 
 namespace MiniErp\shared;
 
-use MiniErp\logistics\LogisticsUiApi;
 use MiniErp\shared\database\Connection;
 use MiniErp\shared\database\DatabaseError;
 use MiniErp\shared\database\MigrationRunner;
@@ -40,25 +38,7 @@ final class Kernel
                 if ($path !== '/api/v1/auth/login') {
                     Api::bearer($headers);
                 }
-                $registerModules = $path !== '/api/v1/auth/login';
-                return (new Api($this->db(), $this->config, $this->clientAddress, $registerModules))
-                    ->handle($method, $path, $input, $headers, $query);
-            }
-            // Keep the browser session bridge separate from bearer-only /api/v1.
-            if (str_starts_with($path, '/ui-api/logistics')) {
-                $actor = $this->actor();
-                if ($method !== 'GET') {
-                    Security::verifyCsrf($this->session, $headers['x-csrf-token'] ?? null);
-                    if (strtolower(trim(explode(';', $headers['content-type'] ?? '')[0])) !== 'application/json') {
-                        throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'Logistics UI writes require Content-Type: application/json.', 415);
-                    }
-                }
-                $operation = substr($path, strlen('/ui-api/logistics'));
-                $response = (new LogisticsUiApi($this->db()))->dispatch($actor, $method, $operation, $input, $query);
-                return $this->json($response['status'], [
-                    'success' => true, 'operation_id' => null, 'current_version' => null,
-                    'result' => $response['result'], 'error' => null,
-                ]);
+                return (new Api($this->db(), $this->config, $this->clientAddress))->handle($method, $path, $input, $headers, $query);
             }
             if (str_starts_with($path, '/api/') && isset($headers['authorization'])) {
                 throw new AppError('UNAUTHENTICATED', 'Bearer clients must use /api/v1 endpoints.', 401);
@@ -113,9 +93,7 @@ final class Kernel
             if ($method === 'POST' && $path === '/login') {
                 Security::verifyCsrf($this->session, $input['csrf_token'] ?? null);
                 $actor = (new AuthService($this->db()))->authenticate(
-                    $this->stringInput($input, 'username'),
-                    $this->stringInput($input, 'password'),
-                    $this->stringInput($input, 'company'),
+                    $this->stringInput($input, 'username'), $this->stringInput($input, 'password'), $this->stringInput($input, 'company'),
                 );
                 $this->session = ['actor_id' => $actor->id, 'security_version' => $actor->securityVersion, 'company_id' => $actor->companyId];
                 Security::csrfToken($this->session);
@@ -129,8 +107,7 @@ final class Kernel
             if ($method === 'GET' && $path === '/example') {
                 $actor = $this->actor();
                 return $this->page('shared/example/note.tpl', 'Neutral versioned note', [
-                    'actor' => $actor,
-                    'note' => (new NeutralNote($this->db()))->read($actor),
+                    'actor' => $actor, 'note' => (new NeutralNote($this->db()))->read($actor),
                 ]);
             }
             if ($path === '/account/password') {
@@ -156,17 +133,11 @@ final class Kernel
                 }
                 $reference = $this->stringInput($input, 'action_reference');
                 $result = (new NeutralNote($this->db()))->update(
-                    $actor,
-                    $reference,
-                    $this->stringInput($input, 'text'),
-                    $input['expected_version'],
+                    $actor, $reference, $this->stringInput($input, 'text'), $input['expected_version'],
                 );
                 return $this->json(200, [
-                    'success' => true,
-                    'operation_id' => $reference,
-                    'current_version' => $result['current_version'],
-                    'result' => $result,
-                    'error' => null,
+                    'success' => true, 'operation_id' => $reference,
+                    'current_version' => $result['current_version'], 'result' => $result, 'error' => null,
                 ]);
             }
             throw new AppError('NOT_FOUND', 'Page or operation not found.', 404);
@@ -178,10 +149,7 @@ final class Kernel
                 return $this->page('shared/security/password.tpl', 'Change password', ['actor' => $actor, 'error' => $error->getMessage()], $error->status);
             }
             $response = $this->json($error->status, [
-                'success' => false,
-                'operation_id' => null,
-                'current_version' => null,
-                'result' => null,
+                'success' => false, 'operation_id' => null, 'current_version' => null, 'result' => null,
                 'error' => ['code' => $error->errorCode, 'message' => $error->getMessage()],
             ]);
             if ($error->status === 401) {
@@ -192,11 +160,8 @@ final class Kernel
             $reference = bin2hex(random_bytes(8));
             error_log('mini-erp database_error request=' . $reference . ' oracle_code=' . $error->oracleCode);
             return $this->json(503, [
-                'success' => false,
-                'operation_id' => null,
-                'current_version' => null,
-                'result' => null,
-                'error' => ['code' => 'DATABASE_ERROR', 'message' => 'Oracle error ORA-' . str_pad((string) $error->oracleCode, 5, '0', STR_PAD_LEFT), 'request_id' => $reference],
+                'success' => false, 'operation_id' => null, 'current_version' => null, 'result' => null,
+                'error' => ['code' => 'DATABASE_ERROR', 'message' => 'Database operation failed. Contact the lab maintainer.', 'request_id' => $reference],
             ]);
         }
     }
@@ -211,10 +176,8 @@ final class Kernel
         if (!isset($this->session['actor_id']) || !is_string($this->session['actor_id'])) {
             throw new AppError('FORBIDDEN', 'Sign in before performing this operation.', 403);
         }
-        if (
-            !isset($this->session['security_version'], $this->session['company_id'])
-            || !is_int($this->session['security_version']) || !is_int($this->session['company_id']) || $this->session['company_id'] < 1
-        ) {
+        if (!isset($this->session['security_version'], $this->session['company_id'])
+            || !is_int($this->session['security_version']) || !is_int($this->session['company_id']) || $this->session['company_id'] < 1) {
             $this->session = [];
             throw new AppError('SESSION_EXPIRED', 'Sign in again.', 403);
         }
@@ -258,13 +221,8 @@ final class Kernel
             Security::verifyCsrf($this->session, $headers['x-csrf-token'] ?? null);
             $operation = $this->stringInput($input, 'operation');
             if ($operation === 'create') {
-                $id = $users->create(
-                    $actor,
-                    $this->stringInput($input, 'username'),
-                    $this->stringInput($input, 'display_name'),
-                    $this->stringInput($input, 'password'),
-                    $this->boolInput($input, 'is_admin')
-                );
+                $id = $users->create($actor, $this->stringInput($input, 'username'), $this->stringInput($input, 'display_name'),
+                    $this->stringInput($input, 'password'), $this->boolInput($input, 'is_admin'));
                 return $this->json(201, ['success' => true, 'result' => ['id' => $id], 'error' => null]);
             }
             $id = $this->stringInput($input, 'id');
@@ -272,14 +230,8 @@ final class Kernel
                 throw new AppError('VALIDATION_ERROR', 'expected_version must be an integer.');
             }
             if ($operation === 'update') {
-                $users->update(
-                    $actor,
-                    $id,
-                    $this->stringInput($input, 'display_name'),
-                    $this->boolInput($input, 'is_admin'),
-                    $this->boolInput($input, 'active'),
-                    $input['expected_version']
-                );
+                $users->update($actor, $id, $this->stringInput($input, 'display_name'), $this->boolInput($input, 'is_admin'),
+                    $this->boolInput($input, 'active'), $input['expected_version']);
             } elseif ($operation === 'permissions') {
                 if (!isset($input['grants']) || !is_array($input['grants']) || !array_is_list($input['grants'])) {
                     throw new AppError('VALIDATION_ERROR', 'grants must be an array of object:operation strings.');
@@ -318,10 +270,7 @@ final class Kernel
 
     private function json(int $status, array $payload): array
     {
-        return [
-            'status' => $status,
-            'headers' => ['Content-Type' => 'application/json; charset=UTF-8'],
-            'body' => json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE)
-        ];
+        return ['status' => $status, 'headers' => ['Content-Type' => 'application/json; charset=UTF-8'],
+            'body' => json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE)];
     }
 }

@@ -1,8 +1,0 @@
-/* Tables use the navy headings and pale rows from the planner reference. */
-.logistics-workspace th, .logistics-planner th { background: #1f3d57; color: #fff; font-weight: 600; font-size: .875rem; padding: .7rem 1rem; white-space: nowrap; }
-.logistics-workspace tbody tr:nth-child(odd), .logistics-planner tbody tr:nth-child(odd) { background: #f3f7f9; }
-.logistics-workspace .table-scroll, .logistics-planner .table-scroll { border-radius: .3rem; border: 1px solid #d7e1e8; }
-.logistics-planner td { font-size: .875rem; line-height: 1.6; padding: .8rem 1rem; border-color: #e2eaf0; }
-.logistics-workspace .logistics-panel { border-radius: .5rem; box-shadow: none; }
-.logistics-workspace button:not(.button-secondary):not(.button-danger):not(.logistics-tab), .logistics-planner button[type="submit"] { background: #287f86; }
-.logistics-badge-draft { background: #e5f4ee; color: #28574c; }

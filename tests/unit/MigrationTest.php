@@ -228,7 +228,6 @@ final class MigrationTest extends TestCase
     public function testRegistrationRowsCanBeAddedByMigration(): void
     {
         $runner = new MigrationRunner($this->createMock(Connection::class));
-
         $plan = $runner->plan(dirname(__DIR__, 2) . '/database/migrations/001-shared');
         self::assertCount(4, $plan);
         self::assertTrue((bool) array_filter($plan[1]['statements'], fn (string $sql) => str_starts_with($sql, 'INSERT INTO ME_OBJECTS')));

@@ -58,7 +58,6 @@ final class Renderer
         foreach ([
             'home' => '/', 'login' => '/login', 'logout' => '/logout',
             'css' => '/assets/app.css', 'script' => '/assets/app.js',
-            'logisticsCss' => '/assets/logistics/app.css', 'logisticsScript' => '/assets/logistics/app.js',
             'example' => '/example', 'password' => '/account/password',
             'company' => '/settings/company', 'users' => '/settings/users',
             'createUser' => '/settings/users/new', 'userApi' => '/api/settings/users',
