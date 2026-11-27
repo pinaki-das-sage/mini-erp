@@ -107,6 +107,10 @@ final readonly class PurchasingDocumentController
         foreach ($input['entries'] as $entry) {
             $entries[] = self::createEntry(self::entryObject($entry), $lineNumbers);
         }
+        $duplicateField = $this->documents->duplicateKey($actor, $document);
+        if ($duplicateField !== null) {
+            throw new AppError('CONFLICT', $duplicateField . ' already exists in this company.', 409);
+        }
         return $this->documents->create($actor, $document, $entries);
     }
 

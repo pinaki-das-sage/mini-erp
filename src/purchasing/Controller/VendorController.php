@@ -67,6 +67,9 @@ final readonly class VendorController
         if ($values['postal_code'] !== null && !preg_match('/\A[A-Za-z0-9]+\z/', $values['postal_code'])) {
             throw new AppError('VALIDATION_ERROR', 'postal_code must contain only letters and numbers.');
         }
+        if ($this->vendors->codeExists($actor, $values['vendor_id'])) {
+            throw new AppError('CONFLICT', 'A vendor with this vendor_id already exists in this company.', 409);
+        }
         $saved = $this->vendors->create($actor, $values);
         return $saved + ['message' => 'Vendor created successfully.'];
     }

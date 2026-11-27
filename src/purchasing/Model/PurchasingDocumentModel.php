@@ -28,6 +28,30 @@ final readonly class PurchasingDocumentModel
     public function __construct(private Connection $connection) {}
 
     /** @param array<string, mixed> $document
+     *  @return 'docno'|'order_id'|'receiver_id'|'invoice_id'|null
+     */
+    public function duplicateKey(Actor $actor, array $document): ?string
+    {
+        // Column names come only from this allowlist; values are always bound.
+        foreach (['docno', 'order_id', 'receiver_id', 'invoice_id'] as $field) {
+            if (!isset($document[$field])) {
+                continue;
+            }
+            $column = strtoupper($field);
+            $rows = $this->connection->query(
+                'SELECT ID FROM ME_PUR_DOC
+                 WHERE CNYID = :company_id AND ' . $column . ' = :key_value
+                 FETCH FIRST 1 ROWS ONLY',
+                ['company_id' => $actor->companyId, 'key_value' => $document[$field]],
+            );
+            if ($rows !== []) {
+                return $field;
+            }
+        }
+        return null;
+    }
+
+    /** @param array<string, mixed> $document
      *  @param list<array<string, mixed>> $entries
      *  @return array{id: string, cnyid: int, name: string, message: string}
      */
