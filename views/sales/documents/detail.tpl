@@ -3,7 +3,7 @@
     <p><a href="{$data.listUrl}" data-document-back>Back to {$data.kind}s</a></p>
     <div class="panel">
         <div class="document-toolbar">
-            <span class="document-status">{$data.document.status}</span>
+            {include file='sales/partials/status_badge.tpl' badgeStatus=$data.document.status badgeKind=$data.kind}
             {if $data.editUrl}<a class="button" href="{$data.editUrl}">Edit Draft</a>{/if}
             {foreach $data.actions as $action}<a class="button" href="{$action.url}">{$action.label}</a>{/foreach}
             {if $data.createOrderUrl}

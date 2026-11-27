@@ -37,10 +37,10 @@
         <dd>{$data.paymentTermsLabel}</dd></div>
 
         <div class="document-block"><dt>Status</dt>
-        <dd>{$data.invoice.status}</dd></div>
+        <dd>{include file='sales/partials/status_badge.tpl' badgeStatus=$data.invoice.status badgeKind='invoice'}</dd></div>
 
         <div class="document-block"><dt>Payment status</dt>
-        <dd>{$data.invoice.payment_status|default:'-'}</dd></div>
+        <dd>{include file='sales/partials/status_badge.tpl' badgeStatus=$data.invoice.payment_status|default:'' badgeKind='payment'}</dd></div>
 
         <div class="document-block"><dt>Source order</dt>
         <dd>{$data.invoice.source_order_number|default:'Standalone invoice'}</dd></div>

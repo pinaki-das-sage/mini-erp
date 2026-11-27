@@ -36,7 +36,7 @@
         <dd>{$data.invoice.amount_due}</dd></div>
 
         <div class="document-block"><dt>Payment status</dt>
-        <dd>{$data.invoice.payment_status}</dd></div>
+        <dd>{include file='sales/partials/status_badge.tpl' badgeStatus=$data.invoice.payment_status badgeKind='payment'}</dd></div>
     </dl>
 
     {if $data.invoiceUrl}

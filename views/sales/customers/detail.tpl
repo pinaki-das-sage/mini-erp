@@ -19,11 +19,7 @@
         <div class="customer-detail__field">
         <dt>Status</dt>
         <dd>
-            {if $data.customer.is_active === 'T'}
-                Active
-            {else}
-                Inactive
-            {/if}
+            {include file='sales/partials/status_badge.tpl' badgeStatus=$data.customer.is_active badgeKind='customer'}
         </dd>
         </div>
 

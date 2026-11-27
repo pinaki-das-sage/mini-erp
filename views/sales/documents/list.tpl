@@ -29,7 +29,7 @@
                     {if $data.kind === 'order'}<td>{$document.source_quote_number}</td>{/if}
                     <td>{$document.customer_code}</td>{if $data.kind === 'quote'}<td>{$document.customer_name}</td>{/if}
                     <td>{$document.date}</td><td>{$document.requested_delivery_date|default:'—'}</td>
-                    <td><span class="document-status">{$document.status}</span></td><td class="document-money">{$document.document_total}</td></tr>
+                    <td>{include file='sales/partials/status_badge.tpl' badgeStatus=$document.status badgeKind=$data.kind}</td><td class="document-money">{$document.document_total}</td></tr>
             {foreachelse}<tr><td colspan="7">No {$data.kind}s match your search.</td></tr>{/foreach}</tbody>
         </table>
     </div>

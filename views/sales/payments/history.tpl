@@ -57,7 +57,7 @@
                         <td>{$payment.payment_date}</td>
                         <td class="document-money">{$payment.payment_amount}</td>
                         <td class="document-money">{$payment.amount_due}</td>
-                        <td><span class="document-status">{$payment.payment_status}</span></td>
+                        <td>{include file='sales/partials/status_badge.tpl' badgeStatus=$payment.payment_status badgeKind='payment'}</td>
                         <td>{$payment.payment_reference|default:'—'}</td>
                         <td>{$payment.created_at}</td>
                     </tr>

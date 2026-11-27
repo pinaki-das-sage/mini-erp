@@ -54,7 +54,7 @@
                     <td>{$customer.customer_name}</td>
                     <td>{$customer.city}</td>
                     <td>
-                        {if $customer.is_active === 'T'}Active{else}Inactive{/if}
+                        {include file='sales/partials/status_badge.tpl' badgeStatus=$customer.is_active badgeKind='customer'}
                     </td>
                     <td>{$customer.amount_customer_owes_us}</td>
                 </tr>

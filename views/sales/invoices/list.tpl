@@ -83,11 +83,11 @@
                     <td>{$invoice.customer_code}</td>
                     <td>{$invoice.invoice_date}</td>
                     <td>{$invoice.due_date}</td>
-                    <td>{$invoice.status}</td>
+                    <td>{include file='sales/partials/status_badge.tpl' badgeStatus=$invoice.status badgeKind='invoice'}</td>
                     <td>{$invoice.document_total}</td>
                     <td>{$invoice.total_paid}</td>
                     <td>{$invoice.amount_due}</td>
-                    <td>{$invoice.payment_status|default:'-'}</td>
+                    <td>{include file='sales/partials/status_badge.tpl' badgeStatus=$invoice.payment_status|default:'' badgeKind='payment'}</td>
                 </tr>
             {foreachelse}
                 <tr>

@@ -23,7 +23,7 @@
         <tbody>{foreach $data.invoices.items as $invoice}<tr>
             <td><a href="{$invoice.viewUrl}">{$invoice.invoice_number}</a></td><td>{$invoice.customer_code}</td><td>{$invoice.invoice_date}</td>
             <td class="document-money">{$invoice.document_total}</td><td class="document-money">{$invoice.total_paid}</td><td class="document-money">{$invoice.amount_due}</td>
-            <td><span class="document-status">{$invoice.payment_status}</span></td>
+            <td>{include file='sales/partials/status_badge.tpl' badgeStatus=$invoice.payment_status badgeKind='payment'}</td>
             <td><div class="document-toolbar">
                 {if $invoice.recordUrl}<a class="button" href="{$invoice.recordUrl}">Record payment</a>{/if}
                 {if $invoice.historyUrl}<a href="{$invoice.historyUrl}">View history</a>{/if}

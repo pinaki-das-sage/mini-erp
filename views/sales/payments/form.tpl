@@ -12,7 +12,7 @@
         <dd>{$data.invoice.invoice_date}</dd></div>
 
         <div class="document-block"><dt>Invoice status</dt>
-        <dd>{$data.invoice.status}</dd></div>
+        <dd>{include file='sales/partials/status_badge.tpl' badgeStatus=$data.invoice.status badgeKind='invoice'}</dd></div>
 
         <div class="document-block"><dt>Invoice total</dt>
         <dd>{$data.invoice.document_total}</dd></div>
