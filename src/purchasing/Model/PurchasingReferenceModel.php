@@ -17,10 +17,10 @@ final readonly class PurchasingReferenceModel
             'sku' => $row['SKU'], 'active' => strtoupper((string) $row['IS_ACTIVE']) === 'Y',
         ], $this->connection->query(
             'SELECT PRODUCT_ID, PRODUCT_NAME, SKU, IS_ACTIVE FROM ME_INV_PRODUCTS
-             WHERE COMPANY_ID = :company_id
+             WHERE COMPANY_ID = :company_id AND WAREHOUSE_ID = :warehouse_id
                AND (UPPER(PRODUCT_NAME) LIKE UPPER(:search) OR UPPER(SKU) LIKE UPPER(:search))
              ORDER BY PRODUCT_NAME, PRODUCT_ID FETCH FIRST 200 ROWS ONLY',
-            ['company_id' => $actor->companyId, 'search' => '%' . $search . '%'],
+            ['company_id' => $actor->companyId, 'warehouse_id' => PurchasingDocumentModel::WAREHOUSE, 'search' => '%' . $search . '%'],
         ));
     }
 

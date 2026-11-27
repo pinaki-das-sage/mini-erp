@@ -5,6 +5,7 @@ namespace MiniErp\purchasing\Controller;
 
 use MiniErp\purchasing\Model\PurchasingDocumentModel;
 use MiniErp\shared\AppError;
+use MiniErp\purchasing\Quantity;
 use MiniErp\shared\security\Actor;
 use DateTimeImmutable;
 
@@ -277,12 +278,12 @@ final readonly class PurchasingDocumentController
             throw new AppError('VALIDATION_ERROR', 'lineno values must be unique within a document.');
         }
         $lineNumbers[$line] = true;
-        $quantity = self::numeric($entry, 'quantity', 3, true);
+        $quantity = Quantity::fromInput($entry['quantity'] ?? null);
         $unitCost = self::numeric($entry, 'unitcost', 2, false, 1e36);
         $lineAmount = self::calculatedAmount($quantity, $unitCost);
         if (array_key_exists('lineamount', $entry)
             && abs((float) self::numeric($entry, 'lineamount', 2, false) - (float) $lineAmount) > 0.000001) {
-            throw new AppError('VALIDATION_ERROR', 'lineamount must equal quantity multiplied by unitcost, rounded to two decimals.');
+            throw new AppError('VALIDATION_ERROR', 'lineamount must equal the rounded whole-unit quantity multiplied by unitcost, rounded to two decimals.');
         }
         $result = [
             'lineno' => $line,
@@ -314,7 +315,7 @@ final readonly class PurchasingDocumentController
                 $result['product_id'] = self::productId($entry);
             }
             if (array_key_exists('quantity', $entry)) {
-                $result['quantity'] = self::numeric($entry, 'quantity', 3, true);
+                $result['quantity'] = Quantity::fromInput($entry['quantity'] ?? null);
             }
             if (array_key_exists('unitcost', $entry)) {
                 $result['unitcost'] = self::numeric($entry, 'unitcost', 2, false, 1e36);
@@ -379,7 +380,7 @@ final readonly class PurchasingDocumentController
         return number_format((float) $value, $scale, '.', '');
     }
 
-    private static function calculatedAmount(string $quantity, string $unitCost): string
+    private static function calculatedAmount(int $quantity, string $unitCost): string
     {
         $amount = round((float) $quantity * (float) $unitCost, 2, PHP_ROUND_HALF_UP);
         if (!is_finite($amount) || abs($amount) >= 1e36) {

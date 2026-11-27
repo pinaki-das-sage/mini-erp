@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="{$basePath}/assets/purchasing.css">
+<link rel="stylesheet" href="{$basePath}/assets/purchasing/purchasing.css">
 <div id="purchasing" data-csrf="{$csrf}">
   <div class="purchase-intro"><p>Purchase from active vendors, edit drafts, and follow each document through its next step.</p><span class="purchase-tag">Company workspace</span></div>
   <ol class="purchase-flow" aria-label="Purchasing workflow">
@@ -51,4 +51,4 @@
   </section>
   <noscript><p class="error">Enable JavaScript to use Purchasing.</p></noscript>
 </div>
-<script src="{$basePath}/assets/purchasing.js" defer></script>
+<script src="{$basePath}/assets/purchasing/purchasing.js" defer></script>

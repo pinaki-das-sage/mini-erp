@@ -8,7 +8,7 @@
   const docForm = find('#purchasing-document');
   const vendorUpdate = find('#purchasing-update');
   const state = { section: 'documents', records: [], selected: null, editing: null, source: null,
-    permissions: new Set(), vendors: new Map(), products: new Map(), page: 1, version: 0, busy: false, dirty: false, nextLine: 1 };
+    receivingAvailable: false, permissions: new Set(), vendors: new Map(), products: new Map(), page: 1, version: 0, busy: false, dirty: false, nextLine: 1 };
   const names = { order: 'Purchase order', receiver: 'Receiver', invoice: 'Vendor invoice' };
   const can = operation => state.permissions.has(operation);
   const money = value => Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -128,6 +128,7 @@
       const context = await request('context');
       if (version !== state.version) return false;
       state.permissions = new Set(context.permissions);
+      state.receivingAvailable = context.receiving_available === true;
       const resource = state.section;
       if (!can('purchasing.' + (isDocument() ? 'document' : 'vendor') + ':read')) {
         state.records = [];
@@ -206,7 +207,7 @@
         vendorUpdate.elements.payment_terms.value = record.payment_terms;
       } else {
         for (const [term, value] of [
-          ['Document type', names[record.recordtype]], ['Vendor', vendorName(record.vendor_id)],
+          ['Document type', names[record.recordtype]], ['Warehouse', 'W01'], ['Vendor', vendorName(record.vendor_id)],
           ['Document date', record.doc_date?.slice(0, 10)], ['Vendor reference', record.vendor_ref],
           ['Payment terms', label(record.payment_terms)], ['Delivery address', record.delivery_addr],
           ['Document notes', record.notes], ['Total', money(record.total)],
@@ -235,8 +236,12 @@
             !can('purchasing.document:create') || !can('purchasing.document:create_receiver')));
         }
         if (record.recordtype === 'receiver' && draft) {
-          actions.append(action('Receive all items', null, true));
-          find('#purchasing-integration-note').textContent = 'Receiving is not connected yet. Inventory stock posting and active-warehouse validation must be integrated before this action can be enabled. No stock is posted by this screen.';
+          const allowed = state.receivingAvailable && can('purchasing.document:update') && can('inventory.stock:receive');
+          actions.append(action('Receive all items into W01', () => receiveAll(record), !allowed));
+          find('#purchasing-integration-note').textContent = !state.receivingAvailable
+            ? 'Warehouse W01 only. Deploy the Inventory StockReceiptService before receiving goods.'
+            : allowed ? 'Whole-unit quantities are received into W01. Stock, order and receiver are saved together, once.'
+              : 'Receiving requires document update and Inventory stock receive permissions.';
         }
         if (record.recordtype === 'receiver' && record.status === 'received' && !child) {
           actions.append(action('Create draft invoice', () => openDocument({ type: 'invoice', source: record }),
@@ -272,13 +277,35 @@
   }
 
   async function submitOrder(record) {
-    if (!window.confirm('Submit ' + record.docno + '? Its header and lines will become read-only.')) return;
+    if (!window.confirm('Submit ' + record.docno + '? Quantities round to whole units and amounts are recalculated. Its header and lines will become read-only.')) return;
     await saving(async () => {
       await request('documents/' + encodeURIComponent(record.id), { status: 'submitted' });
       await load();
       await showDetail(record.id);
       message('Order submitted. Header and lines are read-only.');
     });
+  }
+
+  async function receiveAll(record) {
+    if (!window.confirm('Receive all items on ' + record.docno + ' into W01? Decimal quantities round to whole units and document amounts are recalculated. Stock increases once and the receiver becomes read-only.')) return;
+    await saving(async () => {
+      const result = await request('documents/' + encodeURIComponent(record.id), { status: 'received' });
+      await load();
+      await showDetail(record.id);
+      message(result.message || 'Goods received into W01.');
+    });
+  }
+
+  function normalizeQuantity(input) {
+    input.setCustomValidity('');
+    if (input.value === '') return;
+    const raw = Number(input.value);
+    const rounded = Math.round(raw);
+    if (!Number.isFinite(raw) || raw <= 0 || rounded < 1 || rounded > 9999999999) {
+      input.setCustomValidity('Enter a quantity that rounds to between 1 and 9999999999 whole units.');
+      return;
+    }
+    input.value = String(rounded);
   }
 
   function fillVendors(selected = '') {
@@ -307,7 +334,7 @@
     let amount = 0;
     const lines = [...find('#purchasing-lines').children];
     for (const line of lines) {
-      const quantity = Number(line.querySelector('[name="quantity"]').value);
+      const quantity = Math.round(Number(line.querySelector('[name="quantity"]').value));
       const cost = Number(line.querySelector('[name="unitcost"]').value);
       const value = Math.round((quantity * cost + Number.EPSILON) * 100) / 100;
       if (Number.isFinite(value)) amount += value;
@@ -424,7 +451,7 @@
       const value = name => line.querySelector('[name="' + name + '"]').value;
       return { ...(line.dataset.id ? { id: line.dataset.id } : {}), lineno: Number(line.dataset.lineno),
         product_id: Number(value('product_id')), description: value('description').trim(),
-        quantity: Number(value('quantity')), unitcost: Number(value('unitcost')), notes: value('notes').trim() };
+        quantity: Math.round(Number(value('quantity'))), unitcost: Number(value('unitcost')), notes: value('notes').trim() };
     });
     if (record) {
       const savedIds = lines.map(line => line.dataset.id).filter(Boolean);
@@ -485,7 +512,13 @@
   find('#vendors-next').addEventListener('click', () => { state.page++; load(); });
   [docForm, vendorForm].forEach(form => form.addEventListener('input', () => { state.dirty = true; }));
   docForm.addEventListener('input', () => { total(); dueDate(); });
-  docForm.addEventListener('change', dueDate);
+  docForm.addEventListener('change', event => {
+    if (event.target.name === 'quantity') { normalizeQuantity(event.target); total(); }
+    dueDate();
+  });
+  docForm.addEventListener('input', event => {
+    if (event.target.name === 'quantity') event.target.setCustomValidity('');
+  });
   docForm.elements.vendor_id.addEventListener('change', () => {
     const vendor = state.vendors.get(docForm.elements.vendor_id.value);
     if (vendor) { docForm.elements.payment_terms.value = vendor.payment_terms; dueDate(); }

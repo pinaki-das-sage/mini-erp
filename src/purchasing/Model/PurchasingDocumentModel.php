@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace MiniErp\purchasing\Model;
 
 use MiniErp\shared\AppError;
+use MiniErp\purchasing\Quantity;
 use MiniErp\shared\database\Connection;
 use MiniErp\shared\database\DatabaseError;
 use MiniErp\shared\database\TransactionContext;
@@ -13,6 +14,7 @@ use MiniErp\shared\security\Authorization;
 
 final readonly class PurchasingDocumentModel
 {
+    public const WAREHOUSE = 'W01';
     private const DOCUMENT_SELECT = "D.CNYID AS DOC_CNYID, D.ID AS DOC_ID, D.VENDOR_ID, D.DOCNO,
         TO_CHAR(D.DOC_DATE, 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS DOC_DATE,
         D.SOURCE_DOC_ID, D.NOTES AS DOC_NOTES, D.VENDOR_REF, D.DELIVERY_ADDR, D.PAYMENT_TERMS, D.STATUS, D.ORDER_ID, D.RECEIVER_ID,
@@ -137,11 +139,131 @@ final readonly class PurchasingDocumentModel
         ];
     }
 
+    public static function receivingAvailable(): bool
+    {
+        return class_exists(\MiniErp\inventory\StockReceiptService::class);
+    }
+
+    /** Purchasing owns the transaction; Inventory joins it for each receipt line. */
+    public function receive(Actor $actor, string $id): array
+    {
+        $auth = new Authorization($this->connection);
+        $auth->requirePermission($actor, 'purchasing.document', 'update');
+        $auth->requirePermission($actor, 'inventory.stock', 'receive');
+        if (!self::receivingAvailable()) {
+            throw new AppError('DEPENDENCY_UNAVAILABLE', 'Deploy Inventory StockReceiptService before receiving goods.', 503);
+        }
+        return (new TransactionManager($this->connection))->run(
+            function (TransactionContext $tx) use ($actor, $id): array {
+                $lookup = $tx->query(
+                    'SELECT SOURCE_DOC_ID FROM ME_PUR_DOC WHERE CNYID = :company_id AND ID = :id',
+                    ['company_id' => $actor->companyId, 'id' => $id],
+                );
+                if ($lookup === [] || $lookup[0]['SOURCE_DOC_ID'] === null) {
+                    throw new AppError('NOT_FOUND', 'A source-linked receiver was not found.', 404);
+                }
+                $sourceId = (string) $lookup[0]['SOURCE_DOC_ID'];
+                // Lock the source first, matching the source-document creation lock order.
+                $orders = $tx->query(
+                    "SELECT RECORDTYPE, STATUS, TO_CHAR(DOC_DATE, 'YYYY-MM-DD') AS DOC_DATE
+                     FROM ME_PUR_DOC WHERE CNYID = :company_id AND ID = :id FOR UPDATE",
+                    ['company_id' => $actor->companyId, 'id' => $sourceId],
+                );
+                $receivers = $tx->query(
+                    "SELECT RECORDTYPE, STATUS, SOURCE_DOC_ID, TO_CHAR(DOC_DATE, 'YYYY-MM-DD') AS DOC_DATE
+                     FROM ME_PUR_DOC WHERE CNYID = :company_id AND ID = :id FOR UPDATE",
+                    ['company_id' => $actor->companyId, 'id' => $id],
+                );
+                if ($orders === [] || $receivers === []
+                    || strtolower((string) $orders[0]['RECORDTYPE']) !== 'order'
+                    || strtolower((string) $receivers[0]['RECORDTYPE']) !== 'receiver'
+                    || $receivers[0]['SOURCE_DOC_ID'] !== $sourceId) {
+                    throw new AppError('CONFLICT', 'Receiver source does not match its purchase order.', 409);
+                }
+                $order = $orders[0];
+                $receiver = $receivers[0];
+                if (strtolower((string) $receiver['STATUS']) === 'received'
+                    && strtolower((string) $order['STATUS']) === 'received') {
+                    return ['id' => $id, 'status' => 'received', 'warehouse_id' => self::WAREHOUSE,
+                        'message' => 'This receiver is already Received. Stock was not posted again.'];
+                }
+                if (strtolower((string) $receiver['STATUS']) !== 'draft'
+                    || strtolower((string) $order['STATUS']) !== 'submitted') {
+                    throw new AppError('CONFLICT', 'Receiving requires a Draft receiver and its Submitted order.', 409);
+                }
+                if ($receiver['DOC_DATE'] === null || $order['DOC_DATE'] === null
+                    || $receiver['DOC_DATE'] < $order['DOC_DATE']) {
+                    throw new AppError('VALIDATION_ERROR', 'Receipt date must be on or after the order date.');
+                }
+                $sourceLines = $tx->query(
+                    'SELECT LINENO, PRODUCT_ID, DESCRIPTION, QUANTITY, UNITCOST, LINEAMOUNT FROM ME_PUR_DOC_ENTRY
+                     WHERE CNYID = :company_id AND DOC_ID = :doc_id ORDER BY LINENO',
+                    ['company_id' => $actor->companyId, 'doc_id' => $sourceId],
+                );
+                $lines = $tx->query(
+                    'SELECT ID, LINENO, PRODUCT_ID, DESCRIPTION, QUANTITY, UNITCOST, LINEAMOUNT FROM ME_PUR_DOC_ENTRY
+                     WHERE CNYID = :company_id AND DOC_ID = :doc_id ORDER BY PRODUCT_ID, LINENO, ID',
+                    ['company_id' => $actor->companyId, 'doc_id' => $id],
+                );
+                if ($lines === [] || count($lines) !== count($sourceLines)) {
+                    throw new AppError('VALIDATION_ERROR', 'Receiver lines must match every source order line.');
+                }
+                $sourceMap = [];
+                foreach ($sourceLines as $line) {
+                    if (isset($sourceMap[(int) $line['LINENO']])) {
+                        throw new AppError('VALIDATION_ERROR', 'Source line numbers must be unique.');
+                    }
+                    $sourceMap[(int) $line['LINENO']] = $line;
+                }
+                $seen = [];
+                foreach ($lines as $line) {
+                    $number = (int) $line['LINENO'];
+                    $source = $sourceMap[$number] ?? null;
+                    if ($number < 1 || isset($seen[$number]) || $source === null
+                        || (int) $line['PRODUCT_ID'] !== (int) $source['PRODUCT_ID']
+                        || (float) $line['QUANTITY'] !== (float) $source['QUANTITY']
+                        || number_format((float) $line['UNITCOST'], 2, '.', '') !== number_format((float) $source['UNITCOST'], 2, '.', '')
+                        || number_format((float) $line['LINEAMOUNT'], 2, '.', '') !== number_format((float) $source['LINEAMOUNT'], 2, '.', '')
+                        || $line['DESCRIPTION'] !== $source['DESCRIPTION']) {
+                        throw new AppError('VALIDATION_ERROR', 'Receiver product, quantity, price and description must match the source order.');
+                    }
+                    $seen[$number] = true;
+                    self::validLine($line['QUANTITY'], $line['UNITCOST']);
+                    self::requireProduct($tx, $actor, (int) $line['PRODUCT_ID']);
+                }
+                // Round matching legacy quantities and recalculate both snapshots before
+                // posting stock. A failure rolls these changes back with Inventory.
+                self::normalizeDocumentLines($tx, $actor, $sourceId);
+                self::normalizeDocumentLines($tx, $actor, $id);
+                $inventory = new \MiniErp\inventory\StockReceiptService($this->connection);
+                foreach ($lines as $line) {
+                    // The stable receiver ENTRY ID is the Inventory movement's idempotency key.
+                    $inventory->receivePurchase($tx, $actor, (string) $line['ID'],
+                        (int) $line['PRODUCT_ID'], Quantity::fromStored($line['QUANTITY']));
+                }
+                $tx->execute(
+                    "UPDATE ME_PUR_DOC SET STATUS = 'received', MODIFIEDBY = :modified_by, WHENMODIFIED = SYSTIMESTAMP
+                     WHERE CNYID = :company_id AND ID IN (:order_id, :receiver_id)",
+                    ['modified_by' => $actor->id, 'company_id' => $actor->companyId,
+                        'order_id' => $sourceId, 'receiver_id' => $id],
+                );
+                return ['id' => $id, 'status' => 'received', 'warehouse_id' => self::WAREHOUSE,
+                    'message' => 'All items received into W01. Order, receiver and stock committed together.'];
+            },
+        );
+    }
+
     /** @param array<string, mixed> $changes
      *  @return array<string, mixed>
      */
     public function update(Actor $actor, string $id, array $changes): array
     {
+        if (($changes['status'] ?? null) === 'received') {
+            if (array_keys($changes) !== ['status']) {
+                throw new AppError('VALIDATION_ERROR', 'Save Draft changes before receiving goods.');
+            }
+            return $this->receive($actor, $id);
+        }
         try {
             return (new TransactionManager($this->connection))->run(
                 function (TransactionContext $tx) use ($actor, $id, $changes): array {
@@ -163,8 +285,8 @@ final readonly class PurchasingDocumentModel
                         if ($type !== 'order') {
                             throw new AppError('DEPENDENCY_UNAVAILABLE',
                                 $type === 'receiver'
-                                    ? 'Receiving is unavailable until Inventory posting and warehouse validation are connected.'
-                                    : 'Invoice posting is unavailable until the vendor balance ledger is connected.', 503);
+                                    ? 'Use Receive all items to move a Draft receiver to Received.'
+                                    : 'Invoice posting is unavailable until the vendor balance ledger is connected.', $type === 'receiver' ? 409 : 503);
                         }
                         if ($nextStatus !== 'submitted') {
                             throw new AppError('CONFLICT', 'A Draft order can only move to Submitted.', 409);
@@ -263,7 +385,8 @@ final readonly class PurchasingDocumentModel
                             throw new AppError('VALIDATION_ERROR', 'lineno must match the saved document line.');
                         }
                         $product = $entry['product_id'] ?? (int) $line['PRODUCT_ID'];
-                        $quantity = $entry['quantity'] ?? $line['QUANTITY'];
+                        $quantity = array_key_exists('quantity', $entry)
+                            ? Quantity::fromInput($entry['quantity']) : Quantity::fromStored($line['QUANTITY']);
                         $cost = $entry['unitcost'] ?? $line['UNITCOST'];
                         self::validLine($quantity, $cost);
                         self::requireProduct($tx, $actor, $product);
@@ -278,6 +401,9 @@ final readonly class PurchasingDocumentModel
                                 'notes' => array_key_exists('notes', $entry) ? $entry['notes'] : $line['NOTES'],
                                 'modified_by' => $actor->id, 'company_id' => $actor->companyId, 'doc_id' => $id, 'id' => $entry['id']],
                         );
+                    }
+                    if ($type === 'order') {
+                        self::normalizeDocumentLines($tx, $actor, $id);
                     }
                     $totals = $tx->query(
                         'SELECT COUNT(*) AS LINE_COUNT, COUNT(DISTINCT LINENO) AS UNIQUE_LINES, NVL(SUM(LINEAMOUNT), 0) AS TOTAL
@@ -392,6 +518,7 @@ final readonly class PurchasingDocumentModel
                     'duedate' => $row['DUEDATE'],
                     'recordtype' => $type,
                     'source_document_id' => $row['SOURCE_DOC_ID'],
+                    'warehouse_id' => self::WAREHOUSE,
                     'notes' => $row['DOC_NOTES'],
                     'amountdue' => self::numberOrNull($row['AMOUNTDUE']),
                     'total' => self::numberOrNull($row['TOTAL']),
@@ -490,6 +617,9 @@ final readonly class PurchasingDocumentModel
         ) !== []) {
             throw new AppError('CONFLICT', 'A downstream document already exists for this source.', 409);
         }
+        if ($type === 'receiver') {
+            self::normalizeDocumentLines($tx, $actor, (string) $source['ID']);
+        }
         $rows = $tx->query(
             'SELECT LINENO, PRODUCT_ID, DESCRIPTION, QUANTITY, UNITCOST, LINEAMOUNT, NOTES
              FROM ME_PUR_DOC_ENTRY WHERE CNYID = :company_id AND DOC_ID = :doc_id ORDER BY LINENO',
@@ -500,13 +630,16 @@ final readonly class PurchasingDocumentModel
         }
         $entries = [];
         foreach ($rows as $row) {
+            if ($type === 'invoice' && (float) $row['QUANTITY'] !== (float) Quantity::fromStored($row['QUANTITY'])) {
+                throw new AppError('VALIDATION_ERROR', 'The already Received source contains decimal quantities. Review that receipt before creating an invoice.');
+            }
             if ((int) $row['LINENO'] < 1 || trim((string) $row['DESCRIPTION']) === '') {
                 throw new AppError('VALIDATION_ERROR', 'The source has an invalid line number or description.');
             }
             self::validLine($row['QUANTITY'], $row['UNITCOST']);
             $entries[] = [
                 'lineno' => (int) $row['LINENO'], 'product_id' => (int) $row['PRODUCT_ID'],
-                'description' => $row['DESCRIPTION'], 'quantity' => (string) $row['QUANTITY'],
+                'description' => $row['DESCRIPTION'], 'quantity' => Quantity::fromStored($row['QUANTITY']),
                 'unitcost' => (string) $row['UNITCOST'], 'lineamount' => (string) $row['LINEAMOUNT'],
                 'notes' => $row['NOTES'],
             ];
@@ -523,6 +656,42 @@ final readonly class PurchasingDocumentModel
         return [$document, $entries];
     }
 
+    /** Caller holds the document header lock. No schema change or commit is needed. */
+    private static function normalizeDocumentLines(TransactionContext $tx, Actor $actor, string $documentId): void
+    {
+        $lines = $tx->query(
+            'SELECT ID, QUANTITY, UNITCOST, LINEAMOUNT FROM ME_PUR_DOC_ENTRY
+             WHERE CNYID = :company_id AND DOC_ID = :doc_id ORDER BY LINENO, ID FOR UPDATE',
+            ['company_id' => $actor->companyId, 'doc_id' => $documentId],
+        );
+        $total = 0.0;
+        foreach ($lines as $line) {
+            $quantity = Quantity::fromStored($line['QUANTITY']);
+            self::validLine($quantity, $line['UNITCOST']);
+            $amount = number_format(round($quantity * (float) $line['UNITCOST'], 2, PHP_ROUND_HALF_UP), 2, '.', '');
+            $total += (float) $amount;
+            if ((float) $line['QUANTITY'] !== (float) $quantity
+                || number_format((float) $line['LINEAMOUNT'], 2, '.', '') !== $amount) {
+                $tx->execute(
+                    'UPDATE ME_PUR_DOC_ENTRY SET QUANTITY = :quantity, LINEAMOUNT = :amount,
+                        MODIFIEDBY = :modified_by, WHENMODIFIED = SYSTIMESTAMP
+                     WHERE CNYID = :company_id AND DOC_ID = :doc_id AND ID = :id',
+                    ['quantity' => $quantity, 'amount' => $amount, 'modified_by' => $actor->id,
+                        'company_id' => $actor->companyId, 'doc_id' => $documentId, 'id' => $line['ID']],
+                );
+            }
+        }
+        if (!is_finite($total) || abs($total) >= 1e18) {
+            throw new AppError('VALIDATION_ERROR', 'The rounded document total exceeds the supported amount.');
+        }
+        $tx->execute(
+            'UPDATE ME_PUR_DOC SET TOTAL = :total, MODIFIEDBY = :modified_by, WHENMODIFIED = SYSTIMESTAMP
+             WHERE CNYID = :company_id AND ID = :id',
+            ['total' => number_format($total, 2, '.', ''), 'modified_by' => $actor->id,
+                'company_id' => $actor->companyId, 'id' => $documentId],
+        );
+    }
+
     private static function activeVendor(TransactionContext $tx, Actor $actor, string $vendorId): void
     {
         $rows = $tx->query(
@@ -536,6 +705,7 @@ final readonly class PurchasingDocumentModel
 
     private static function validLine(mixed $quantity, mixed $cost): void
     {
+        $quantity = Quantity::fromStored($quantity);
         $amount = (float) $quantity * (float) $cost;
         if ((float) $quantity <= 0 || (float) $cost < 0 || !is_finite($amount) || $amount >= 1e36) {
             throw new AppError('VALIDATION_ERROR', 'Quantity must be positive and unit cost must be zero or more, within the supported range.');
@@ -544,11 +714,16 @@ final readonly class PurchasingDocumentModel
 
     private static function requireProduct(TransactionContext $tx, Actor $actor, int $productId): void
     {
-        if ($tx->query(
-            'SELECT PRODUCT_ID FROM ME_INV_PRODUCTS WHERE COMPANY_ID = :company_id AND PRODUCT_ID = :product_id',
+        $rows = $tx->query(
+            'SELECT PRODUCT_ID, WAREHOUSE_ID FROM ME_INV_PRODUCTS
+             WHERE COMPANY_ID = :company_id AND PRODUCT_ID = :product_id',
             ['company_id' => $actor->companyId, 'product_id' => $productId],
-        ) === []) {
+        );
+        if ($rows === []) {
             throw new AppError('VALIDATION_ERROR', 'product_id must reference an existing inventory product in this company.');
+        }
+        if ($rows[0]['WAREHOUSE_ID'] !== self::WAREHOUSE) {
+            throw new AppError('VALIDATION_ERROR', 'Purchasing supports warehouse W01 only.');
         }
     }
 
@@ -560,16 +735,10 @@ final readonly class PurchasingDocumentModel
     /** @param array<string, mixed> $entry */
     private static function insertEntry(TransactionContext $tx, Actor $actor, string $documentId, array $entry): void
     {
+        $entry['quantity'] = Quantity::fromInput($entry['quantity']);
         self::validLine($entry['quantity'], $entry['unitcost']);
-        $products = $tx->query(
-            'SELECT PRODUCT_ID FROM ME_INV_PRODUCTS
-             WHERE COMPANY_ID = :company_id AND PRODUCT_ID = :product_id',
-            ['company_id' => $actor->companyId, 'product_id' => $entry['product_id']],
-        );
-        if ($products === []) {
-            throw new AppError('VALIDATION_ERROR',
-                'product_id must reference an existing inventory product in this company.');
-        }
+        self::requireProduct($tx, $actor, (int) $entry['product_id']);
+        $entry['lineamount'] = number_format(round($entry['quantity'] * (float) $entry['unitcost'], 2, PHP_ROUND_HALF_UP), 2, '.', '');
 
         try {
             $tx->execute(

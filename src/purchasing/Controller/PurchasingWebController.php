@@ -20,7 +20,9 @@ final readonly class PurchasingWebController
     {
         $auth = new Authorization($this->connection);
         if ($method === 'GET' && $path === '/api/purchasing/context') {
-            return ['permissions' => $auth->permissions($actor)];
+            return ['permissions' => $auth->permissions($actor),
+                'receiving_available' => PurchasingDocumentModel::receivingAvailable(),
+                'warehouse_id' => PurchasingDocumentModel::WAREHOUSE];
         }
         if ($method === 'GET' && preg_match('#^/api/purchasing/references/(products|vendors)$#', $path, $reference)) {
             if (array_intersect($auth->permissions($actor), [
