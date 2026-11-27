@@ -1,29 +1,37 @@
 <form id="purchasing-document" class="panel" method="post" action="{$basePath}/api/purchasing/documents" hidden>
-  <h2>New document</h2>
+  <div class="purchasing-toolbar"><h2 id="purchasing-form-title">New purchase order</h2><span class="purchase-state draft">Draft</span></div>
+  <p id="purchasing-source-summary" class="purchase-notice" hidden></p>
+  <input type="hidden" name="recordtype" value="order">
   <div class="purchasing-grid">
-    <label>Document type <select name="recordtype"><option value="order">Purchase order</option><option value="receiver">Receiver</option><option value="invoice">Invoice</option></select></label>
-    <label>Document number <input name="docno" required maxlength="20" placeholder="PO-0001" pattern="PO-.+"></label>
-    <label>Vendor record ID <input name="vendor_id" required maxlength="40"></label>
-    <label>Document date <input name="doc_date" type="date" required></label>
+    <label>Document number * <input name="docno" required maxlength="20" placeholder="PO-0001" pattern="PO-.+"></label>
+    <label>Vendor * <select name="vendor_id" required><option value="">Select an active vendor</option></select></label>
+    <label><span id="purchasing-date-label">Order date *</span><input name="doc_date" type="date" required></label>
     <label>Vendor reference <input name="vendor_ref" maxlength="40"></label>
     {include file='purchasing/payment_terms.tpl'}
     <label>Delivery address <textarea name="delivery_addr" maxlength="400"></textarea></label>
+    <label>Document notes <textarea name="notes" maxlength="500"></textarea></label>
   </div>
-  <p>Use the record ID from Vendors. Document numbers begin with PO-, RCV- or INV-. Invoice due dates are calculated from the document date and payment terms.</p>
-  <fieldset><legend>Document lines</legend>
-    <p>Use an existing inventory product ID. The server calculates line amounts and totals.</p>
+  <p id="purchasing-due-date" class="purchase-muted"></p>
+  <div id="purchasing-reference-tools" class="purchase-reference-tools">
+    <label>Find vendor or product <input type="search" id="purchasing-reference-search" maxlength="100" placeholder="Search by name, vendor code or SKU"></label>
+    <button type="button" id="purchasing-find-references">Find choices</button>
+    <span id="purchasing-reference-status" role="status"></span>
+  </div>
+  <fieldset><legend>Item lines</legend>
+    <p id="purchasing-lines-help">Edit the items while this order is Draft. Submitting makes the header and lines read-only.</p>
     <div id="purchasing-lines"></div>
     <button type="button" id="purchasing-add-line">Add line</button>
-    <p>Estimated total: <output id="purchasing-total">0.00</output></p>
+    <p class="purchase-total">Total preview: <output id="purchasing-total">0.00</output></p>
   </fieldset>
-  <button type="submit">Create document</button> <button type="button" data-close>Cancel</button>
+  <div class="purchase-actions"><button type="submit" id="purchasing-document-save">Save draft</button><button type="button" data-close>Cancel</button></div>
+  <p class="purchase-muted">Save the draft first, then submit from its details page. Invoice due dates are calculated from the invoice date and copied payment terms.</p>
 </form>
 <template id="purchasing-line-template">
   <fieldset class="purchasing-line"><legend>Line</legend><div class="purchasing-grid">
-    <label>Product ID <input name="product_id" type="number" min="1" max="9999999999" step="1" required></label>
-    <label>Description <input name="description" maxlength="200" required></label>
-    <label>Quantity <input name="quantity" type="number" min="0.001" step="0.001" required value="1"></label>
-    <label>Unit cost <input name="unitcost" type="number" step="0.01" required value="0"></label>
-    <label>Notes <input name="notes" maxlength="500"></label>
-  </div><button type="button" data-remove-line>Remove line</button></fieldset>
+    <label>Inventory product * <select name="product_id" required><option value="">Select a product</option></select></label>
+    <label>Description * <input name="description" maxlength="200" required></label>
+    <label>Quantity * <input name="quantity" type="number" min="0.001" step="0.001" required value="1"></label>
+    <label>Unit cost * <input name="unitcost" type="number" min="0" step="0.01" required value="0"></label>
+    <label>Line notes <input name="notes" maxlength="500"></label>
+  </div><div class="purchasing-toolbar"><span data-line-total class="purchase-muted"></span><button type="button" data-remove-line>Remove line</button></div></fieldset>
 </template>

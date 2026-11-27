@@ -9,12 +9,13 @@ use MiniErp\shared\database\DatabaseError;
 use MiniErp\shared\database\TransactionContext;
 use MiniErp\shared\database\TransactionManager;
 use MiniErp\shared\security\Actor;
+use MiniErp\shared\security\Authorization;
 
 final readonly class PurchasingDocumentModel
 {
     private const DOCUMENT_SELECT = "D.CNYID AS DOC_CNYID, D.ID AS DOC_ID, D.VENDOR_ID, D.DOCNO,
         TO_CHAR(D.DOC_DATE, 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS DOC_DATE,
-        D.VENDOR_REF, D.DELIVERY_ADDR, D.PAYMENT_TERMS, D.STATUS, D.ORDER_ID, D.RECEIVER_ID,
+        D.SOURCE_DOC_ID, D.NOTES AS DOC_NOTES, D.VENDOR_REF, D.DELIVERY_ADDR, D.PAYMENT_TERMS, D.STATUS, D.ORDER_ID, D.RECEIVER_ID,
         D.INVOICE_ID, TO_CHAR(D.DUEDATE, 'YYYY-MM-DD') AS DUEDATE, D.RECORDTYPE, D.AMOUNTDUE,
         D.TOTAL, D.CREATEDBY AS DOC_CREATEDBY, D.MODIFIEDBY AS DOC_MODIFIEDBY,
         TO_CHAR(D.WHENCREATED, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF3\"Z\"') AS DOC_WHENCREATED,
@@ -57,6 +58,22 @@ final readonly class PurchasingDocumentModel
      */
     public function create(Actor $actor, array $document, array $entries): array
     {
+        if (($document['status'] ?? 'draft') !== 'draft') {
+            throw new AppError('VALIDATION_ERROR', 'New documents must start in Draft.');
+        }
+        $document['status'] = 'draft';
+        $sourceId = $document['source_document_id'] ?? null;
+        if ($document['recordtype'] !== 'order') {
+            if ($sourceId === null) {
+                throw new AppError('VALIDATION_ERROR', 'Select the source document when creating a receiver or invoice.');
+            }
+            $auth = new Authorization($this->connection);
+            $auth->requirePermission($actor, 'purchasing.document', 'read');
+            $auth->requirePermission($actor, 'purchasing.document',
+                $document['recordtype'] === 'receiver' ? 'create_receiver' : 'create_invoice');
+        } elseif ($sourceId !== null) {
+            throw new AppError('VALIDATION_ERROR', 'A purchase order cannot use a source document.');
+        }
         $id = bin2hex(random_bytes(16));
         $typeField = match ($document['recordtype']) {
             'order' => 'order_id',
@@ -66,31 +83,27 @@ final readonly class PurchasingDocumentModel
         try {
             (new TransactionManager($this->connection))->run(
                 function (TransactionContext $tx) use ($actor, $document, $entries, $id, $typeField): void {
-                    $vendors = $tx->query(
-                        'SELECT STATUS FROM ME_PUR_VENDOR WHERE CNYID = :company_id AND ID = :vendor_id',
-                        ['company_id' => $actor->companyId, 'vendor_id' => $document['vendor_id']],
-                    );
-                    if ($vendors === []) {
-                        throw new AppError('NOT_FOUND', 'Vendor not found in this company.', 404);
-                    }
-                    if ($document['recordtype'] === 'order' && strtolower((string) $vendors[0]['STATUS']) !== 'active') {
-                        throw new AppError('INVALID_STATE', 'A purchase order requires an active vendor.', 409);
+                    if (($document['source_document_id'] ?? null) !== null) {
+                        [$document, $entries] = self::sourceDraft($tx, $actor, $document);
+                    } else {
+                        self::activeVendor($tx, $actor, $document['vendor_id']);
                     }
                     $total = self::total($entries);
                     $typeId = $document[$typeField] ?? $id;
                     $tx->execute(
                         'INSERT INTO ME_PUR_DOC
-                            (CNYID, ID, VENDOR_ID, DOCNO, DOC_DATE, VENDOR_REF, DELIVERY_ADDR, PAYMENT_TERMS,
+                            (CNYID, ID, VENDOR_ID, DOCNO, SOURCE_DOC_ID, NOTES, DOC_DATE, VENDOR_REF, DELIVERY_ADDR, PAYMENT_TERMS,
                              STATUS, ORDER_ID, RECEIVER_ID, INVOICE_ID, DUEDATE, RECORDTYPE, AMOUNTDUE, TOTAL,
                              CREATEDBY, MODIFIEDBY, WHENCREATED, WHENMODIFIED)
                          VALUES
-                            (:company_id, :id, :vendor_id, :docno, TO_DATE(:doc_date, \'YYYY-MM-DD\'), :vendor_ref,
+                            (:company_id, :id, :vendor_id, :docno, :source_doc_id, :document_notes, TO_DATE(:doc_date, \'YYYY-MM-DD\'), :vendor_ref,
                              :delivery_addr, :payment_terms, :status, :order_id, :receiver_id, :invoice_id,
                              TO_DATE(:duedate, \'YYYY-MM-DD\'), :recordtype, :amountdue, :total, :created_by,
                              :modified_by, SYSTIMESTAMP, SYSTIMESTAMP)',
                         [
                             'company_id' => $actor->companyId, 'id' => $id,
                             'vendor_id' => $document['vendor_id'], 'docno' => $document['docno'],
+                            'source_doc_id' => $document['source_document_id'] ?? null, 'document_notes' => $document['notes'] ?? null,
                             'doc_date' => $document['doc_date'], 'vendor_ref' => $document['vendor_ref'],
                             'delivery_addr' => $document['delivery_addr'], 'payment_terms' => $document['payment_terms'],
                             'status' => $document['status'],
@@ -98,7 +111,7 @@ final readonly class PurchasingDocumentModel
                             'receiver_id' => $document['recordtype'] === 'receiver' ? $typeId : null,
                             'invoice_id' => $document['recordtype'] === 'invoice' ? $typeId : null,
                             'duedate' => $document['duedate'], 'recordtype' => $document['recordtype'],
-                            'amountdue' => $document['recordtype'] === 'invoice' ? $total : null,
+                            'amountdue' => $document['recordtype'] === 'invoice' ? '0.00' : null,
                             'total' => $total, 'created_by' => $actor->id, 'modified_by' => $actor->id,
                         ],
                     );
@@ -133,103 +146,164 @@ final readonly class PurchasingDocumentModel
             return (new TransactionManager($this->connection))->run(
                 function (TransactionContext $tx) use ($actor, $id, $changes): array {
                     $rows = $tx->query(
-                        'SELECT RECORDTYPE, STATUS FROM ME_PUR_DOC WHERE CNYID = :company_id AND ID = :id FOR UPDATE',
+                        'SELECT RECORDTYPE, STATUS, VENDOR_ID, DOCNO, DOC_DATE, PAYMENT_TERMS, SOURCE_DOC_ID
+                         FROM ME_PUR_DOC WHERE CNYID = :company_id AND ID = :id FOR UPDATE',
                         ['company_id' => $actor->companyId, 'id' => $id],
                     );
                     if ($rows === []) {
                         throw new AppError('NOT_FOUND', 'Purchasing document not found.', 404);
                     }
-                    $type = strtolower((string) $rows[0]['RECORDTYPE']);
-                    $sets = [];
+                    $saved = $rows[0];
+                    $type = strtolower((string) $saved['RECORDTYPE']);
+                    if (strtolower((string) $saved['STATUS']) !== 'draft') {
+                        throw new AppError('CONFLICT', 'Only Draft documents can be edited or submitted.', 409);
+                    }
+                    $nextStatus = $changes['status'] ?? 'draft';
+                    if ($nextStatus !== 'draft') {
+                        if ($type !== 'order') {
+                            throw new AppError('DEPENDENCY_UNAVAILABLE',
+                                $type === 'receiver'
+                                    ? 'Receiving is unavailable until Inventory posting and warehouse validation are connected.'
+                                    : 'Invoice posting is unavailable until the vendor balance ledger is connected.', 503);
+                        }
+                        if ($nextStatus !== 'submitted') {
+                            throw new AppError('CONFLICT', 'A Draft order can only move to Submitted.', 409);
+                        }
+                        if (array_keys($changes) !== ['status']) {
+                            throw new AppError('VALIDATION_ERROR', 'Save Draft changes before submitting the order.');
+                        }
+                        (new Authorization($this->connection))->requirePermission($actor, 'purchasing.document', 'submit');
+                        if ($saved['DOC_DATE'] === null || !str_starts_with((string) $saved['DOCNO'], 'PO-')
+                            || strlen((string) $saved['DOCNO']) <= 3) {
+                            throw new AppError('VALIDATION_ERROR', 'Enter a valid order number and order date before submitting.');
+                        }
+                        self::activeVendor($tx, $actor, $saved['VENDOR_ID']);
+                        $lines = $tx->query(
+                            'SELECT LINENO, PRODUCT_ID, DESCRIPTION, QUANTITY, UNITCOST FROM ME_PUR_DOC_ENTRY
+                             WHERE CNYID = :company_id AND DOC_ID = :doc_id ORDER BY LINENO',
+                            ['company_id' => $actor->companyId, 'doc_id' => $id],
+                        );
+                        if ($lines === []) {
+                            throw new AppError('VALIDATION_ERROR', 'Add at least one order line before submitting.');
+                        }
+                        foreach ($lines as $line) {
+                            if ((int) $line['LINENO'] < 1 || trim((string) $line['DESCRIPTION']) === '') {
+                                throw new AppError('VALIDATION_ERROR', 'Every order line needs a positive line number and description.');
+                            }
+                            self::validLine($line['QUANTITY'], $line['UNITCOST']);
+                            self::requireProduct($tx, $actor, (int) $line['PRODUCT_ID']);
+                        }
+                    }
+                    if ($type !== 'order' && array_diff(array_keys($changes), ['doc_date', 'notes', 'status']) !== []) {
+                        throw new AppError('VALIDATION_ERROR', 'Copied header and line values are read-only. Only the date and document notes can change.');
+                    }
+                    if (isset($changes['vendor_id'])) {
+                        self::activeVendor($tx, $actor, $changes['vendor_id']);
+                    }
+                    if (isset($changes['doc_date']) && $saved['SOURCE_DOC_ID'] !== null) {
+                        $source = $tx->query(
+                            "SELECT TO_CHAR(DOC_DATE, 'YYYY-MM-DD') AS SOURCE_DATE FROM ME_PUR_DOC
+                             WHERE CNYID = :company_id AND ID = :id",
+                            ['company_id' => $actor->companyId, 'id' => $saved['SOURCE_DOC_ID']],
+                        );
+                        if ($source === [] || $changes['doc_date'] < $source[0]['SOURCE_DATE']) {
+                            throw new AppError('VALIDATION_ERROR', 'Document date must be on or after the source document date.');
+                        }
+                    }
+                    $sets = ['MODIFIEDBY = :modified_by', 'WHENMODIFIED = SYSTIMESTAMP'];
                     $bindings = ['company_id' => $actor->companyId, 'id' => $id, 'modified_by' => $actor->id];
-                    foreach (['status', 'payment_terms'] as $field) {
+                    foreach (['vendor_id', 'payment_terms', 'vendor_ref', 'delivery_addr', 'notes', 'status'] as $field) {
                         if (array_key_exists($field, $changes)) {
                             $sets[] = strtoupper($field) . ' = :' . $field;
                             $bindings[$field] = $changes[$field];
                         }
                     }
-                    if ($type === 'invoice' && array_key_exists('payment_terms', $changes)) {
-                        $sets[] = "DUEDATE = CASE :payment_terms
-                            WHEN 'due_on_receipt' THEN DOC_DATE
-                            WHEN 'net_15' THEN DOC_DATE + 15
-                            ELSE DOC_DATE + 30 END";
+                    if (isset($changes['doc_date'])) {
+                        $sets[] = "DOC_DATE = TO_DATE(:doc_date, 'YYYY-MM-DD')";
+                        $bindings['doc_date'] = $changes['doc_date'];
                     }
-                    if ($sets !== []) {
-                        $sets[] = 'MODIFIEDBY = :modified_by';
-                        $sets[] = 'WHENMODIFIED = SYSTIMESTAMP';
+                    $tx->execute('UPDATE ME_PUR_DOC SET ' . implode(', ', $sets)
+                        . ' WHERE CNYID = :company_id AND ID = :id', $bindings);
+                    if ($type === 'invoice') {
                         $tx->execute(
-                            'UPDATE ME_PUR_DOC SET ' . implode(', ', $sets) . ' WHERE CNYID = :company_id AND ID = :id',
-                            $bindings,
+                            "UPDATE ME_PUR_DOC SET DUEDATE = DOC_DATE + CASE PAYMENT_TERMS
+                                WHEN 'due_on_receipt' THEN 0 WHEN 'net_15' THEN 15 ELSE 30 END,
+                                AMOUNTDUE = 0
+                             WHERE CNYID = :company_id AND ID = :id",
+                            ['company_id' => $actor->companyId, 'id' => $id],
                         );
                     }
-                    $changedEntries = [];
+                    foreach ($changes['remove_entry_ids'] ?? [] as $entryId) {
+                        $deleted = $tx->execute(
+                            'DELETE FROM ME_PUR_DOC_ENTRY WHERE CNYID = :company_id AND DOC_ID = :doc_id AND ID = :id',
+                            ['company_id' => $actor->companyId, 'doc_id' => $id, 'id' => $entryId],
+                        );
+                        if ($deleted !== 1) {
+                            throw new AppError('NOT_FOUND', 'Document entry not found in this document.', 404);
+                        }
+                    }
                     foreach ($changes['entries'] ?? [] as $entry) {
-                        if (isset($entry['id'])) {
-                            $saved = $tx->query(
-                                'SELECT LINENO, DESCRIPTION, NOTES FROM ME_PUR_DOC_ENTRY
-                                 WHERE CNYID = :company_id AND DOC_ID = :doc_id AND ID = :id FOR UPDATE',
-                                ['company_id' => $actor->companyId, 'doc_id' => $id, 'id' => $entry['id']],
-                            );
-                            if ($saved === []) {
-                                throw new AppError('NOT_FOUND', 'Document entry not found in this document.', 404);
-                            }
-                            if (isset($entry['lineno']) && (int) $entry['lineno'] !== (int) $saved[0]['LINENO']) {
-                                throw new AppError('VALIDATION_ERROR', 'lineno must match the saved document line.');
-                            }
-                            $tx->execute(
-                                'UPDATE ME_PUR_DOC_ENTRY
-                                 SET DESCRIPTION = :description, NOTES = :notes, MODIFIEDBY = :modified_by,
-                                     WHENMODIFIED = SYSTIMESTAMP
-                                 WHERE CNYID = :company_id AND DOC_ID = :doc_id AND ID = :id',
-                                [
-                                    'description' => $entry['description'] ?? $saved[0]['DESCRIPTION'] ?? null,
-                                    'notes' => $entry['notes'] ?? $saved[0]['NOTES'] ?? null,
-                                    'modified_by' => $actor->id, 'company_id' => $actor->companyId,
-                                    'doc_id' => $id, 'id' => $entry['id'],
-                                ],
-                            );
-                        } else {
+                        if (!isset($entry['id'])) {
                             if (isset($entry['doc_id']) && $entry['doc_id'] !== $id) {
                                 throw new AppError('VALIDATION_ERROR', 'entry doc_id must match this document.');
                             }
                             self::insertEntry($tx, $actor, $id, $entry);
+                            continue;
                         }
-                        $changedEntries[] = $entry;
-                    }
-                    if ($changedEntries !== []) {
-                        $totals = $tx->query(
-                            'SELECT NVL(SUM(LINEAMOUNT), 0) AS TOTAL FROM ME_PUR_DOC_ENTRY
-                             WHERE CNYID = :company_id AND DOC_ID = :doc_id',
-                            ['company_id' => $actor->companyId, 'doc_id' => $id],
+                        $rows = $tx->query(
+                            'SELECT LINENO, PRODUCT_ID, DESCRIPTION, QUANTITY, UNITCOST, NOTES FROM ME_PUR_DOC_ENTRY
+                             WHERE CNYID = :company_id AND DOC_ID = :doc_id AND ID = :id FOR UPDATE',
+                            ['company_id' => $actor->companyId, 'doc_id' => $id, 'id' => $entry['id']],
                         );
-                        $total = number_format((float) $totals[0]['TOTAL'], 2, '.', '');
+                        if ($rows === []) {
+                            throw new AppError('NOT_FOUND', 'Document entry not found in this document.', 404);
+                        }
+                        $line = $rows[0];
+                        if (isset($entry['lineno']) && $entry['lineno'] !== (int) $line['LINENO']) {
+                            throw new AppError('VALIDATION_ERROR', 'lineno must match the saved document line.');
+                        }
+                        $product = $entry['product_id'] ?? (int) $line['PRODUCT_ID'];
+                        $quantity = $entry['quantity'] ?? $line['QUANTITY'];
+                        $cost = $entry['unitcost'] ?? $line['UNITCOST'];
+                        self::validLine($quantity, $cost);
+                        self::requireProduct($tx, $actor, $product);
+                        $amount = number_format(round((float) $quantity * (float) $cost, 2, PHP_ROUND_HALF_UP), 2, '.', '');
                         $tx->execute(
-                            "UPDATE ME_PUR_DOC
-                             SET TOTAL = :total,
-                                 AMOUNTDUE = CASE WHEN LOWER(RECORDTYPE) = 'invoice' THEN CAST(:amountdue AS NUMBER(38,2)) ELSE AMOUNTDUE END,
-                                 MODIFIEDBY = :modified_by, WHENMODIFIED = SYSTIMESTAMP
-                             WHERE CNYID = :company_id AND ID = :id",
-                            [
-                                'total' => $total, 'amountdue' => $total,
-                                'modified_by' => $actor->id, 'company_id' => $actor->companyId, 'id' => $id,
-                            ],
+                            'UPDATE ME_PUR_DOC_ENTRY SET PRODUCT_ID = :product_id, DESCRIPTION = :description,
+                                QUANTITY = :quantity, UNITCOST = :unitcost, LINEAMOUNT = :lineamount,
+                                NOTES = :notes, MODIFIEDBY = :modified_by, WHENMODIFIED = SYSTIMESTAMP
+                             WHERE CNYID = :company_id AND DOC_ID = :doc_id AND ID = :id',
+                            ['product_id' => $product, 'description' => $entry['description'] ?? $line['DESCRIPTION'],
+                                'quantity' => (string) $quantity, 'unitcost' => (string) $cost, 'lineamount' => $amount,
+                                'notes' => array_key_exists('notes', $entry) ? $entry['notes'] : $line['NOTES'],
+                                'modified_by' => $actor->id, 'company_id' => $actor->companyId, 'doc_id' => $id, 'id' => $entry['id']],
                         );
                     }
-                    $result = [];
-                    foreach (['payment_terms', 'status'] as $field) {
-                        if (array_key_exists($field, $changes)) {
-                            $result[$field] = $changes[$field];
-                        }
+                    $totals = $tx->query(
+                        'SELECT COUNT(*) AS LINE_COUNT, COUNT(DISTINCT LINENO) AS UNIQUE_LINES, NVL(SUM(LINEAMOUNT), 0) AS TOTAL
+                         FROM ME_PUR_DOC_ENTRY WHERE CNYID = :company_id AND DOC_ID = :doc_id',
+                        ['company_id' => $actor->companyId, 'doc_id' => $id],
+                    );
+                    if ((int) $totals[0]['LINE_COUNT'] === 0) {
+                        throw new AppError('VALIDATION_ERROR', 'A document must have at least one line.');
                     }
-                    if ($changedEntries !== []) {
-                        $result['entries'] = $changedEntries;
+                    if ((int) $totals[0]['UNIQUE_LINES'] !== (int) $totals[0]['LINE_COUNT']) {
+                        throw new AppError('VALIDATION_ERROR', 'Every document line must have a unique line number.');
                     }
-                    return $result;
+                    $tx->execute(
+                        'UPDATE ME_PUR_DOC SET TOTAL = :total WHERE CNYID = :company_id AND ID = :id',
+                        ['total' => number_format((float) $totals[0]['TOTAL'], 2, '.', ''),
+                            'company_id' => $actor->companyId, 'id' => $id],
+                    );
+                    return ['id' => $id, 'status' => $nextStatus, 'message' => $nextStatus === 'submitted' ? 'Order submitted. Header and lines are now read-only.' : 'Draft saved.'];
                 },
             );
         } catch (DatabaseError $error) {
             if ($error->oracleCode === 1) {
-                throw new AppError('CONFLICT', 'The document line number already exists.', 409);
+                throw new AppError('CONFLICT', 'The document number, source or line number already exists in this company.', 409);
+            }
+            if ($error->oracleCode === 2291) {
+                throw new AppError('VALIDATION_ERROR', 'The selected vendor or product no longer exists in this company.');
             }
             throw $error;
         }
@@ -317,6 +391,8 @@ final readonly class PurchasingDocumentModel
                     'status' => $row['STATUS'] === null ? null : strtolower((string) $row['STATUS']),
                     'duedate' => $row['DUEDATE'],
                     'recordtype' => $type,
+                    'source_document_id' => $row['SOURCE_DOC_ID'],
+                    'notes' => $row['DOC_NOTES'],
                     'amountdue' => self::numberOrNull($row['AMOUNTDUE']),
                     'total' => self::numberOrNull($row['TOTAL']),
                     'createdby' => $row['DOC_CREATEDBY'],
@@ -385,6 +461,97 @@ final readonly class PurchasingDocumentModel
         ];
     }
 
+    /** @return array{0: array<string, mixed>, 1: list<array<string, mixed>>} */
+    private static function sourceDraft(TransactionContext $tx, Actor $actor, array $document): array
+    {
+        $type = $document['recordtype'];
+        $rows = $tx->query(
+            "SELECT ID, VENDOR_ID, RECORDTYPE, STATUS, PAYMENT_TERMS, VENDOR_REF, DELIVERY_ADDR,
+                    TO_CHAR(DOC_DATE, 'YYYY-MM-DD') AS SOURCE_DATE
+             FROM ME_PUR_DOC WHERE CNYID = :company_id AND ID = :id FOR UPDATE",
+            ['company_id' => $actor->companyId, 'id' => $document['source_document_id']],
+        );
+        if ($rows === []) {
+            throw new AppError('NOT_FOUND', 'Source document not found.', 404);
+        }
+        $source = $rows[0];
+        $sourceType = $type === 'receiver' ? 'order' : 'receiver';
+        $sourceStatus = $type === 'receiver' ? 'submitted' : 'received';
+        if (strtolower((string) $source['RECORDTYPE']) !== $sourceType
+            || strtolower((string) $source['STATUS']) !== $sourceStatus) {
+            throw new AppError('CONFLICT', 'Select a ' . $sourceStatus . ' ' . $sourceType . ' as the source.', 409);
+        }
+        if ($source['SOURCE_DATE'] === null || $document['doc_date'] < $source['SOURCE_DATE']) {
+            throw new AppError('VALIDATION_ERROR', 'Document date must be on or after the source document date.');
+        }
+        if ($tx->query(
+            'SELECT ID FROM ME_PUR_DOC WHERE CNYID = :company_id AND SOURCE_DOC_ID = :source_id',
+            ['company_id' => $actor->companyId, 'source_id' => $source['ID']],
+        ) !== []) {
+            throw new AppError('CONFLICT', 'A downstream document already exists for this source.', 409);
+        }
+        $rows = $tx->query(
+            'SELECT LINENO, PRODUCT_ID, DESCRIPTION, QUANTITY, UNITCOST, LINEAMOUNT, NOTES
+             FROM ME_PUR_DOC_ENTRY WHERE CNYID = :company_id AND DOC_ID = :doc_id ORDER BY LINENO',
+            ['company_id' => $actor->companyId, 'doc_id' => $source['ID']],
+        );
+        if ($rows === []) {
+            throw new AppError('VALIDATION_ERROR', 'The source document has no lines.');
+        }
+        $entries = [];
+        foreach ($rows as $row) {
+            if ((int) $row['LINENO'] < 1 || trim((string) $row['DESCRIPTION']) === '') {
+                throw new AppError('VALIDATION_ERROR', 'The source has an invalid line number or description.');
+            }
+            self::validLine($row['QUANTITY'], $row['UNITCOST']);
+            $entries[] = [
+                'lineno' => (int) $row['LINENO'], 'product_id' => (int) $row['PRODUCT_ID'],
+                'description' => $row['DESCRIPTION'], 'quantity' => (string) $row['QUANTITY'],
+                'unitcost' => (string) $row['UNITCOST'], 'lineamount' => (string) $row['LINEAMOUNT'],
+                'notes' => $row['NOTES'],
+            ];
+        }
+        $document['vendor_id'] = $source['VENDOR_ID'];
+        $document['vendor_ref'] = $source['VENDOR_REF'];
+        $document['delivery_addr'] = $source['DELIVERY_ADDR'];
+        $document['payment_terms'] = $source['PAYMENT_TERMS'];
+        $document['duedate'] = null;
+        if ($type === 'invoice') {
+            $days = match ($document['payment_terms']) { 'due_on_receipt' => 0, 'net_15' => 15, default => 30 };
+            $document['duedate'] = (new \DateTimeImmutable($document['doc_date']))->modify('+' . $days . ' days')->format('Y-m-d');
+        }
+        return [$document, $entries];
+    }
+
+    private static function activeVendor(TransactionContext $tx, Actor $actor, string $vendorId): void
+    {
+        $rows = $tx->query(
+            'SELECT STATUS FROM ME_PUR_VENDOR WHERE CNYID = :company_id AND ID = :id FOR UPDATE',
+            ['company_id' => $actor->companyId, 'id' => $vendorId],
+        );
+        if ($rows === [] || strtolower((string) $rows[0]['STATUS']) !== 'active') {
+            throw new AppError('CONFLICT', 'Select an active vendor before creating or submitting an order.', 409);
+        }
+    }
+
+    private static function validLine(mixed $quantity, mixed $cost): void
+    {
+        $amount = (float) $quantity * (float) $cost;
+        if ((float) $quantity <= 0 || (float) $cost < 0 || !is_finite($amount) || $amount >= 1e36) {
+            throw new AppError('VALIDATION_ERROR', 'Quantity must be positive and unit cost must be zero or more, within the supported range.');
+        }
+    }
+
+    private static function requireProduct(TransactionContext $tx, Actor $actor, int $productId): void
+    {
+        if ($tx->query(
+            'SELECT PRODUCT_ID FROM ME_INV_PRODUCTS WHERE COMPANY_ID = :company_id AND PRODUCT_ID = :product_id',
+            ['company_id' => $actor->companyId, 'product_id' => $productId],
+        ) === []) {
+            throw new AppError('VALIDATION_ERROR', 'product_id must reference an existing inventory product in this company.');
+        }
+    }
+
     private static function numberOrNull(mixed $value): int|float|null
     {
         return $value === null ? null : (0 + $value);
@@ -393,6 +560,7 @@ final readonly class PurchasingDocumentModel
     /** @param array<string, mixed> $entry */
     private static function insertEntry(TransactionContext $tx, Actor $actor, string $documentId, array $entry): void
     {
+        self::validLine($entry['quantity'], $entry['unitcost']);
         $products = $tx->query(
             'SELECT PRODUCT_ID FROM ME_INV_PRODUCTS
              WHERE COMPANY_ID = :company_id AND PRODUCT_ID = :product_id',

@@ -42,7 +42,7 @@ final readonly class PurchasingDocumentController
         }
         self::allowFields($input, [
             'docno', 'vendor_id', 'recordtype', 'order_id', 'receiver_id', 'invoice_id',
-            'doc_date', 'vendor_ref', 'delivery_addr', 'payment_terms', 'status', 'duedate', 'entries',
+            'doc_date', 'vendor_ref', 'delivery_addr', 'payment_terms', 'status', 'duedate', 'entries', 'source_document_id', 'notes',
         ]);
         $docno = self::requiredString($input, 'docno', 20);
         if (array_key_exists('recordtype', $input) && !is_string($input['recordtype'])) {
@@ -63,7 +63,7 @@ final readonly class PurchasingDocumentController
             'invoice' => 'INV-',
             default => null,
         };
-        if ($prefix === null || !str_starts_with($docno, $prefix)) {
+        if ($prefix === null || !str_starts_with($docno, $prefix) || strlen($docno) <= strlen($prefix)) {
             throw new AppError('VALIDATION_ERROR', 'docno prefix must match recordtype.');
         }
         $typeField = match ($type) {
@@ -76,7 +76,28 @@ final readonly class PurchasingDocumentController
                 throw new AppError('VALIDATION_ERROR', $field . ' is not valid for this recordtype.');
             }
         }
+        if (array_key_exists('status', $input) && $input['status'] !== 'draft') {
+            throw new AppError('VALIDATION_ERROR', 'New documents must start in Draft.');
+        }
+        if ($type !== 'order') {
+            self::allowFields($input, ['docno', 'recordtype', 'source_document_id', 'doc_date', 'notes', 'status']);
+            $document = [
+                'docno' => $docno, 'recordtype' => $type, 'status' => 'draft',
+                'source_document_id' => self::requiredString($input, 'source_document_id', 40),
+                'doc_date' => self::date(self::requiredString($input, 'doc_date', 10), 'doc_date'),
+                'notes' => self::optionalString($input, 'notes', 500),
+            ];
+            $duplicate = $this->documents->duplicateKey($actor, $document);
+            if ($duplicate !== null) {
+                throw new AppError('CONFLICT', $duplicate . ' already exists in this company.', 409);
+            }
+            return $this->documents->create($actor, $document, []);
+        }
+        if (array_key_exists('source_document_id', $input)) {
+            throw new AppError('VALIDATION_ERROR', 'A purchase order cannot use a source document.');
+        }
         $document = [
+            'notes' => self::optionalString($input, 'notes', 500),
             'docno' => $docno,
             'vendor_id' => self::requiredString($input, 'vendor_id', 40),
             'recordtype' => $type,
@@ -123,11 +144,35 @@ final readonly class PurchasingDocumentController
         if ($params['id'] === '' || strlen($params['id']) > 40) {
             throw new AppError('VALIDATION_ERROR', 'id must be a non-empty string of at most 40 characters.');
         }
-        self::allowFields($input, ['payment_terms', 'status', 'entries']);
+        self::allowFields($input, ['vendor_id', 'doc_date', 'vendor_ref', 'delivery_addr', 'notes', 'payment_terms', 'status', 'entries', 'remove_entry_ids']);
         if ($input === []) {
-            throw new AppError('VALIDATION_ERROR', 'Provide payment_terms, status or entries to update.');
+            throw new AppError('VALIDATION_ERROR', 'Provide Draft fields, entries or a workflow action to update.');
         }
         $changes = [];
+        if (array_key_exists('vendor_id', $input)) {
+            $changes['vendor_id'] = self::requiredString($input, 'vendor_id', 40);
+        }
+        if (array_key_exists('doc_date', $input)) {
+            $changes['doc_date'] = self::date(self::requiredString($input, 'doc_date', 10), 'doc_date');
+        }
+        foreach (['vendor_ref' => 40, 'delivery_addr' => 400, 'notes' => 500] as $field => $limit) {
+            if (array_key_exists($field, $input)) {
+                $changes[$field] = self::optionalString($input, $field, $limit);
+            }
+        }
+        if (array_key_exists('remove_entry_ids', $input)) {
+            $ids = $input['remove_entry_ids'];
+            if (!is_array($ids) || !array_is_list($ids) || $ids === []) {
+                throw new AppError('VALIDATION_ERROR', 'remove_entry_ids must be a non-empty array of IDs.');
+            }
+            $changes['remove_entry_ids'] = [];
+            foreach ($ids as $id) {
+                $changes['remove_entry_ids'][] = self::requiredString(['id' => $id], 'id', 40);
+            }
+            if (count(array_unique($changes['remove_entry_ids'])) !== count($changes['remove_entry_ids'])) {
+                throw new AppError('VALIDATION_ERROR', 'remove_entry_ids must not contain duplicates.');
+            }
+        }
         if (array_key_exists('payment_terms', $input)) {
             $changes['payment_terms'] = self::enum($input, 'payment_terms', ['due_on_receipt', 'net_15', 'net_30']);
         }
@@ -144,6 +189,15 @@ final readonly class PurchasingDocumentController
                 $entries[] = self::updateEntry(self::entryObject($entry), $lineNumbers);
             }
             $changes['entries'] = $entries;
+        }
+        $entryIds = [];
+        foreach ($changes['entries'] ?? [] as $entry) {
+            if (isset($entry['id'])) {
+                if (isset($entryIds[$entry['id']]) || in_array($entry['id'], $changes['remove_entry_ids'] ?? [], true)) {
+                    throw new AppError('VALIDATION_ERROR', 'An entry cannot be repeated or both edited and removed.');
+                }
+                $entryIds[$entry['id']] = true;
+            }
         }
         return $this->documents->update($actor, $params['id'], $changes);
     }
@@ -251,18 +305,28 @@ final readonly class PurchasingDocumentController
     private static function updateEntry(array $entry, array &$lineNumbers): array
     {
         if (array_key_exists('id', $entry)) {
-            self::allowFields($entry, ['id', 'lineno', 'description', 'notes']);
+            self::allowFields($entry, ['id', 'lineno', 'product_id', 'description', 'quantity', 'unitcost', 'notes']);
             $result = ['id' => self::requiredString($entry, 'id', 40)];
             if (array_key_exists('lineno', $entry)) {
                 $result['lineno'] = self::positiveInteger($entry, 'lineno');
             }
-            foreach (['description' => 200, 'notes' => 500] as $field => $maxLength) {
-                if (array_key_exists($field, $entry)) {
-                    $result[$field] = self::requiredString($entry, $field, $maxLength);
-                }
+            if (array_key_exists('product_id', $entry)) {
+                $result['product_id'] = self::productId($entry);
             }
-            if (!isset($result['description']) && !isset($result['notes'])) {
-                throw new AppError('VALIDATION_ERROR', 'An existing entry requires description or notes.');
+            if (array_key_exists('quantity', $entry)) {
+                $result['quantity'] = self::numeric($entry, 'quantity', 3, true);
+            }
+            if (array_key_exists('unitcost', $entry)) {
+                $result['unitcost'] = self::numeric($entry, 'unitcost', 2, false, 1e36);
+            }
+            if (array_key_exists('description', $entry)) {
+                $result['description'] = self::requiredString($entry, 'description', 200);
+            }
+            if (array_key_exists('notes', $entry)) {
+                $result['notes'] = self::optionalString($entry, 'notes', 500);
+            }
+            if (count(array_diff(array_keys($result), ['id', 'lineno'])) === 0) {
+                throw new AppError('VALIDATION_ERROR', 'Provide a Draft line field to update.');
             }
             return $result;
         }
