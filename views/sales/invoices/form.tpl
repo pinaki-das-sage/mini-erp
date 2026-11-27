@@ -1,5 +1,8 @@
+<link rel="stylesheet" href="{$basePath}/assets/sales/documents.css">
+<div class="sales-document">
 <p><a href="{$data.listUrl}">Back to invoices</a></p>
 <div class="panel">
+    <h2>{if $data.isNew}New Invoice{else}Edit Draft Invoice{/if}</h2>
     <form method="post" action="{$data.formUrl}" id="invoice-form">
         <input type="hidden" name="csrf_token" value="{$csrf}">
         <input type="hidden" name="action_reference" value="{$data.actionReference}">
@@ -19,13 +22,13 @@
             <p>The Customer, items, quantities, prices and payment terms come from the Order.</p>
         {else}
             <input type="hidden" name="expected_version" value="{$data.expectedVersion}">
-            <dl>
-                <dt>Invoice number</dt><dd>{$data.invoice.invoice_number}</dd>
-                <dt>Source Order</dt><dd>{$data.invoice.source_order_number}</dd>
-                <dt>Customer</dt><dd>{$data.invoice.customer_code}</dd>
-                <dt>Payment terms</dt><dd>{$data.invoice.payment_terms}</dd>
+            <dl class="document-summary">
+                <div><dt>Invoice number</dt><dd>{$data.invoice.invoice_number}</dd></div>
+                <div><dt>Source Order</dt><dd>{$data.invoice.source_order_number|default:'Standalone invoice'}</dd></div>
+                <div><dt>Customer</dt><dd>{$data.invoice.customer_code}</dd></div>
+                <div><dt>Payment terms</dt><dd>{$data.invoice.payment_terms}</dd></div>
             </dl>
-            <div class="filters">
+            <div class="document-grid">
                 <label>Invoice date *
                     <input type="date" name="invoice_date" value="{$data.invoice.invoice_date}" required>
                 </label>
@@ -50,8 +53,11 @@
             </div>
             <p><strong>Invoice total:</strong> {$data.invoice.document_total}</p>
         {/if}
-        <button type="submit">Save draft</button>
-        <a href="{$data.listUrl}">Cancel</a>
+        <div class="document-toolbar">
+            <button type="submit">Save draft</button>
+            <a href="{$data.listUrl}">Cancel</a>
+        </div>
     </form>
+</div>
 </div>
 <script src="{$data.scriptUrl}" defer></script>
