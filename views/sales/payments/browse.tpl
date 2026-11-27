@@ -9,7 +9,7 @@
                 <label>Invoice number<input name="invoice_number" maxlength="20" value="{$data.filters.invoice_number}" placeholder="SI-000000000000001"></label>
                 <label>Customer code<input name="customer_code" maxlength="20" value="{$data.filters.customer_code}" placeholder="CUST-001"></label>
                 <label>Payment status<select name="payment_status">
-                    <option value="">All statuses</option>
+                    <option value="">All</option>
                     {foreach ['Unpaid', 'Partially Paid', 'Paid'] as $status}<option value="{$status}" {if $data.filters.payment_status === $status}selected{/if}>{$status}</option>{/foreach}
                 </select></label>
             </div>
@@ -31,8 +31,8 @@
             </div></td>
         </tr>{foreachelse}<tr><td colspan="8">No Submitted Invoices match your search.</td></tr>{/foreach}</tbody>
     </table></div>
-    <nav class="document-toolbar" aria-label="Submitted Invoice pages">
-        {if $data.previousUrl}<a class="button" href="{$data.previousUrl}">Previous</a>{/if}<span>Page {$data.invoices.page}</span>
-        {if $data.nextUrl}<a class="button" href="{$data.nextUrl}">Next</a>{/if}
+    <nav class="sales-pagination" aria-label="Submitted Invoice pages">
+        {if $data.previousUrl}<a rel="prev" href="{$data.previousUrl}">&lt; Previous</a>{/if}<span aria-current="page">Page {$data.invoices.page}</span>
+        {if $data.nextUrl}<a rel="next" href="{$data.nextUrl}">Next &gt;</a>{/if}
     </nav>
 </div>

@@ -343,11 +343,11 @@ final class PaymentPagesTest extends TestCase
         }
         $first = $pages->handle('GET', '/modules/sales/payments', $this->actor(), [], ['customer_code' => 'CUST-0001'])['body'];
         self::assertSame(25, substr_count($first, 'Record payment</a>'));
-        self::assertStringContainsString('Next</a>', $first);
+        self::assertStringContainsString('Next &gt;</a>', $first);
         self::assertStringContainsString('customer_code=CUST-0001&amp;page=2', $first);
         $second = $pages->handle('GET', '/modules/sales/payments', $this->actor(), [], ['customer_code' => 'CUST-0001', 'page' => '2'])['body'];
         self::assertSame(1, substr_count($second, 'Record payment</a>'));
         self::assertStringContainsString('Previous</a>', $second);
-        self::assertStringNotContainsString('Next</a>', $second);
+        self::assertStringNotContainsString('Next &gt;</a>', $second);
     }
 }

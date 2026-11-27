@@ -41,3 +41,29 @@
     .sales-document .document-blocks, .sales-document .document-entry-grid { grid-template-columns: minmax(0, 1fr); }
     .sales-document.document-detail .panel { padding: 1rem; }
 }
+
+main:has(.sales-list-page) { box-sizing: border-box; width: 100%; max-width: 1200px; }
+.sales-list-page { max-width: 1200px; margin-left: auto; margin-right: auto; }
+.sales-list-page .sales-filter-panel { padding: 24px; background: white; }
+.sales-filter-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; align-items: end; }
+.sales-filter-grid-invoices { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.sales-filter-grid label { display: flex; flex-direction: column; gap: 8px; min-width: 0; max-width: none; margin: 0; }
+.sales-filter-grid input:not([type="hidden"]):not([type="date"]), .sales-filter-grid select { box-sizing: border-box; height: 40px; min-width: 0; padding: 0 12px; border: 1px solid #b6c6d4; border-radius: .4rem; background: white; color: inherit; }
+.sales-filter-grid .sales-list-date-input input[type="text"] { padding-right: 44px; }
+.sales-filter-actions { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 16px; min-height: 40px; align-self: end; }
+.sales-filter-actions button { box-sizing: border-box; height: 40px; padding: 0 24px; font: inherit; }
+.sales-filter-actions a { display: flex; align-items: center; min-height: 40px; }
+.sales-filter-grid-invoices .sales-filter-actions { grid-column: span 2; }
+@media (max-width: 1000px) {
+    .sales-filter-grid-invoices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+    .sales-filter-grid, .sales-filter-grid-invoices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .sales-filter-grid > label { grid-column: 1 / -1; }
+    .sales-filter-grid > .sales-filter-from { grid-column: 1; }
+    .sales-filter-grid > .sales-filter-to { grid-column: 2; }
+    .sales-filter-grid .sales-filter-actions { grid-column: 1 / -1; }
+    .sales-filter-grid .sales-list-date-input input[type="text"] { padding-left: 8px; padding-right: 32px; font-size: .875rem; }
+    .sales-filter-grid .sales-list-date-input button { width: 30px; }
+    .app-layout > main { width: 100%; box-sizing: border-box; }
+}

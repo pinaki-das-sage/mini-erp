@@ -72,14 +72,13 @@
         </table>
     </div>
 
-    <p>Page {$data.payments.page}</p>
-
-    <nav aria-label="Payment history pages">
+    <nav class="sales-pagination" aria-label="Payment history pages">
         {if $data.previousUrl}
-            <a class="button" href="{$data.previousUrl}">Previous</a>
+            <a rel="prev" href="{$data.previousUrl}">&lt; Previous</a>
         {/if}
+        <span aria-current="page">Page {$data.payments.page}</span>
         {if $data.nextUrl}
-            <a class="button" href="{$data.nextUrl}">Next</a>
+            <a rel="next" href="{$data.nextUrl}">Next &gt;</a>
         {/if}
     </nav>
 {/if}

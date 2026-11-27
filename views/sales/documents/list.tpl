@@ -1,21 +1,21 @@
 <link rel="stylesheet" href="{$data.styleUrl}">
 <link rel="stylesheet" href="{$data.dateRangeStyleUrl}">
-<div class="sales-document">
+<div class="sales-document sales-list-page">
     <div class="document-toolbar">
         <a href="{$data.salesUrl}">Back to Sales</a>
         {if $data.createUrl}<a class="button" href="{$data.createUrl}">New {$data.documentLabel}</a>{/if}
     </div>
-    <div class="panel">
+    <div class="panel sales-filter-panel">
         <form method="get" action="{$data.listUrl}">
-            <div class="document-grid">
-                <label>Customer code<input name="customer_code" maxlength="20" value="{$data.filters.customer_code}" placeholder="CUST-001"></label>
+            <div class="sales-filter-grid sales-filter-grid-documents">
                 <label>{$data.documentLabel} number<input name="{$data.kind}_number" maxlength="20" value="{$data.numberFilterValue}" placeholder="{if $data.kind === 'quote'}SQ{else}SO{/if}-000000000000001"></label>
-                <label>Status<select name="status"><option value="">All statuses</option>
+                <label>Customer code<input name="customer_code" maxlength="20" value="{$data.filters.customer_code}" placeholder="CUST-001"></label>
+                <label>Status<select name="status"><option value="">All</option>
                     {foreach $data.statuses as $status}<option value="{$status}" {if $data.filters.status === $status}selected{/if}>{$status}</option>{/foreach}
                 </select></label>
                 {include file='sales/documents/date_range.tpl'}
+                <div class="sales-filter-actions"><button type="submit">Search</button><a href="{$data.listUrl}">Clear filters</a></div>
             </div>
-            <div class="document-toolbar"><button type="submit">Search</button><a href="{$data.listUrl}">Clear filters</a></div>
         </form>
     </div>
     <div class="table-scroll">
@@ -33,10 +33,10 @@
             {foreachelse}<tr><td colspan="7">No {$data.kind}s match your search.</td></tr>{/foreach}</tbody>
         </table>
     </div>
-    <nav class="document-toolbar" aria-label="{$data.documentLabel} pages">
-        {if $data.previousUrl}<a class="button" href="{$data.previousUrl}">Previous</a>{/if}
-        <span>Page {$data.list.page}</span>
-        {if $data.nextUrl}<a class="button" href="{$data.nextUrl}">Next</a>{/if}
+    <nav class="sales-pagination" aria-label="{$data.documentLabel} pages">
+        {if $data.previousUrl}<a rel="prev" href="{$data.previousUrl}">&lt; Previous</a>{/if}
+        <span aria-current="page">Page {$data.list.page}</span>
+        {if $data.nextUrl}<a rel="next" href="{$data.nextUrl}">Next &gt;</a>{/if}
     </nav>
 </div>
 <script src="{$data.dateRangeScriptUrl}" defer></script>

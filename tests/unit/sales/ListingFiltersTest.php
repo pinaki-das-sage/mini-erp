@@ -77,11 +77,16 @@ final class ListingFiltersTest extends TestCase
         $query = ['customer_code' => 'CUST-001', 'date_range' => '2026-11-24 to 2026-11-25'];
         $first = $pages->handle('GET', '/modules/sales/quotes', $actor, [], $query)['body'];
         self::assertSame(25, substr_count($first, 'href="/training/modules/sales/quotes/SQ-'));
-        self::assertStringContainsString('Next</a>', $first);
+        self::assertStringContainsString('Next &gt;</a>', $first);
+        self::assertStringContainsString('rel="next"', $first);
+        self::assertStringContainsString('data-date-open="from"', $first);
+        self::assertStringContainsString('data-date-open="to"', $first);
         self::assertStringContainsString('date_range=2026-11-24+to+2026-11-25&amp;page=2', $first);
         $second = $pages->handle('GET', '/modules/sales/quotes', $actor, [], [...$query, 'page' => '2'])['body'];
         self::assertSame(1, substr_count($second, 'href="/training/modules/sales/quotes/SQ-'));
         self::assertStringContainsString('Previous</a>', $second);
-        self::assertStringNotContainsString('Next</a>', $second);
+        self::assertStringContainsString('rel="prev"', $second);
+        self::assertStringContainsString('aria-current="page">Page 2</span>', $second);
+        self::assertStringNotContainsString('Next &gt;</a>', $second);
     }
 }

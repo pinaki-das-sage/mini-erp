@@ -1,10 +1,7 @@
-<p><a href="{$data.salesUrl}">Back to Sales</a></p>
-
-{if $data.createUrl}
-    <p>
-        <a class="button" href="{$data.createUrl}">New customer</a>
-    </p>
-{/if}
+<div class="sales-customer-toolbar">
+    <a href="{$data.salesUrl}">Back to Sales</a>
+    {if $data.createUrl}<a class="button" href="{$data.createUrl}">New customer</a>{/if}
+</div>
 <div class="panel">
     <form method="get" action="{$data.listUrl}">
         <div class="filters">
@@ -70,13 +67,12 @@
     </table>
 </div>
 
-<p>Page {$data.customers.page}</p>
-
-<nav aria-label="Customer pages">
+<nav class="sales-pagination" aria-label="Customer pages">
     {if $data.previousUrl}
-        <a class="button" href="{$data.previousUrl}">Previous</a>
+        <a rel="prev" href="{$data.previousUrl}">&lt; Previous</a>
     {/if}
+    <span aria-current="page">Page {$data.customers.page}</span>
     {if $data.nextUrl}
-        <a class="button" href="{$data.nextUrl}">Next</a>
+        <a rel="next" href="{$data.nextUrl}">Next &gt;</a>
     {/if}
 </nav>

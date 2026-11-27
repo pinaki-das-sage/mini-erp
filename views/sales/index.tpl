@@ -1,6 +1,6 @@
 <p>Manage customers, sales documents and customer payments.</p>
 
-<div class="cards">
+<div class="cards sales-home-cards">
     <article>
         <h2>Customers</h2>
         <p>Create and maintain customer details, payment terms and account status.</p>

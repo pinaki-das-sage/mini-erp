@@ -1,15 +1,14 @@
 <link rel="stylesheet" href="{$data.dateRangeStyleUrl}">
 <link rel="stylesheet" href="{$data.styleUrl}">
-<div class="sales-document">
+<div class="sales-document sales-list-page">
     <div class="document-toolbar">
         <a href="{$data.salesUrl}">Back to Sales</a>
         {if $data.createUrl}<a class="button" href="{$data.createUrl}">New Invoice</a>{/if}
     </div>
-</div>
 
-<div class="panel">
+<div class="panel sales-filter-panel">
     <form method="get" action="{$data.listUrl}">
-        <div class="filters">
+        <div class="sales-filter-grid sales-filter-grid-invoices">
             <label>Invoice number
                 <input name="invoice_number" maxlength="20" value="{$data.filters.invoice_number}" placeholder="SI-000000000000001">
             </label>
@@ -52,14 +51,9 @@
                     </option>
                 </select>
             </label>
-        </div>
-
-        <div class="filters">
             {include file='sales/documents/date_range.tpl'}
+            <div class="sales-filter-actions"><button type="submit">Search</button><a href="{$data.listUrl}">Clear filters</a></div>
         </div>
-
-        <button type="submit">Search</button>
-        <a href="{$data.listUrl}">Clear filters</a>
     </form>
 </div>
 
@@ -104,14 +98,14 @@
     </table>
 </div>
 
-<p>Page {$data.invoices.page}</p>
-
-<nav aria-label="Invoice pages">
+<nav class="sales-pagination" aria-label="Invoice pages">
     {if $data.previousUrl}
-        <a class="button" href="{$data.previousUrl}">Previous</a>
+        <a rel="prev" href="{$data.previousUrl}">&lt; Previous</a>
     {/if}
+    <span aria-current="page">Page {$data.invoices.page}</span>
     {if $data.nextUrl}
-        <a class="button" href="{$data.nextUrl}">Next</a>
+        <a rel="next" href="{$data.nextUrl}">Next &gt;</a>
     {/if}
 </nav>
+</div>
 <script src="{$data.dateRangeScriptUrl}" defer></script>

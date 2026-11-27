@@ -195,7 +195,7 @@ final class DocumentPagesTest extends TestCase
             $path = '/modules/sales/' . $kind . 's';
             $response = $pages->handle('GET', $path, $this->actor(), [], ['page_size' => '1', 'customer_code' => 'CUST-001', 'status' => 'Draft']);
             self::assertSame(200, $response['status']);
-            self::assertStringNotContainsString('Next</a>', $response['body']);
+            self::assertStringNotContainsString('Next &gt;</a>', $response['body']);
             self::assertStringNotContainsString('name="page_size"', $response['body']);
             self::assertStringNotContainsString('name="warehouse_id"', $response['body']);
             self::assertStringContainsString('name="' . $kind . '_number"', $response['body']);
