@@ -29,6 +29,7 @@ export function initDrivers(context) {
       textCell(row, getField(driver, 'phone'));
       stackedCell(row, driver.licence_number, driver.licence_expiry ? `Expires ${driver.licence_expiry}` : 'Expiry not recorded');
       activeCell(row, getField(driver, 'isactive'));
+      textCell(row, { ASSIGNED: 'Assigned', AVAILABLE: 'Available' }[driver.assignment_status] || '-');
       const actionsCell = document.createElement('td');
       actionsCell.className = 'logistics-actions';
       actionsCell.append(makeButton('View', 'button-secondary', () => openRecord('drivers', driver.id)));
@@ -140,6 +141,8 @@ export function initDrivers(context) {
     } else {
       populateDriverForm();
     }
+    // Keep the numeric current-user option present even while the eligible-user request runs.
+    showDriverUserFallback();
     showDialog(driverDialog);
     await loadDriverUsers();
     driverSubmit.disabled = false;

@@ -125,6 +125,9 @@ return static function (Api $api, Connection $connection): void {
         ) use ($drivers): array {
             $pagination = Api::pagination($query, ['exclude_trip_id', 'planned_departure_at']);
             $plannedDepartureAt = $pagination['filters']['planned_departure_at'] ?? null;
+            if ($plannedDepartureAt === null) {
+                throw new \MiniErp\shared\AppError('VALIDATION_ERROR', 'planned_departure_at is required.');
+            }
             $excludeTripId = null;
             if (isset($pagination['filters']['exclude_trip_id'])) {
                 $excludeTripId = filter_var(

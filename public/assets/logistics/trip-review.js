@@ -65,7 +65,7 @@ export function initTripReview(context) {
       confirm.disabled = !stateMatches || (action === 'dispatch' && known && load > capacity);
       document.querySelector('#trip-review-confirmation').textContent = action === 'dispatch'
         ? 'Dispatch the complete saved trip. All lines are included and its Sales Order moves from Submitted to In Progress. Availability, capacity and stock are checked again.'
-        : action === 'deliver' ? 'Record full delivery for the complete trip and close its Sales Order. All saved line quantities are delivered together; quantities cannot be edited here.'
+        : action === 'deliver' ? 'Record full delivery for the complete trip and close its Sales Order. Only the assigned driver or an administrator can confirm delivery. All saved line quantities are delivered together.'
         : 'Saved trip and line information is read only. Activity times are returned by the server.';
       if (action && !stateMatches) setFormError(error, 'This trip is now ' + trip.status + '. The requested action is unavailable.');
       await loadLines();

@@ -132,7 +132,8 @@ class TripService
                     $tx,
                     $actor->companyId,
                     $data['vehicle_id'],
-                    $data['driver_id']
+                    $data['driver_id'],
+                    $this->validator->normalizedDepartureDate($data['planned_departure_at'])
                 );
 
                 $tripId = $this->repository->create(
@@ -207,6 +208,7 @@ class TripService
                     $actor->companyId,
                     $data['vehicle_id'],
                     $data['driver_id'],
+                    $this->validator->normalizedDepartureDate($data['planned_departure_at']),
                     $id
                 );
 
@@ -346,6 +348,7 @@ class TripService
                     $actor->companyId,
                     $trip['vehicle_id'],
                     $trip['driver_id'],
+                    $this->validator->departureDate($savedTrip['planned_departure_at']),
                     $id
                 );
                 $this->repository->assertTripWithinCapacity(
@@ -504,6 +507,7 @@ class TripService
         int $companyId,
         int $vehicleId,
         int $driverId,
+        string $departureDate,
         ?int $excludeTripId = null
     ): void {
         if (!$this->repository->lockVehicle($tx, $companyId, $vehicleId)) {
@@ -522,6 +526,14 @@ class TripService
             throw new AppError('CONFLICT', 'Driver is already assigned to an active trip.', 409);
         }
 
+        if (!$this->repository->driverLicenceValidForDate(
+            $companyId,
+            $driverId,
+            $departureDate,
+            $tx
+        )) {
+            throw new AppError('INVALID_STATE', 'Driver licence is not valid for the planned departure.', 409);
+        }
     }
 
     private function validateSalesLines(mixed $lines): array

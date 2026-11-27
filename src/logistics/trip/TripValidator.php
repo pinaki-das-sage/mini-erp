@@ -115,6 +115,16 @@ class TripValidator
         }
     }
 
+    public function normalizedDepartureDate(string $normalized): string
+    {
+        if (!preg_match('/\A(\d{4})-(\d{2})-(\d{2}) \d{2}:\d{2}:\d{2}\.\d{6} [+-]\d{2}:\d{2}\z/D', $normalized, $matches)
+            || !checkdate((int) $matches[2], (int) $matches[3], (int) $matches[1])) {
+            throw new AppError('VALIDATION_ERROR', 'Planned departure must be a valid timestamp with a timezone offset.');
+        }
+
+        return $matches[1] . '-' . $matches[2] . '-' . $matches[3];
+    }
+
     private function validatePositiveInteger(mixed $value, string $label): int
     {
         if (filter_var($value, FILTER_VALIDATE_INT) === false || (int) $value <= 0) {
@@ -141,7 +151,7 @@ class TripValidator
 
         $value = trim($value);
 
-        if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$/D', $value, $matches)) {
+        if (!preg_match('/\A(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(Z|[+-]\d{2}:\d{2})\z/D', $value, $matches)) {
             throw new \InvalidArgumentException('Planned departure must be a valid timestamp with a timezone offset.');
         }
 

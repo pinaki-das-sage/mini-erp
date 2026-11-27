@@ -259,18 +259,25 @@ export function initTrips(context) {
 
   const refreshEligibleTripDrivers = async (selectedDriverId = tripDriverSelect.value || null, tripId = tripForm.dataset.tripId || null) => {
     const sequence = ++driverLookupSequence;
+    const departureValue = tripForm.elements.planned_departure_at.value;
     loadingEligibleTripDrivers = false;
     tripDriverSelect.disabled = true;
-
+    if (!departureValue) {
+      fillResourceSelect(tripDriverSelect, [], 'Driver');
+      tripDriverStatus.textContent = 'Choose a planned departure to find available drivers with a valid licence for that date.';
+      updateTripSubmitState();
+      return;
+    }
     loadingEligibleTripDrivers = true;
     tripSubmit.disabled = true;
     try {
       const query = new URLSearchParams({
         page: '1',
         page_size: '100',
+        planned_departure_at: localDateTimeWithOffset(departureValue),
       });
       if (tripId !== null && tripId !== '') query.set('exclude_trip_id', tripId);
-      tripDriverStatus.textContent = 'Loading available drivers...';
+      tripDriverStatus.textContent = 'Loading available drivers with valid licences for this departure...';
       const result = await apiRequest(`/eligible-drivers?${query.toString()}`);
       if (sequence !== driverLookupSequence) return;
       if (!Array.isArray(result?.items)) throw new Error('The server returned an unexpected eligible Driver list. Refresh and try again.');
@@ -282,11 +289,11 @@ export function initTrips(context) {
       fillResourceSelect(tripDriverSelect, result.items, 'Driver', retained);
       tripDriverSelect.disabled = false;
       if (selectedDriverId !== null && retained === null) {
-        tripDriverStatus.textContent = 'The selected driver is no longer available. Select another driver.';
+        tripDriverStatus.textContent = 'The selected driver is unavailable or their licence does not cover this departure. Select another driver.';
       } else {
         tripDriverStatus.textContent = result.items.length === 0
-          ? 'No drivers are available.'
-          : `${result.items.length} Driver${result.items.length === 1 ? '' : 's'} available.`;
+          ? 'No drivers are available with a valid licence for this departure.'
+          : `${result.items.length} Driver${result.items.length === 1 ? '' : 's'} available for this departure.`;
       }
     } catch (error) {
       if (sequence !== driverLookupSequence) return;
@@ -301,6 +308,11 @@ export function initTrips(context) {
     }
   };
 
+
+  // A changed departure invalidates the previous availability result immediately.
+  tripForm.elements.planned_departure_at.addEventListener('change', () => {
+    refreshEligibleTripDrivers();
+  });
 
   const openTripDialog = async (mode, trip = null) => {
     openingTrip = true;
@@ -350,7 +362,7 @@ export function initTrips(context) {
       return;
     }
     if (loadingEligibleTripDrivers || tripDriverSelect.disabled || tripDriverSelect.value === '') {
-      setFormError(document.querySelector('#trip-form-error'), 'Choose an available driver before saving.');
+      setFormError(document.querySelector('#trip-form-error'), 'Choose a planned departure and an eligible driver before saving.');
       return;
     }
     if (!tripForm.reportValidity()) return;

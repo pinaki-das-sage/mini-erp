@@ -93,7 +93,8 @@ final readonly class SalesOrderProvider implements LogisticsOrderProviderContrac
             throw new AppError('FORBIDDEN', 'Trip event must be recorded by the authenticated actor.', 403);
         }
 
-        if ($event === 'delivery' && (string) ($trip['DRIVER_USER_ID'] ?? '') !== $actorUserId) {
+        // Admin still passed the logistics.trips:update check above and the company-scoped Trip lookup.
+        if ($event === 'delivery' && !$actor->isAdmin && (string) ($trip['DRIVER_USER_ID'] ?? '') !== $actorUserId) {
             throw new AppError('FORBIDDEN', 'Only the assigned driver may record delivery.', 403);
         }
 

@@ -50,7 +50,7 @@ class DriverService
     public function getEligibleDrivers(
         Actor $actor,
         array $pagination,
-        ?string $plannedDepartureAt = null,
+        string $plannedDepartureAt,
         ?int $excludeTripId = null
     ): array
     {
@@ -58,12 +58,14 @@ class DriverService
         if ($excludeTripId !== null) {
             $this->validator->validateId($excludeTripId);
         }
-        // Departure is accepted for compatibility; availability is independent of its date.
+        $departureDate = (new \MiniErp\logistics\trip\TripValidator())
+            ->departureDate($plannedDepartureAt);
         return [
             'items' => $this->repository->findEligible(
                 $actor->companyId,
                 $pagination['offset'],
                 $pagination['page_size'],
+                $departureDate,
                 $excludeTripId,
             ),
             'page' => $pagination['page'],
@@ -140,14 +142,50 @@ class DriverService
         );
 
         $this->validator->validateId($id);
-        $data = $this->validator->validateUpdate($input);
-
-        $this->requireDriver($actor->companyId, $id);
-        $this->assertReferences($actor->companyId, $data, $id);
-        $actorId = $this->actorId($actor);
 
         return (new TransactionManager($this->connection))->run(
-            fn (): array => $this->repository->update($actor->companyId, $id, $actorId, $data)
+            function () use ($actor, $id, $input): array {
+                $driver = $this->repository->findById($actor->companyId, $id, true);
+                if ($driver === []) {
+                    throw new AppError('NOT_FOUND', 'Driver not found.', 404);
+                }
+
+                $data = $this->validator->validateUpdate($input);
+                $changed = false;
+                foreach ($data as $field => $value) {
+                    if ($driver[$field] !== $value) {
+                        $changed = true;
+                        break;
+                    }
+                }
+                if (!$changed) {
+                    throw new AppError('VALIDATION_ERROR', 'At least one field must actually change.', 400);
+                }
+
+                if ($driver['isactive'] === 'T' && $data['isactive'] === 'F'
+                    && $this->repository->hasActiveTrip($actor->companyId, $id)) {
+                    throw new AppError(
+                        'RESOURCE_IN_USE',
+                        'Driver cannot be deactivated while assigned to a Draft or Dispatched Trip.',
+                        409
+                    );
+                }
+
+                // Keeping this driver's current user is valid. Identity changes with history
+                // must report their own restriction before unrelated duplicate-user checks.
+                $codeChanged = $driver['driver_code'] !== $data['driver_code'];
+                $userChanged = $driver['user_id'] !== $data['user_id'];
+                if (($codeChanged || $userChanged) && $this->repository->hasTripHistory($actor->companyId, $id)) {
+                    if ($codeChanged) {
+                        throw new AppError('REFERENCED_RECORD', 'Driver code cannot change after first Trip use.', 409);
+                    }
+                    throw new AppError('REFERENCED_RECORD', 'Linked user cannot change after first Trip use.', 409);
+                }
+
+                $this->assertReferences($actor->companyId, $data, $id);
+                $actorId = $this->actorId($actor);
+                return $this->repository->update($actor->companyId, $id, $actorId, $data);
+            }
         );
     }
 
@@ -163,19 +201,24 @@ class DriverService
         );
 
         $this->validator->validateId($id);
-        $this->requireDriver($actor->companyId, $id);
-
-        if ($this->repository->hasActiveTrip($actor->companyId, $id)) {
-            throw new AppError('CONFLICT', 'Driver is assigned to an active trip.', 409);
-        }
-
-        $actorId = $this->actorId($actor);
-        $referenced = $this->repository->hasTripHistory($actor->companyId, $id);
 
         (new TransactionManager($this->connection))->run(
-            fn () => $referenced
-                ? $this->repository->deactivate($actor->companyId, $id, $actorId)
-                : $this->repository->delete($actor->companyId, $id)
+            function () use ($actor, $id): void {
+                $driver = $this->repository->findById($actor->companyId, $id, true);
+                if ($driver === []) {
+                    throw new AppError('NOT_FOUND', 'Driver not found.', 404);
+                }
+                if ($this->repository->hasActiveTrip($actor->companyId, $id)) {
+                    throw new AppError('CONFLICT', 'Driver is assigned to an active trip.', 409);
+                }
+
+                $actorId = $this->actorId($actor);
+                if ($this->repository->hasTripHistory($actor->companyId, $id)) {
+                    $this->repository->deactivate($actor->companyId, $id, $actorId);
+                } else {
+                    $this->repository->delete($actor->companyId, $id);
+                }
+            }
         );
 
         return [];
@@ -217,7 +260,7 @@ class DriverService
             throw new AppError('VALIDATION_ERROR', 'User does not exist.');
         }
 
-        if ($data['user_id'] !== null && $this->repository->driverUserExists($companyId, $data['user_id'], $excludeId)) {
+        if ($data['user_id'] !== null && $this->repository->userLinkedToAnotherDriver($companyId, $data['user_id'], $excludeId)) {
             throw new AppError('CONFLICT', 'User already has an active driver profile.', 409);
         }
     }

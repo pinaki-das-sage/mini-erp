@@ -32,7 +32,8 @@ export function initRecordDetails({ apiRequest, formatKilograms, errorMessage, s
         ['Availability', {AVAILABLE:'Available',ASSIGNED:'Assigned'}[record.assignment_status] || 'Not supplied']
       ] : [
         ['Driver ID', record.id], ['Driver code', record.driver_code], ['First name', record.first_name], ['Last name', record.last_name],
-        ['Linked user ID', record.user_id], ['Phone', record.phone], ['Licence number', record.licence_number], ['Licence expiry', record.licence_expiry], ['Status', active]
+        ['Linked user ID', record.user_id], ['Phone', record.phone], ['Licence number', record.licence_number], ['Licence expiry', record.licence_expiry], ['Status', active],
+        ['Assignment', {AVAILABLE:'Available',ASSIGNED:'Assigned'}[record.assignment_status] || 'Not supplied']
       ]);
     } catch (failure) {
       if (request === sequence && dialog.open) setFormError(error, errorMessage(failure));

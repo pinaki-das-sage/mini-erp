@@ -191,7 +191,7 @@ if (logisticsWorkspace && logisticsWorkspace.dataset.initialized !== 'true') {
       state.itemCount = result.items.length;
       if (!state.itemCount) {
         const row = document.createElement('tr'); const cell = textCell(row, 'No records found. Try another page or filter.');
-        cell.colSpan = { trips: 10, drivers: 7, vehicles: 7, 'trip-lines': 8 }[name]; cell.className = 'logistics-empty';
+        cell.colSpan = { trips: 10, drivers: 8, vehicles: 7, 'trip-lines': 8 }[name]; cell.className = 'logistics-empty';
         document.querySelector('#' + name + '-table-body').append(row);
       }
       updatePagination(name, state.page, state.pageSize, result.items.length);

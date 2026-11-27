@@ -87,6 +87,9 @@ final class LogisticsUiApi
         if ($method === 'GET' && $path === '/eligible-drivers') {
             $pagination = Api::pagination($query, ['exclude_trip_id', 'planned_departure_at']);
             $plannedDepartureAt = $pagination['filters']['planned_departure_at'] ?? null;
+            if ($plannedDepartureAt === null) {
+                throw new AppError('VALIDATION_ERROR', 'planned_departure_at is required.');
+            }
             return $this->response($this->drivers->getEligibleDrivers(
                 $actor,
                 $pagination,

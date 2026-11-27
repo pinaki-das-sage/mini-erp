@@ -159,7 +159,7 @@ paths:
           application/json:
             schema:
               allOf:
-                - $ref: '#/components/schemas/Command'
+                - $ref: '#/components/schemas/VehicleCommand'
                 - type: object
                   required: [ vehicle_code, registration_number, capacity ]
                   properties:
@@ -313,17 +313,18 @@ paths:
       summary: List Drivers eligible for Trip assignment
       description: >
         Returns active same-company Drivers with a valid active linked Foundation
-        account (when linked) and no other active Draft/Dispatched Trip assignment.
-        Driver availability does not depend on the planned departure date.
+        account (when linked), no other active Draft/Dispatched Trip assignment,
+        and a licence expiry on or after the business date represented by
+        planned_departure_at. Licence eligibility is evaluated for the requested
+        departure date, not the current date.
       operationId: listEligibleDrivers
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PageSize'
         - name: planned_departure_at
           in: query
-          required: false
-          deprecated: true
-          description: Accepted for compatibility; ignored when determining driver availability.
+          required: true
+          description: ISO-8601 departure timestamp including its UTC offset.
           schema:
             type: string
             format: date-time
@@ -337,7 +338,7 @@ paths:
             minimum: 1
       responses:
         '200':
-          description: Active Drivers available for Trip assignment
+          description: Eligible Drivers for the planned departure date
           content:
             application/json:
               schema:
@@ -376,6 +377,15 @@ paths:
     post:
       tags: ["Logistics - Drivers"]
       summary: Update a driver profile
+      description: >
+        A Driver assigned to a Draft or Dispatched Trip cannot be deactivated.
+        The attempt returns 409 and leaves all Driver fields unchanged.
+        Delivered or Cancelled Trip history alone does not block deactivation.
+        ISACTIVE is administrative and is never changed by Trip assignment, dispatch,
+        delivery or cancellation. Reactivation from F to T is allowed with normal
+        validation. Retaining the same numeric linked ME_USERS.ID is valid; only
+        another active Driver linked to that user causes a duplicate-user conflict.
+        Driver code and linked user cannot change after first Trip use.
       operationId: updateDriver
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -435,7 +445,12 @@ paths:
       tags: ["Logistics - Drivers"]
       summary: Delete or deactivate a driver profile
       description: >
-        A driver never referenced by a Trip may be deleted. A driver with historical Trip references is deactivated. A driver assigned to an active Trip cannot be deleted or deactivated.
+        A driver never referenced by a Trip may be deleted. A driver with
+        historical Trip references is deactivated. A driver assigned to a
+        Draft or Dispatched Trip cannot be deleted or deactivated; the attempt
+        returns 409 and leaves the Driver unchanged. The Driver row is locked
+        before checking assignments, serializing deletion/deactivation with
+        Trip assignment. Delivered or Cancelled history alone permits deactivation.
       operationId: deleteDriver
       requestBody:
         required: true
@@ -545,8 +560,8 @@ paths:
         assignment keeps the Order Submitted; dispatching the complete Trip
         moves it to In Progress, and delivering the complete Trip closes it.
         Draft cancellation clears the complete assignment. Invoice creation is
-        a separate Sales action. The selected Driver must be active and available.
-        Logistics locks the Sales Order before
+        a separate Sales action. The selected Driver's licence must be valid
+        on the planned departure date. Logistics locks the Sales Order before
         Vehicle/Driver resources and creates all TripLines in the same outer
         transaction as the Sales callback.
       operationId: createTrip
@@ -578,11 +593,11 @@ paths:
                   format: date-time
                   example: '2026-11-26T10:00:00+05:30'
               example:
-                order_number: SO-000000000000022
-                trip_code: 1001
-                vehicle_id: 1
-                driver_id: 63
-                planned_departure_at: '2026-11-26T10:00:00+05:30'
+                order_number: SO-000000000000141
+                trip_code: 1010
+                vehicle_id: 5
+                driver_id: 61
+                planned_departure_at: '2026-11-29T10:00:00+05:30'
       responses:
         '201':
           description: Draft trip created
@@ -643,8 +658,8 @@ paths:
       description: >
         Updates Trip resources only. Logistics locks the Trip, then its Sales
         Order, before locking Vehicle/Driver resources. The complete Sales
-        Order assignment remains on this Trip. The selected Driver must be active
-        and available. The changes
+        Order assignment remains on this Trip. The selected Driver's licence
+        must be valid on the resulting planned departure date. The changes
         commit or roll back together in the Logistics transaction.
       operationId: updateTrip
       requestBody:
@@ -776,8 +791,13 @@ paths:
         Dispatched -> Delivered for the complete Trip and every saved Order
         line. Logistics locks the Trip and all TripLines, then the Sales Order,
         and sends the complete mapping to recordDelivery() in the shared outer
-        transaction. Sales closes the Order. Only the assigned Driver may
-        record delivery. Delivery does not create or modify an Invoice; Invoice
+        transaction. Sales closes the Order. Delivery may be performed by the
+        authenticated user linked to the assigned Driver, or by an authorized
+        Admin; both require the Logistics Trip update permission and are
+        limited to Trips in the authenticated company. Admin does not bypass
+        Trip state, Sales or Inventory validation. A 403 is returned when
+        neither condition is satisfied. DELIVERED_BY records the authenticated
+        actor. Delivery does not create or modify an Invoice; Invoice
         creation remains a separate Sales action. A committed retry verifies
         saved state read-only and does not invoke the Sales callback again.
       operationId: deliverTrip
@@ -1301,7 +1321,7 @@ paths:
           application/json:
             schema:
               allOf:
-                - $ref: '#/components/schemas/Command'
+                - $ref: '#/components/schemas/VehicleCommand'
                 - type: object
                   properties:
                     vehicle_code:
@@ -1344,7 +1364,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Command'
+              $ref: '#/components/schemas/VehicleCommand'
       responses:
         '200':
           description: Vehicle deleted
@@ -1506,6 +1526,13 @@ components:
       content: { application/json: { schema: { $ref: "#/components/schemas/SalesDocumentActionRequest" } } }
 
   schemas:
+    VehicleCommand:
+      type: object
+      description: Optional vehicle request metadata; action_reference may be omitted.
+      properties:
+        action_reference:
+          $ref: '#/components/schemas/ActionReference'
+
     Command:
       type: object
       required: [ action_reference ]
@@ -1619,7 +1646,7 @@ components:
 
     Driver:
       type: object
-      required: [ id, driver_code, first_name, last_name, licence_number, licence_expiry, isactive ]
+      required: [ id, driver_code, first_name, last_name, licence_number, licence_expiry, isactive, assignment_status ]
       properties:
         id:
           type: integer
@@ -1648,6 +1675,13 @@ components:
         isactive:
           type: string
           enum: [ 'T', 'F' ]
+          description: Administrative state, independent of Trip assignment; F to T reactivation is supported.
+
+        assignment_status:
+          type: string
+          enum: [AVAILABLE, ASSIGNED]
+          readOnly: true
+          description: ASSIGNED for a same-company Draft (D) or Dispatched (S) Trip; otherwise AVAILABLE. Never submit this field in a Driver update.
 
     DriverUser:
       type: object

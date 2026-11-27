@@ -18,13 +18,17 @@ class DriverRepository
 
     public function findAll(int $companyId, int $offset, int $pageSize): array
     {
-        $sql = 'SELECT ID, DRIVER_CODE, USER_ID, FIRST_NAME, LAST_NAME, PHONE,
-        LICENCE_NUMBER, TO_CHAR(LICENCE_EXPIRY, \'YYYY-MM-DD\') AS LICENCE_EXPIRY, ISACTIVE 
-        FROM ME_LOG_DRIVERS 
-        WHERE COMPANY_ID = :companyId 
-        ORDER BY ID
+        // Assignment is derived from trips; it never replaces the administrative ISACTIVE flag.
+        $sql = "SELECT D.ID, D.DRIVER_CODE, D.USER_ID, D.FIRST_NAME, D.LAST_NAME, D.PHONE,
+        D.LICENCE_NUMBER, TO_CHAR(D.LICENCE_EXPIRY, 'YYYY-MM-DD') AS LICENCE_EXPIRY, D.ISACTIVE,
+        CASE WHEN EXISTS (SELECT 1 FROM ME_LOG_TRIPS T
+            WHERE T.COMPANY_ID = D.COMPANY_ID AND T.DRIVER_ID = D.ID AND T.STATUS IN ('D', 'S'))
+            THEN 'ASSIGNED' ELSE 'AVAILABLE' END AS ASSIGNMENT_STATUS
+        FROM ME_LOG_DRIVERS D
+        WHERE D.COMPANY_ID = :companyId
+        ORDER BY D.ID
         OFFSET :offset ROWS
-        FETCH NEXT :page_size ROWS ONLY';
+        FETCH NEXT :page_size ROWS ONLY";
 
         return array_map($this->mapRow(...), $this->connection->query($sql, [
             'companyId' => $companyId,
@@ -37,19 +41,22 @@ class DriverRepository
         int $companyId,
         int $offset,
         int $pageSize,
+        string $departureDate,
         ?int $excludeTripId = null
     ): array
     {
         $sql = "SELECT D.ID, D.DRIVER_CODE, D.USER_ID, D.FIRST_NAME, D.LAST_NAME, D.PHONE,
-            D.LICENCE_NUMBER, TO_CHAR(D.LICENCE_EXPIRY, 'YYYY-MM-DD') AS LICENCE_EXPIRY, D.ISACTIVE
+            D.LICENCE_NUMBER, TO_CHAR(D.LICENCE_EXPIRY, 'YYYY-MM-DD') AS LICENCE_EXPIRY, D.ISACTIVE,
+            'AVAILABLE' AS ASSIGNMENT_STATUS
             FROM ME_LOG_DRIVERS D
             WHERE D.COMPANY_ID = :company_id AND D.ISACTIVE = 'T'
+            AND TRUNC(D.LICENCE_EXPIRY) >= TO_DATE(:departure_date, 'YYYY-MM-DD')
             AND (D.USER_ID IS NULL OR EXISTS (
                 SELECT 1 FROM ME_USERS U WHERE U.COMPANY_ID = D.COMPANY_ID AND U.ID = D.USER_ID AND U.ACTIVE = 1
             ))
             AND NOT EXISTS (SELECT 1 FROM ME_LOG_TRIPS T WHERE T.COMPANY_ID = D.COMPANY_ID
                 AND T.DRIVER_ID = D.ID AND T.STATUS IN ('D', 'S')";
-        $parameters = ['company_id' => $companyId];
+        $parameters = ['company_id' => $companyId, 'departure_date' => $departureDate];
         if ($excludeTripId !== null) {
             $sql .= ' AND T.ID <> :exclude_trip_id';
             $parameters['exclude_trip_id'] = $excludeTripId;
@@ -60,19 +67,28 @@ class DriverRepository
         return array_map($this->mapRow(...), $this->connection->query($sql, $parameters));
     }
 
-    public function findById(int $companyId, int $id): array
+    public function findById(int $companyId, int $id, bool $forUpdate = false): array
     {
         $sql = 'SELECT ID, DRIVER_CODE, USER_ID, FIRST_NAME, LAST_NAME, PHONE,
         LICENCE_NUMBER, TO_CHAR(LICENCE_EXPIRY, \'YYYY-MM-DD\') AS LICENCE_EXPIRY, ISACTIVE 
         FROM ME_LOG_DRIVERS 
         WHERE COMPANY_ID = :companyId AND ID = :id';
 
+        if ($forUpdate) {
+            $sql .= ' FOR UPDATE';
+        }
+
         $result = $this->connection->query($sql, [
             'companyId' => $companyId,
             'id' => $id
         ]);
 
-        return $result ? $this->mapRow($result[0]) : [];
+        if ($result === []) {
+            return [];
+        }
+        $driver = $this->mapRow($result[0]);
+        $driver['assignment_status'] = $this->hasActiveTrip($companyId, $id) ? 'ASSIGNED' : 'AVAILABLE';
+        return $driver;
     }
 
     public function hasActiveTrip(int $companyId, int $id): bool
@@ -108,7 +124,8 @@ class DriverRepository
             'phone' => $row['PHONE'],
             'licence_number' => $row['LICENCE_NUMBER'],
             'licence_expiry' => $row['LICENCE_EXPIRY'],
-            'isactive' => $row['ISACTIVE']
+            'isactive' => $row['ISACTIVE'],
+            'assignment_status' => $row['ASSIGNMENT_STATUS'] ?? null,
         ];
     }
 
@@ -159,21 +176,19 @@ class DriverRepository
         return $result && $result[0]['COUNT'] > 0;
     }
 
-    public function driverUserExists(int $companyId, int $userId, ?int $excludeId = null): bool
+    public function userLinkedToAnotherDriver(int $companyId, int $userId, ?int $excludeDriverId = null): bool
     {
-        $sql = 'SELECT COUNT(*) as count FROM ME_LOG_DRIVERS WHERE COMPANY_ID = :companyId AND USER_ID = :userId AND ISACTIVE = \'T\'';
+        $sql = 'SELECT ID FROM ME_LOG_DRIVERS WHERE COMPANY_ID = :companyId AND USER_ID = :userId AND ISACTIVE = \'T\'';
         $params = [
             'companyId' => $companyId,
             'userId' => $userId
         ];
-        if ($excludeId !== null) {
-            $sql .= ' AND ID != :excludeId';
-            $params['excludeId'] = $excludeId;
+        if ($excludeDriverId !== null) {
+            $sql .= ' AND ID <> :excludeDriverId';
+            $params['excludeDriverId'] = $excludeDriverId;
         }
-
-        $result = $this->connection->query($sql, $params);
-
-        return $result && $result[0]['COUNT'] > 0;
+        $sql .= ' FETCH FIRST 1 ROWS ONLY';
+        return $this->connection->query($sql, $params) !== [];
     }
 
     public function findEligibleUsers(int $companyId, int $offset, int $pageSize, ?string $search = null): array

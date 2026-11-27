@@ -96,6 +96,10 @@ final class VehicleValidator
 
     private function validateReference(array $input): void
     {
+        // The vehicle UI omits this metadata. Validate it only when supplied.
+        if (!array_key_exists('action_reference', $input)) {
+            return;
+        }
         if (!is_string($input['action_reference'] ?? null) || !preg_match('/^[A-Za-z0-9_-]{1,100}$/D', $input['action_reference'])) {
             throw new AppError('VALIDATION_ERROR', 'action_reference requires 1-100 letters, digits, underscores or hyphens.', 400);
         }
