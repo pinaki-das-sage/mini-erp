@@ -1,0 +1,40 @@
+meta {
+  name: Get product
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/api/v1/inventory/products/{{product_id}}
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{access_token}}
+  Accept: application/json
+}
+
+script:pre-request {
+  const token = bru.getVar("access_token");
+  if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) {
+    throw new Error("Run Login first.");
+  }
+  const id = bru.getVar("product_id");
+  if (!Number.isInteger(id) || id < 1) {
+    throw new Error("Create a product, or set product_id from List products.");
+  }
+}
+
+tests {
+  test("Returns the selected product", function () {
+    const body = res.getBody();
+    expect(res.getStatus()).to.equal(200);
+    expect(body.success).to.equal(true);
+    expect(body.result.warehouse_id).to.equal("W01");
+  });
+}
+
+docs {
+  Uses product_id selected by Create product. An unknown id returns 404 NOT_FOUND.
+}

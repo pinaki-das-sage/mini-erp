@@ -1,0 +1,54 @@
+meta {
+  name: Delete product
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base_url}}/api/v1/inventory/products/delete/{{product_id}}
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{access_token}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {}
+}
+
+script:pre-request {
+  const token = bru.getVar("access_token");
+  if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) {
+    throw new Error("Run Login first.");
+  }
+  const id = bru.getVar("product_id");
+  if (!Number.isInteger(id) || id < 1) {
+    throw new Error("Create a product, or set product_id from List products.");
+  }
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    bru.deleteVar("product_id");
+  }
+}
+
+tests {
+  test("Deletes an unused product", function () {
+    const body = res.getBody();
+    expect(res.getStatus()).to.equal(200);
+    expect(body.success).to.equal(true);
+    expect(body.result.deleted).to.equal(true);
+  });
+}
+
+docs {
+  POST is used because the training host gateway blocks DELETE.
+  Permanent. Refused with 409 PRODUCT_IN_USE while the product has stock on hand or reserved,
+  or any stock movement or reservation history; deactivate those with Update product instead.
+  The list shows canDelete=false for such products.
+}

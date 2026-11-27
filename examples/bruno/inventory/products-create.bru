@@ -1,0 +1,62 @@
+meta {
+  name: Create product
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/api/v1/inventory/products
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{access_token}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "name": "{{?Product name}}",
+    "sku": "{{?SKU (letters, digits, . _ -)}}",
+    "unitLabel": "{{?Unit label (for example box)}}",
+    "unitWeightKg": {{?Unit weight in kg (for example 0.5, up to 3 decimals)}}
+  }
+}
+
+script:pre-request {
+  const token = bru.getVar("access_token");
+  if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) {
+    throw new Error("Run Login first.");
+  }
+  bru.deleteVar("product_id");
+}
+
+script:post-response {
+  const body = res.getBody();
+  if (res.getStatus() === 201 && body && body.success === true) {
+    const id = body.result && body.result.productId;
+    if (!Number.isInteger(id) || id < 1) {
+      throw new Error("Create did not return a valid productId.");
+    }
+    bru.setVar("product_id", id);
+  }
+}
+
+tests {
+  test("Creates a product and returns its id and normalised SKU", function () {
+    const body = res.getBody();
+    expect(res.getStatus()).to.equal(201);
+    expect(body.success).to.equal(true);
+    expect(Number.isInteger(body.result.productId)).to.equal(true);
+    expect(body.result.sku).to.equal(body.result.sku.toUpperCase());
+  });
+}
+
+docs {
+  Creates real data: use a unique SKU in your approved sandbox only.
+  The server generates the action reference, so re-sending with the same SKU returns 409 DUPLICATE_SKU.
+  Success selects product_id in runtime variables for Get and Update.
+  The product starts with a zero-stock balance row. Stock arrives later through purchase receipt.
+}

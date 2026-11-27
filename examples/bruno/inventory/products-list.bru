@@ -1,0 +1,61 @@
+meta {
+  name: List products
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/v1/inventory/products?page=1&pageSize=25
+  body: none
+  auth: none
+}
+
+params:query {
+  page: 1
+  pageSize: 25
+  ~q: bolt
+  ~sku: BO
+  ~name: steel
+  ~status: active
+}
+
+headers {
+  Authorization: Bearer {{access_token}}
+  Accept: application/json
+}
+
+script:pre-request {
+  const token = bru.getVar("access_token");
+  if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) {
+    throw new Error("Run Login first.");
+  }
+}
+
+tests {
+  const body = res.getBody();
+  test("Lists products for the signed-in company", function () {
+    expect(res.getStatus()).to.equal(200);
+    expect(body.success).to.equal(true);
+    expect(Boolean(body.result && Array.isArray(body.result.items))).to.equal(true);
+  });
+  test("Products expose id, sku, unit and weight", function () {
+    const items = body.result && body.result.items;
+    expect(Array.isArray(items) && items.every(function (p) {
+      return Number.isInteger(p.productId) && typeof p.sku === "string" &&
+        typeof p.unitWeightKg === "number" && typeof p.active === "boolean";
+    })).to.equal(true);
+  });
+  test("List reports the total and whether each product can be deleted", function () {
+    const items = body.result && body.result.items;
+    expect(Number.isInteger(body.result.total)).to.equal(true);
+    expect(Array.isArray(items) && items.every(function (p) {
+      return typeof p.canDelete === "boolean";
+    })).to.equal(true);
+  });
+}
+
+docs {
+  Needs inventory.products:read (admins pass once the object is registered).
+  Change page and pageSize (1-100). Tick q to search SKU and name together, or sku, name and status to filter by column
+  (contains, any case, up to 100 characters). total counts all matches across pages.
+}

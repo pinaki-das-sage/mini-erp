@@ -1,0 +1,53 @@
+meta {
+  name: Update product
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/api/v1/inventory/products/update/{{product_id}}
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{access_token}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "name": "{{?Product name}}",
+    "unitLabel": "{{?Unit label}}",
+    "unitWeightKg": {{?Unit weight in kg (for example 0.5, up to 3 decimals)}},
+    "active": true
+  }
+}
+
+script:pre-request {
+  const token = bru.getVar("access_token");
+  if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) {
+    throw new Error("Run Login first.");
+  }
+  const id = bru.getVar("product_id");
+  if (!Number.isInteger(id) || id < 1) {
+    throw new Error("Create a product, or set product_id from List products.");
+  }
+}
+
+tests {
+  test("Updates the selected product", function () {
+    const body = res.getBody();
+    expect(res.getStatus()).to.equal(200);
+    expect(body.success).to.equal(true);
+    expect(body.result.productId).to.equal(bru.getVar("product_id"));
+  });
+}
+
+docs {
+  POST is used because the training host gateway blocks PUT, PATCH and DELETE.
+  The SKU cannot be changed. To retire a product, deliberately set active to false;
+  this is refused with 409 while any of its stock is reserved. Unit and weight cannot change
+  once the product has stock movements or reservations (409). Use Delete product for unused products.
+}

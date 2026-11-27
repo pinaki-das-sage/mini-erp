@@ -1,0 +1,53 @@
+meta {
+  name: Stock movement history
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{base_url}}/api/v1/inventory/products/movements/{{product_id}}?page=1&pageSize=25
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{access_token}}
+  Accept: application/json
+}
+
+params:query {
+  page: 1
+  pageSize: 25
+}
+
+script:pre-request {
+  const token = bru.getVar("access_token");
+  if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) {
+    throw new Error("Run Login first.");
+  }
+  const id = bru.getVar("product_id");
+  if (!Number.isInteger(id) || id < 1) {
+    throw new Error("Create a product, or set product_id from List products.");
+  }
+}
+
+tests {
+  const body = res.getBody();
+  test("Returns a page of movements for the product", function () {
+    expect(res.getStatus()).to.equal(200);
+    expect(body.success).to.equal(true);
+    expect(Array.isArray(body.result.items)).to.equal(true);
+    expect(Number.isInteger(body.result.total)).to.equal(true);
+  });
+  test("Each movement has balances and a source", function () {
+    expect(body.result.items.every(function (m) {
+      return Number.isInteger(m.movementId) && typeof m.type === "string" &&
+        typeof m.sourceId === "string" && Number.isInteger(m.closingBalance);
+    })).to.equal(true);
+  });
+}
+
+docs {
+  Newest movement first. A new product has no movements until stock is received, so an empty list is normal.
+  Needs inventory.movements:read (admins pass once the object is registered). Movements are never edited.
+}

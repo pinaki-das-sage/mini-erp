@@ -12,6 +12,7 @@ use MiniErp\shared\security\AuthService;
 use MiniErp\shared\security\Security;
 use MiniErp\shared\security\UserService;
 use MiniErp\shared\view\Renderer;
+use MiniErp\inventory\InventoryWeb;
 
 final class Kernel
 {
@@ -122,6 +123,18 @@ final class Kernel
                     return ['status' => 303, 'headers' => ['Location' => $this->paths->url('/login?password_changed=1')], 'body' => ''];
                 }
             }
+            // Inventory reservations: separate from InventoryWeb's product delegation.
+            if (\MiniErp\inventory\ReservationWeb::matches($path)) {
+                $actor = $this->actor();
+                $result = (new \MiniErp\inventory\ReservationWeb($this->db(), $this->paths))->handle($method, $path, $input, $actor, $query);
+                if (isset($result['view'])) {
+                    return $this->page($result['view'], $result['title'], $result['data'] + ['actor' => $actor], $result['status'] ?? 200);
+                }
+                return $this->json($result['status'], ['success' => true, 'operation_id' => null, 'current_version' => null, 'result' => $result['result'], 'error' => null]);
+            }
+            if (self::isInventoryProductPath($path)) {
+                return $this->inventory($method, $path, $input, $headers, $query);
+            }
             if (str_starts_with($path, '/settings/') || str_starts_with($path, '/api/settings/')) {
                 return $this->settings($method, $path, $input, $headers);
             }
@@ -201,6 +214,30 @@ final class Kernel
             throw new AppError('PASSWORD_CHANGE_REQUIRED', 'Change your temporary password at ' . $this->paths->url('/account/password') . ' first.', 403);
         }
         return $actor;
+    }
+
+    /** Inventory's product pages and web-API calls only; other Inventory screens use their own prefixes. */
+    private static function isInventoryProductPath(string $path): bool
+    {
+        foreach (['/modules/inventory/products', '/api/inventory/products'] as $prefix) {
+            if ($path === $prefix || str_starts_with($path, $prefix . '/')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function inventory(string $method, string $path, array $input, array $headers, array $query): array
+    {
+        $actor = $this->actor();
+        if ($method !== 'GET') {
+            Security::verifyCsrf($this->session, $headers['x-csrf-token'] ?? null);
+        }
+        $result = (new InventoryWeb($this->db()))->handle($actor, $method, $path, $query, $input);
+        if (isset($result['view'])) {
+            return $this->page($result['view'], $result['title'], ['actor' => $actor, ...$result['data']]);
+        }
+        return $this->json($result['status'], ['success' => true, 'result' => $result['result'], 'error' => null]);
     }
 
     private function settings(string $method, string $path, array $input, array $headers): array
