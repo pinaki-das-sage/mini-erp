@@ -223,6 +223,9 @@
             ? 'Draft: edit purchase details and item lines. Submit only after all changes are saved.'
             : 'Draft: edit the date and document notes. Values copied from the source are read-only.'
           : 'This document is ' + label(record.status) + '. Its header and lines are read-only.';
+        if (draft && record.recordtype !== 'order' && !record.source_document_id) {
+          find('#purchasing-state-description').textContent = 'This is an older, unlinked Draft. A receiver created from a Submitted purchase order is required for goods receiving.';
+        }
         if (draft && can('purchasing.document:update')) actions.append(action('Edit draft', () => openDocument({ record })));
         if (record.source_document_id) actions.append(action('View source document', () => showDetail(record.source_document_id)));
         const child = state.records.find(doc => doc.source_document_id === record.id);
@@ -236,12 +239,16 @@
             !can('purchasing.document:create') || !can('purchasing.document:create_receiver')));
         }
         if (record.recordtype === 'receiver' && draft) {
-          const allowed = state.receivingAvailable && can('purchasing.document:update') && can('inventory.stock:receive');
-          actions.append(action('Receive all items into W01', () => receiveAll(record), !allowed));
-          find('#purchasing-integration-note').textContent = !state.receivingAvailable
-            ? 'Warehouse W01 only. Deploy the Inventory StockReceiptService before receiving goods.'
-            : allowed ? 'Whole-unit quantities are received into W01. Stock, order and receiver are saved together, once.'
-              : 'Receiving requires document update and Inventory stock receive permissions.';
+          const linked = Boolean(record.source_document_id);
+          const allowed = linked && state.receivingAvailable && can('purchasing.document:update') && can('inventory.stock:receive');
+          const receiveButton = action('Receive all items into W01', () => receiveAll(record), !allowed);
+          if (!linked) receiveButton.title = 'Create a receiver from a Submitted purchase order first.';
+          actions.append(receiveButton);
+          find('#purchasing-integration-note').textContent = !linked
+            ? 'This receiver has no linked purchase order. Open a Submitted purchase order, choose Create draft receiver, then receive the new document.'
+            : !state.receivingAvailable ? 'Warehouse W01 only. Deploy the Inventory StockReceiptService before receiving goods.'
+              : allowed ? 'Whole-unit quantities are received into W01. Stock, order and receiver are saved together, once.'
+                : 'Receiving requires document update and Inventory stock receive permissions.';
         }
         if (record.recordtype === 'receiver' && record.status === 'received' && !child) {
           actions.append(action('Create draft invoice', () => openDocument({ type: 'invoice', source: record }),
@@ -287,7 +294,6 @@
   }
 
   async function receiveAll(record) {
-    if (!window.confirm('Receive all items on ' + record.docno + ' into W01? Decimal quantities round to whole units and document amounts are recalculated. Stock increases once and the receiver becomes read-only.')) return;
     await saving(async () => {
       const result = await request('documents/' + encodeURIComponent(record.id), { status: 'received' });
       await load();

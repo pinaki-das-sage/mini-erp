@@ -156,11 +156,15 @@ final readonly class PurchasingDocumentModel
         return (new TransactionManager($this->connection))->run(
             function (TransactionContext $tx) use ($actor, $id): array {
                 $lookup = $tx->query(
-                    'SELECT SOURCE_DOC_ID FROM ME_PUR_DOC WHERE CNYID = :company_id AND ID = :id',
+                    'SELECT RECORDTYPE, SOURCE_DOC_ID FROM ME_PUR_DOC WHERE CNYID = :company_id AND ID = :id',
                     ['company_id' => $actor->companyId, 'id' => $id],
                 );
-                if ($lookup === [] || $lookup[0]['SOURCE_DOC_ID'] === null) {
-                    throw new AppError('NOT_FOUND', 'A source-linked receiver was not found.', 404);
+                if ($lookup === [] || strtolower((string) $lookup[0]['RECORDTYPE']) !== 'receiver') {
+                    throw new AppError('NOT_FOUND', 'Receiver not found.', 404);
+                }
+                if ($lookup[0]['SOURCE_DOC_ID'] === null) {
+                    throw new AppError('CONFLICT',
+                        'This receiver has no source purchase order. Open a Submitted purchase order and use Create draft receiver, then receive that new document.', 409);
                 }
                 $sourceId = (string) $lookup[0]['SOURCE_DOC_ID'];
                 // Lock the source first, matching the source-document creation lock order.
