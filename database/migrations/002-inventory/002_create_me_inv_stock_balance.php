@@ -1,8 +1,7 @@
 <?php
 declare(strict_types=1);
 
-// One balance row per product (company-scoped). The product service creates this row, with
-// ON_HAND = 0 and RESERVED = 0, in the same transaction that creates the product.
+
 return [
     <<<'SQL'
     CREATE TABLE ME_INV_STOCK_BALANCE (

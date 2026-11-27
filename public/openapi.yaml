@@ -74,7 +74,9 @@ paths:
       tags:
         - Inventory
       summary: List products
-      description: Paged product list for the signed-in company. Requires inventory.products:read.
+      description: >
+        Paged product list for the signed-in company, ordered by SKU. Use q to search SKU and name
+        (contains, any case), or sku, name and status to filter by column; filters combine. Each item says whether it can be deleted. Requires inventory.products:read.
       operationId: listProducts
       security:
         - bearerAuth: []
@@ -82,9 +84,25 @@ paths:
         - name: page
           in: query
           schema: { type: integer, minimum: 1, default: 1 }
-        - name: page_size
+        - name: pageSize
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+        - name: q
+          in: query
+          description: Search text matched against SKU and product name (max 100 characters).
+          schema: { type: string, maxLength: 100, example: bolt }
+        - name: sku
+          in: query
+          description: Filter on SKU only (contains, any case, max 100 characters).
+          schema: { type: string, maxLength: 100, example: BOLT }
+        - name: name
+          in: query
+          description: Filter on product name only (contains, any case, max 100 characters).
+          schema: { type: string, maxLength: 100, example: steel }
+        - name: status
+          in: query
+          description: Show only active or inactive products. Leave out for both.
+          schema: { type: string, enum: [active, inactive] }
       responses:
         '200':
           description: A page of products
@@ -101,7 +119,8 @@ paths:
                         type: array
                         items: { $ref: '#/components/schemas/Product' }
                       page: { type: integer, example: 1 }
-                      page_size: { type: integer, example: 25 }
+                      pageSize: { type: integer, example: 25 }
+                      total: { type: integer, description: Products matching the search, across all pages., example: 9 }
         '400': { description: Unsupported filter or invalid paging value }
         '401': { description: Missing or invalid token }
         '403': { description: Object not registered, or permission not granted }
@@ -112,7 +131,7 @@ paths:
       summary: Create product
       description: >
         Creates a product and its zero-stock balance row in one transaction.
-        Requires inventory.products:create. Repeating the same action_reference with the same body returns the first result.
+        Requires inventory.products:create. The SKU must be unique within the company.
       operationId: createProduct
       security:
         - bearerAuth: []
@@ -122,13 +141,12 @@ paths:
           application/json:
             schema:
               type: object
-              required: [action_reference, name, sku, unit_label, unit_weight_grams]
+              required: [name, sku, unitLabel, unitWeightKg]
               properties:
-                action_reference: { type: string, example: inv-create-001 }
                 name: { type: string, maxLength: 255, example: Steel Bolt }
                 sku: { type: string, maxLength: 50, example: BOLT-01, description: Trimmed and upper-cased. Letters, digits, dot, underscore, hyphen. }
-                unit_label: { type: string, maxLength: 50, example: box }
-                unit_weight_grams: { type: integer, minimum: 1, example: 500 }
+                unitLabel: { type: string, maxLength: 50, example: box }
+                unitWeightKg: { type: number, minimum: 0.001, multipleOf: 0.001, example: 0.5, description: Weight of one unit in kilograms. At most 3 decimals. }
       responses:
         '201':
           description: Product created
@@ -138,16 +156,16 @@ paths:
                 type: object
                 properties:
                   success: { type: boolean, example: true }
-                  operation_id: { type: string, example: inv-create-001 }
+                  operation_id: { type: [string, 'null'], description: Null unless the caller sent its own action_reference., example: null }
                   result:
                     type: object
                     properties:
-                      product_id: { type: integer, example: 1 }
+                      productId: { type: integer, example: 1 }
                       sku: { type: string, example: BOLT-01 }
         '400': { description: Invalid field }
         '401': { description: Missing or invalid token }
         '403': { description: Object not registered, or permission not granted }
-        '409': { description: DUPLICATE_SKU, or the action reference belongs to a different request }
+        '409': { description: DUPLICATE_SKU }
         '415': { description: Content-Type must be application/json }
 
   /inventory/products/{id}:
@@ -176,17 +194,16 @@ paths:
         '403': { description: Object not registered, or permission not granted }
         '404': { description: Product not found }
 
-
-  /inventory/products/{id}/update:
+  /inventory/products/update/{id}:
     post:
       tags:
         - Inventory
       summary: Update or deactivate product
       description: >
         Changes name, unit label, unit weight and the active flag. The SKU cannot be changed.
-        Deactivating is refused (409) while any of the product's stock is reserved. There is no delete.
+        Deactivating is refused (409) while any of the product's stock is reserved.
         Requires inventory.products:update.
-        Uses POST because the training host's gateway blocks PATCH.
+        Uses POST because the training host's gateway blocks PUT, PATCH and DELETE.
       operationId: updateProduct
       security:
         - bearerAuth: []
@@ -198,12 +215,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [action_reference, name, unit_label, unit_weight_grams, active]
+              required: [name, unitLabel, unitWeightKg, active]
               properties:
-                action_reference: { type: string, example: inv-update-001 }
                 name: { type: string, maxLength: 255, example: Steel Bolt M8 }
-                unit_label: { type: string, maxLength: 50, example: pack }
-                unit_weight_grams: { type: integer, minimum: 1, example: 450 }
+                unitLabel: { type: string, maxLength: 50, example: pack }
+                unitWeightKg: { type: number, minimum: 0.001, multipleOf: 0.001, example: 0.45, description: Weight of one unit in kilograms. At most 3 decimals. }
                 active: { type: boolean, example: true }
       responses:
         '200':
@@ -214,20 +230,269 @@ paths:
                 type: object
                 properties:
                   success: { type: boolean, example: true }
-                  operation_id: { type: string, example: inv-update-001 }
+                  operation_id: { type: [string, 'null'], description: Null unless the caller sent its own action_reference., example: null }
                   result:
                     type: object
                     properties:
-                      product_id: { type: integer, example: 1 }
+                      productId: { type: integer, example: 1 }
                       name: { type: string }
-                      unit_label: { type: string }
-                      unit_weight_grams: { type: integer }
+                      unitLabel: { type: string }
+                      unitWeightKg: { type: number }
                       active: { type: boolean }
         '400': { description: Invalid field, or sku supplied }
         '401': { description: Missing or invalid token }
         '403': { description: Object not registered, or permission not granted }
         '404': { description: Product not found }
-        '409': { description: Product has reserved stock and cannot be deactivated, or action reference conflict }
+        '409': { description: Product has reserved stock and cannot be deactivated, or unit and weight changed on a product that has movements or reservations }
+
+  /inventory/products/delete/{id}:
+    post:
+      tags:
+        - Inventory
+      summary: Delete an unused product
+      description: >
+        Permanently removes a product (and its zero balance row). Refused with 409 PRODUCT_IN_USE while the
+        product has stock on hand or reserved, or any stock movement or reservation history, because that
+        history must keep pointing at the product. Deactivate such products with the update call instead.
+        Requires inventory.products:delete. Uses POST because the training host's gateway blocks DELETE.
+      operationId: deleteProduct
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: No fields. Send an empty JSON object.
+            example: {}
+      responses:
+        '200':
+          description: Product deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  operation_id: { type: [string, 'null'], description: Null unless the caller sent its own action_reference., example: null }
+                  result:
+                    type: object
+                    properties:
+                      productId: { type: integer, example: 1 }
+                      deleted: { type: boolean, example: true }
+        '400': { description: Invalid id }
+        '401': { description: Missing or invalid token }
+        '403': { description: Object not registered, or permission not granted }
+        '404': { description: Product not found }
+        '409': { description: Product has stock or transaction history }
+
+  /inventory/products/movements/{id}:
+    get:
+      tags:
+        - Inventory
+      summary: Stock movement history
+      description: >
+        One product's stock movements, oldest first (by movement time), paged. Each entry shows the opening balance, the quantity
+        received and dispatched, and the closing balance, with its source and, for reservation-related movements,
+        the reservation. Movements are never edited. Requires inventory.movements:read.
+      operationId: listProductMovements
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        '200':
+          description: A page of movements
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  result:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/StockMovement' }
+                      page: { type: integer, example: 1 }
+                      pageSize: { type: integer, example: 25 }
+                      total: { type: integer, example: 2 }
+        '400': { description: Invalid id, unsupported filter or invalid paging value }
+        '401': { description: Missing or invalid token }
+        '403': { description: Object not registered, or permission not granted }
+        '404': { description: Product not found }
+
+  /inventory/get-availability:
+    get:
+      tags:
+        - Inventory
+
+      summary: shows the availability of requested products
+
+      description: >
+        Returns on-hand, reserved, and available quantities for the requested
+        products in the authenticated company. If a product exists but has no
+        stock-balance row, its quantities are returned as zero.
+
+      operationId: getAvailability
+
+      security:
+        - bearerAuth: []
+
+      parameters:
+        - name: productIds
+          in: query
+          required: true
+          description: Comma-separated product IDs, for example 41,42.
+          style: form
+          explode: false
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 1000
+            items:
+              type: integer
+              minimum: 1
+          example:
+            - 41
+            - 42
+
+      responses:
+        '200':
+          description: Availability returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  operation_id:
+                    type:
+                      - string
+                      - 'null'
+                  current_version:
+                    type:
+                      - integer
+                      - 'null'
+                  result:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - productId
+                        - onHand
+                        - reserved
+                        - available
+                      properties:
+                        productId:
+                          type: integer
+                          example: 41
+                        onHand:
+                          type: integer
+                          example: 50
+                        reserved:
+                          type: integer
+                          example: 12
+                        available:
+                          type: integer
+                          example: 38
+                  error:
+                    type:
+                      - object
+                      - 'null'
+
+        '400':
+          description: Product IDs are missing or invalid
+
+        '401':
+          description: Authentication is required or the token is invalid
+
+        '403':
+          description: The user lacks inventory stock-balance read permission
+
+        '409':
+          description: One or more products do not exist for the authenticated company
+
+        '500':
+          description: Internal server error
+  /inventory/reservations/{sales_order_id}/{sales_line_id}:
+    get:
+      tags:
+        - Inventory
+      summary: Get Reservation Detail API
+      operationId: getReservationDetail
+      description: >
+        Returns the authenticated company's latest reservation for the original Sales order and line.
+        Resubmission after release creates a new reservation; earlier released records remain as history.
+        Quantities use the whole-line ACTIVE, RELEASED, or DISPATCHED status model.
+        Reads claimedQuantity from matching company-scoped Logistics trip lines whose trip STATUS is 'D'.
+        For ACTIVE reservations, releasableQuantity is active minus claimed. These values are advisory; release needs a fresh locked check.
+        RELEASED and DISPATCHED reservations have zero releasable quantity.
+        This endpoint is read-only and does not reserve or release stock.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sales_order_id
+          in: path
+          required: true
+          description: Original Sales Order document RECORD#, not its display number.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 999999999999999
+          example: 2001
+        - name: sales_line_id
+          in: path
+          required: true
+          description: Original Sales Order line RECORD#, not LINE_NUMBER.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 999999999999999
+          example: 3001
+      responses:
+        '200':
+          description: Reservation detail returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  operation_id:
+                    type: 'null'
+                  current_version:
+                    type: 'null'
+                  error:
+                    type: 'null'
+                  result:
+                    $ref: '#/components/schemas/ReservationDetail'
+        '400':
+          description: Invalid Sales order or line IDs
+        '401':
+          description: Authentication is required or the token is invalid
+        '403':
+          description: The user lacks inventory.reservations read permission
+        '404':
+          description: No matching reservation exists in the authenticated company
+        '409':
+          description: Invalid reservation state or inconsistent claimed quantity
+        '500':
+          description: Internal server error
 
 components:
   securitySchemes:
@@ -244,10 +509,97 @@ components:
     Product:
       type: object
       properties:
-        product_id: { type: integer, example: 1 }
+        productId: { type: integer, example: 1 }
         name: { type: string, example: Steel Bolt }
         sku: { type: string, example: BOLT-01 }
-        warehouse_id: { type: string, example: W01 }
-        unit_label: { type: string, example: box }
-        unit_weight_grams: { type: integer, example: 500 }
+        warehouseId: { type: string, example: W01 }
+        unitLabel: { type: string, example: box }
+        unitWeightKg: { type: number, example: 0.5 }
         active: { type: boolean, example: true }
+        canDelete: { type: boolean, description: Present in list items only. False when the product has stock reservations or movement history., example: true }
+        onHand: { type: integer, description: Present when fetching one product. Units physically in stock., example: 20 }
+        reserved: { type: integer, description: Present when fetching one product. Units held for sales orders., example: 5 }
+        available: { type: integer, description: Present when fetching one product. On hand minus reserved., example: 15 }
+    StockMovement:
+      type: object
+      properties:
+        movementId: { type: integer, example: 12 }
+        movedAt: { type: string, description: UTC date and time., example: '2026-11-24T08:37:25Z' }
+        type: { type: string, example: RECEIVED }
+        sourceType: { type: string, example: PURCHASE_RECEIVER }
+        sourceId: { type: string, description: The business source, such as a receipt line., example: RCPT-001 }
+        reservationId: { type: [integer, 'null'], example: null }
+        openingBalance: { type: integer, example: 20 }
+        receivedQuantity: { type: integer, example: 5 }
+        dispatchedQuantity: { type: integer, example: 0 }
+        closingBalance: { type: integer, example: 25 }
+    ReservationDetail:
+      type: object
+      required:
+        - reservationId
+        - salesOrderId
+        - salesLineId
+        - productId
+        - reservedQuantity
+        - activeQuantity
+        - releasedQuantity
+        - consumedQuantity
+        - status
+        - tripId
+        - tripLineId
+        - claimedQuantity
+        - releasableQuantity
+        - claimCheckAvailable
+      properties:
+        reservationId:
+          type: integer
+          example: 5001
+        salesOrderId:
+          type: integer
+          example: 2001
+        salesLineId:
+          type: integer
+          example: 3001
+        productId:
+          type: integer
+          example: 163
+        reservedQuantity:
+          type: integer
+          description: Original full-line quantity retained for audit, including closed reservations.
+          minimum: 1
+          example: 10
+        activeQuantity:
+          type: integer
+          minimum: 0
+          example: 10
+        releasedQuantity:
+          type: integer
+          minimum: 0
+          example: 0
+        consumedQuantity:
+          type: integer
+          minimum: 0
+          example: 0
+        status:
+          type: string
+          enum: [ACTIVE, RELEASED, DISPATCHED]
+          example: ACTIVE
+        tripId:
+          type: [integer, 'null']
+          example: null
+        tripLineId:
+          type: [integer, 'null']
+          example: null
+        claimedQuantity:
+          type: [integer, 'null']
+          minimum: 0
+          description: Sum of matching Draft-trip line quantities (Logistics STATUS 'D'); zero when none match. Closed reservations have zero current claims.
+        releasableQuantity:
+          type: [integer, 'null']
+          minimum: 0
+          description: Active minus claimed when known; unknown for ACTIVE reservations without a lookup; zero for closed reservations.
+          example: null
+        claimCheckAvailable:
+          type: boolean
+          description: True when the Logistics claim lookup is connected; failures are reported rather than treated as zero.
+          example: false
