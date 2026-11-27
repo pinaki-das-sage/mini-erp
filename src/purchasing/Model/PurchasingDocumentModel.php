@@ -272,7 +272,9 @@ final readonly class PurchasingDocumentModel
             return (new TransactionManager($this->connection))->run(
                 function (TransactionContext $tx) use ($actor, $id, $changes): array {
                     $rows = $tx->query(
-                        'SELECT RECORDTYPE, STATUS, VENDOR_ID, DOCNO, DOC_DATE, PAYMENT_TERMS, SOURCE_DOC_ID
+                        'SELECT RECORDTYPE, STATUS, VENDOR_ID, DOCNO,
+                                TO_CHAR(DOC_DATE, \'YYYY-MM-DD\') AS DOC_DATE,
+                                PAYMENT_TERMS, VENDOR_REF, DELIVERY_ADDR, SOURCE_DOC_ID
                          FROM ME_PUR_DOC WHERE CNYID = :company_id AND ID = :id FOR UPDATE',
                         ['company_id' => $actor->companyId, 'id' => $id],
                     );
@@ -286,38 +288,41 @@ final readonly class PurchasingDocumentModel
                     }
                     $nextStatus = $changes['status'] ?? 'draft';
                     if ($nextStatus !== 'draft') {
-                        if ($type !== 'order') {
-                            throw new AppError('DEPENDENCY_UNAVAILABLE',
-                                $type === 'receiver'
-                                    ? 'Use Receive all items to move a Draft receiver to Received.'
-                                    : 'Invoice posting is unavailable until the vendor balance ledger is connected.', $type === 'receiver' ? 409 : 503);
-                        }
-                        if ($nextStatus !== 'submitted') {
-                            throw new AppError('CONFLICT', 'A Draft order can only move to Submitted.', 409);
+                        if (!in_array($type, ['order', 'invoice'], true) || $nextStatus !== 'submitted') {
+                            throw new AppError('CONFLICT',
+                                $type === 'receiver' ? 'Use Receive all items to receive a Draft receiver.'
+                                    : 'A Draft order or invoice can only move to Submitted.', 409);
                         }
                         if (array_keys($changes) !== ['status']) {
-                            throw new AppError('VALIDATION_ERROR', 'Save Draft changes before submitting the order.');
+                            throw new AppError('VALIDATION_ERROR', 'Save Draft changes before submitting the document.');
                         }
                         (new Authorization($this->connection))->requirePermission($actor, 'purchasing.document', 'submit');
-                        if ($saved['DOC_DATE'] === null || !str_starts_with((string) $saved['DOCNO'], 'PO-')
-                            || strlen((string) $saved['DOCNO']) <= 3) {
-                            throw new AppError('VALIDATION_ERROR', 'Enter a valid order number and order date before submitting.');
+                        $prefix = $type === 'invoice' ? 'INV-' : 'PO-';
+                        if ($saved['DOC_DATE'] === null || !str_starts_with((string) $saved['DOCNO'], $prefix)
+                            || strlen((string) $saved['DOCNO']) <= strlen($prefix)) {
+                            throw new AppError('VALIDATION_ERROR', 'Enter a valid document number and date before submitting.');
                         }
-                        self::activeVendor($tx, $actor, $saved['VENDOR_ID']);
+                        if ($type === 'order') {
+                            self::activeVendor($tx, $actor, $saved['VENDOR_ID']);
+                        } else {
+                            self::validateInvoiceSubmission($tx, $actor, $id, $saved);
+                        }
                         $lines = $tx->query(
                             'SELECT LINENO, PRODUCT_ID, DESCRIPTION, QUANTITY, UNITCOST FROM ME_PUR_DOC_ENTRY
                              WHERE CNYID = :company_id AND DOC_ID = :doc_id ORDER BY LINENO',
                             ['company_id' => $actor->companyId, 'doc_id' => $id],
                         );
                         if ($lines === []) {
-                            throw new AppError('VALIDATION_ERROR', 'Add at least one order line before submitting.');
+                            throw new AppError('VALIDATION_ERROR', 'Add at least one document line before submitting.');
                         }
                         foreach ($lines as $line) {
                             if ((int) $line['LINENO'] < 1 || trim((string) $line['DESCRIPTION']) === '') {
                                 throw new AppError('VALIDATION_ERROR', 'Every order line needs a positive line number and description.');
                             }
                             self::validLine($line['QUANTITY'], $line['UNITCOST']);
-                            self::requireProduct($tx, $actor, (int) $line['PRODUCT_ID']);
+                            if ($type === 'order') {
+                                self::requireProduct($tx, $actor, (int) $line['PRODUCT_ID']);
+                            }
                         }
                     }
                     if ($type !== 'order' && array_diff(array_keys($changes), ['doc_date', 'notes', 'status']) !== []) {
@@ -425,7 +430,20 @@ final readonly class PurchasingDocumentModel
                         ['total' => number_format((float) $totals[0]['TOTAL'], 2, '.', ''),
                             'company_id' => $actor->companyId, 'id' => $id],
                     );
-                    return ['id' => $id, 'status' => $nextStatus, 'message' => $nextStatus === 'submitted' ? 'Order submitted. Header and lines are now read-only.' : 'Draft saved.'];
+                    if ($type === 'invoice' && $nextStatus === 'submitted') {
+                        // This is an invoice's own outstanding amount, not a vendor/GL ledger entry.
+                        $tx->execute(
+                            'UPDATE ME_PUR_DOC SET AMOUNTDUE = :amount_due WHERE CNYID = :company_id AND ID = :id',
+                            ['amount_due' => number_format((float) $totals[0]['TOTAL'], 2, '.', ''),
+                                'company_id' => $actor->companyId, 'id' => $id],
+                        );
+                    }
+                    return ['id' => $id, 'status' => $nextStatus,
+                        'message' => $nextStatus === 'submitted'
+                            ? ($type === 'invoice'
+                                ? 'Invoice submitted. It is now read-only. No ledger entries were created.'
+                                : 'Order submitted. Header and lines are now read-only.')
+                            : 'Draft saved.'];
                 },
             );
         } catch (DatabaseError $error) {
@@ -694,6 +712,62 @@ final readonly class PurchasingDocumentModel
             ['total' => number_format($total, 2, '.', ''), 'modified_by' => $actor->id,
                 'company_id' => $actor->companyId, 'id' => $documentId],
         );
+    }
+
+    /** Submission finalizes this invoice document only; it never posts a ledger. */
+    private static function validateInvoiceSubmission(TransactionContext $tx, Actor $actor, string $id, array $invoice): void
+    {
+        if ($invoice['SOURCE_DOC_ID'] === null) {
+            throw new AppError('CONFLICT', 'Create this invoice from a Received receiver before submitting.', 409);
+        }
+        $sources = $tx->query(
+            "SELECT RECORDTYPE, STATUS, VENDOR_ID, PAYMENT_TERMS, VENDOR_REF, DELIVERY_ADDR,
+                    TO_CHAR(DOC_DATE, 'YYYY-MM-DD') AS DOC_DATE
+             FROM ME_PUR_DOC WHERE CNYID = :company_id AND ID = :id",
+            ['company_id' => $actor->companyId, 'id' => $invoice['SOURCE_DOC_ID']],
+        );
+        if ($sources === [] || strtolower((string) $sources[0]['RECORDTYPE']) !== 'receiver'
+            || strtolower((string) $sources[0]['STATUS']) !== 'received') {
+            throw new AppError('CONFLICT', 'The invoice source must be a Received receiver.', 409);
+        }
+        $source = $sources[0];
+        if ($invoice['DOC_DATE'] === null || $source['DOC_DATE'] === null
+            || $invoice['DOC_DATE'] < $source['DOC_DATE']) {
+            throw new AppError('VALIDATION_ERROR', 'Invoice date must be on or after the receipt date.');
+        }
+        foreach (['VENDOR_ID', 'PAYMENT_TERMS', 'VENDOR_REF', 'DELIVERY_ADDR'] as $field) {
+            if ((string) $invoice[$field] !== (string) $source[$field]) {
+                throw new AppError('VALIDATION_ERROR', 'Invoice header values must match its source receiver.');
+            }
+        }
+        $sql = 'SELECT LINENO, PRODUCT_ID, DESCRIPTION, QUANTITY, UNITCOST, LINEAMOUNT
+                FROM ME_PUR_DOC_ENTRY WHERE CNYID = :company_id AND DOC_ID = :doc_id ORDER BY LINENO, ID';
+        $sourceLines = $tx->query($sql, ['company_id' => $actor->companyId, 'doc_id' => $invoice['SOURCE_DOC_ID']]);
+        $lines = $tx->query($sql, ['company_id' => $actor->companyId, 'doc_id' => $id]);
+        if ($lines === [] || count($lines) !== count($sourceLines)) {
+            throw new AppError('VALIDATION_ERROR', 'Invoice lines must match every source receiver line.');
+        }
+        $total = 0.0;
+        foreach ($lines as $index => $line) {
+            $original = $sourceLines[$index];
+            if ((int) $line['LINENO'] !== (int) $original['LINENO']
+                || (int) $line['PRODUCT_ID'] !== (int) $original['PRODUCT_ID']
+                || (float) $line['QUANTITY'] !== (float) $original['QUANTITY']
+                || $line['DESCRIPTION'] !== $original['DESCRIPTION']
+                || number_format((float) $line['UNITCOST'], 2, '.', '') !== number_format((float) $original['UNITCOST'], 2, '.', '')
+                || number_format((float) $line['LINEAMOUNT'], 2, '.', '') !== number_format((float) $original['LINEAMOUNT'], 2, '.', '')) {
+                throw new AppError('VALIDATION_ERROR', 'Invoice item values must match the source receiver.');
+            }
+            self::validLine($line['QUANTITY'], $line['UNITCOST']);
+            $expected = round(Quantity::fromStored($line['QUANTITY']) * (float) $line['UNITCOST'], 2, PHP_ROUND_HALF_UP);
+            if (number_format($expected, 2, '.', '') !== number_format((float) $line['LINEAMOUNT'], 2, '.', '')) {
+                throw new AppError('VALIDATION_ERROR', 'Invoice line amounts must match quantity multiplied by unit cost.');
+            }
+            $total += (float) $line['LINEAMOUNT'];
+        }
+        if (!is_finite($total) || $total <= 0 || $total >= 1e18) {
+            throw new AppError('VALIDATION_ERROR', 'Invoice total must be positive and within the supported amount.');
+        }
     }
 
     private static function activeVendor(TransactionContext $tx, Actor $actor, string $vendorId): void

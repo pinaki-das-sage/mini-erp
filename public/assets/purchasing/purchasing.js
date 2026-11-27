@@ -224,7 +224,9 @@
             : 'Draft: edit the date and document notes. Values copied from the source are read-only.'
           : 'This document is ' + label(record.status) + '. Its header and lines are read-only.';
         if (draft && record.recordtype !== 'order' && !record.source_document_id) {
-          find('#purchasing-state-description').textContent = 'This is an older, unlinked Draft. A receiver created from a Submitted purchase order is required for goods receiving.';
+          find('#purchasing-state-description').textContent = record.recordtype === 'receiver'
+            ? 'This is an older, unlinked Draft. Create a receiver from a Submitted purchase order before receiving goods.'
+            : 'This is an older, unlinked Draft. Create an invoice from a Received receiver before submitting.';
         }
         if (draft && can('purchasing.document:update')) actions.append(action('Edit draft', () => openDocument({ record })));
         if (record.source_document_id) actions.append(action('View source document', () => showDetail(record.source_document_id)));
@@ -255,8 +257,14 @@
             !can('purchasing.document:create') || !can('purchasing.document:create_invoice')));
         }
         if (record.recordtype === 'invoice' && draft) {
-          actions.append(action('Post invoice', null, true));
-          find('#purchasing-integration-note').textContent = 'Invoice posting is not connected yet. This draft adds nothing to the vendor amount due. Posting will be enabled when the vendor balance ledger is integrated.';
+          const linked = Boolean(record.source_document_id);
+          const button = action('Submit invoice', () => submitInvoice(record),
+            !linked || !can('purchasing.document:update') || !can('purchasing.document:submit'));
+          if (!linked) button.title = 'Create the invoice from a Received receiver before submitting.';
+          actions.append(button);
+          find('#purchasing-integration-note').textContent = linked
+            ? 'Submit makes this invoice read-only and records its own amount due. No ledger entries or vendor balance changes are made.'
+            : 'Create a draft invoice from a Received receiver before submitting.';
         }
         if (record.status === 'pending') find('#purchasing-integration-note').textContent = 'This record uses the previous Pending state. It remains read-only; no automatic state conversion is performed.';
       }
@@ -290,6 +298,15 @@
       await load();
       await showDetail(record.id);
       message('Order submitted. Header and lines are read-only.');
+    });
+  }
+
+  async function submitInvoice(record) {
+    await saving(async () => {
+      const result = await request('documents/' + encodeURIComponent(record.id), { status: 'submitted' });
+      await load();
+      await showDetail(record.id);
+      message(result.message || 'Invoice submitted. No ledger entries were created.');
     });
   }
 
@@ -377,7 +394,7 @@
     if (!value) return;
     const date = new Date(value + 'T12:00:00Z');
     date.setUTCDate(date.getUTCDate() + ({ due_on_receipt: 0, net_15: 15, net_30: 30 }[docForm.elements.payment_terms.value] ?? 30));
-    find('#purchasing-due-date').textContent = 'Invoice due date: ' + date.toISOString().slice(0, 10) + '. No vendor balance change while Draft.';
+    find('#purchasing-due-date').textContent = 'Invoice due date: ' + date.toISOString().slice(0, 10) + '. Submission finalizes the invoice document without ledger entries.';
   }
 
   async function openDocument({ record = null, type = 'order', source = null } = {}) {

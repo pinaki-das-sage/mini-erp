@@ -5,7 +5,7 @@
     <li><strong>Draft order</strong><span>Edit header and item lines</span></li>
     <li><strong>Submitted order</strong><span>Header and lines locked</span></li>
     <li><strong>Receiver</strong><span>Copy order; receive all items</span></li>
-    <li><strong>Vendor invoice</strong><span>Copy receipt; post amount due</span></li>
+    <li><strong>Vendor invoice</strong><span>Copy receipt; submit invoice</span></li>
   </ol>
   <nav class="purchasing-nav" aria-label="Purchasing">
     <button type="button" data-section="documents" aria-pressed="true">Documents</button>
